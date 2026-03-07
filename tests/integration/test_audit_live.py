@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -13,13 +14,10 @@ from terok_shield.audit import list_log_files, log_event, tail_log
 from tests.testnet import TEST_IP1, TEST_IP2
 
 
-@pytest.mark.integration
 class TestAuditLive:
     """Audit logging with real temp directories."""
 
-    def test_log_and_tail(
-        self, tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_log_and_tail(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Write audit events and read them back."""
         monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", str(tmp_path))
 
@@ -33,9 +31,7 @@ class TestAuditLive:
         assert events[1]["dest"] == TEST_IP1
         assert events[2]["action"] == "denied"
 
-    def test_jsonl_format(
-        self, tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_jsonl_format(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Each line must be valid compact JSON."""
         monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", str(tmp_path))
 
@@ -54,9 +50,7 @@ class TestAuditLive:
             assert ", " not in line
             assert ": " not in line
 
-    def test_list_log_files(
-        self, tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_list_log_files(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """list_log_files returns container names with logs."""
         monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", str(tmp_path))
 
@@ -67,9 +61,7 @@ class TestAuditLive:
         assert "alpha" in names
         assert "bravo" in names
 
-    def test_tail_empty_container(
-        self, tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_tail_empty_container(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Tailing a non-existent container returns no events."""
         monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", str(tmp_path))
 
