@@ -17,6 +17,8 @@ from terok_shield.nft import (
     verify_ruleset,
 )
 
+from .testnet import TEST_IP1, TEST_IP2
+
 
 class TestSafeName(unittest.TestCase):
     """Tests for safe_name validator."""
@@ -64,7 +66,7 @@ class TestSafeIp(unittest.TestCase):
 
     def test_valid_ipv4(self) -> None:
         """Accept valid IPv4 address."""
-        self.assertEqual(safe_ip("192.168.1.1"), "192.168.1.1")
+        self.assertEqual(safe_ip(TEST_IP1), TEST_IP1)
 
     def test_valid_cidr(self) -> None:
         """Accept valid CIDR notation."""
@@ -72,7 +74,7 @@ class TestSafeIp(unittest.TestCase):
 
     def test_strips_whitespace(self) -> None:
         """Strip surrounding whitespace."""
-        self.assertEqual(safe_ip("  1.2.3.4  "), "1.2.3.4")
+        self.assertEqual(safe_ip(f"  {TEST_IP1}  "), TEST_IP1)
 
     def test_rejects_hostname(self) -> None:
         """Reject hostnames."""
@@ -82,7 +84,7 @@ class TestSafeIp(unittest.TestCase):
     def test_rejects_injection(self) -> None:
         """Reject nft command injection."""
         with self.assertRaises(ValueError):
-            safe_ip("1.2.3.4; drop")
+            safe_ip(f"{TEST_IP1}; drop")
 
     def test_rejects_empty(self) -> None:
         """Reject empty string."""
@@ -238,9 +240,9 @@ class TestAddElements(unittest.TestCase):
 
     def test_valid_ips(self) -> None:
         """Generate command with valid IPs."""
-        result = add_elements("allow_v4", ["1.2.3.4", "5.6.7.8"])
-        self.assertIn("1.2.3.4", result)
-        self.assertIn("5.6.7.8", result)
+        result = add_elements("allow_v4", [TEST_IP1, TEST_IP2])
+        self.assertIn(TEST_IP1, result)
+        self.assertIn(TEST_IP2, result)
 
     def test_empty_list(self) -> None:
         """Return empty string for empty list."""
@@ -249,9 +251,9 @@ class TestAddElements(unittest.TestCase):
 
     def test_skips_invalid(self) -> None:
         """Skip invalid IPs, keep valid ones."""
-        result = add_elements("allow_v4", ["1.2.3.4", "invalid", "5.6.7.8"])
-        self.assertIn("1.2.3.4", result)
-        self.assertIn("5.6.7.8", result)
+        result = add_elements("allow_v4", [TEST_IP1, "invalid", TEST_IP2])
+        self.assertIn(TEST_IP1, result)
+        self.assertIn(TEST_IP2, result)
         self.assertNotIn("invalid", result)
 
     def test_all_invalid(self) -> None:

@@ -11,6 +11,8 @@ from pathlib import Path
 
 from terok_shield.audit import list_log_files, log_event, tail_log
 
+from .testnet import TEST_IP1
+
 
 class TestLogEvent(unittest.TestCase):
     """Tests for log_event."""
@@ -36,9 +38,9 @@ class TestLogEvent(unittest.TestCase):
         """Only include optional fields when provided."""
         with tempfile.TemporaryDirectory() as tmp:
             mock_dir.return_value = Path(tmp)
-            log_event("test-ctr", "denied", dest="1.2.3.4")
+            log_event("test-ctr", "denied", dest=TEST_IP1)
             entry = json.loads((Path(tmp) / "test-ctr.jsonl").read_text().strip())
-            self.assertEqual(entry["dest"], "1.2.3.4")
+            self.assertEqual(entry["dest"], TEST_IP1)
             self.assertNotIn("detail", entry)
 
 
