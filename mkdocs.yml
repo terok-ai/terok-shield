@@ -1,0 +1,94 @@
+site_name: terok-shield
+site_description: nftables-based egress firewalling for Podman containers
+site_url: https://terok-ops.github.io/terok-shield
+repo_url: https://github.com/terok-ops/terok-shield
+repo_name: terok-ops/terok-shield
+
+theme:
+  name: material
+  font:
+    text: Ubuntu
+    code: Ubuntu Mono
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: black
+      accent: amber
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: amber
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            show_source: true
+            show_root_heading: true
+            show_root_full_path: false
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            members_order: source
+            merge_init_into_class: true
+  - gen-files:
+      scripts:
+        - docs/gen_ref_pages.py
+        - docs/gen_quality_report.py
+  - literate-nav:
+      nav_file: SUMMARY.md
+  - section-index
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - pymdownx.details
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Developer Guide:
+    - Security Model: SECURITY.md
+    - Contributing: DEVELOPER.md
+    - Code Quality: quality-report.md
+  - API Reference: reference/
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/terok-ops/terok-shield
+
+extra_css:
+  - https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;500;700&family=Ubuntu+Mono:wght@400;700&display=swap
+  - stylesheets/extra.css

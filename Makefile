@@ -1,4 +1,4 @@
-.PHONY: all lint format test security docstrings complexity deadcode reuse check install install-dev clean spdx
+.PHONY: all lint format test security docstrings complexity deadcode reuse check install install-dev docs docs-build clean spdx
 
 all: check
 
@@ -51,11 +51,19 @@ check: lint test security docstrings deadcode reuse
 install:
 	poetry install --only main
 
-# Install all dependencies (dev, test)
+# Install all dependencies (dev, test, docs)
 install-dev:
-	poetry install --with dev,test
+	poetry install --with dev,test,docs
+
+# Build documentation locally
+docs:
+	poetry run mkdocs serve
+
+# Build documentation for deployment
+docs-build:
+	poetry run mkdocs build --strict
 
 # Clean build artifacts
 clean:
-	rm -rf dist/ build/ .coverage coverage.xml .pytest_cache/ .ruff_cache/ .complexipy_cache/
+	rm -rf dist/ build/ site/ .coverage coverage.xml .pytest_cache/ .ruff_cache/ .complexipy_cache/
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true

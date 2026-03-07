@@ -10,6 +10,7 @@ path = [
   "**/*.lock",
   "**/*.txt",
   "**/*.nft",
+  "**/*.css",
   ".gitignore",
   "MANIFEST.in",
   "Makefile",

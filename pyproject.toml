@@ -38,6 +38,14 @@ reuse = "^6.2.0"
 pytest = ">=7.0"
 pytest-cov = ">=4.0"
 
+[tool.poetry.group.docs.dependencies]
+mkdocs = ">=1.5,<2"
+mkdocs-material = ">=9.0"
+mkdocstrings = {extras = ["python"], version = ">=0.24"}
+mkdocs-gen-files = ">=0.5"
+mkdocs-literate-nav = ">=0.6"
+mkdocs-section-index = ">=0.3"
+
 [tool.poetry.scripts]
 terok-shield = "terok_shield.cli:main"
 
