@@ -159,6 +159,25 @@ class TestNftViaNsenter(unittest.TestCase):
         self.assertIn("12345", nsenter_cmd)
         self.assertEqual(result, "output")
 
+    @unittest.mock.patch("terok_shield.run.run")
+    def test_explicit_pid_skips_inspect(self, mock_run: unittest.mock.Mock) -> None:
+        """Skip podman inspect when pid is provided directly."""
+        mock_run.return_value = "output"
+        result = nft_via_nsenter("my-ctr", "list", "ruleset", pid="999")
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        self.assertIn("999", cmd)
+        self.assertEqual(result, "output")
+
+    @unittest.mock.patch("terok_shield.run.run")
+    def test_stdin_support(self, mock_run: unittest.mock.Mock) -> None:
+        """Pass stdin through to nft -f -."""
+        mock_run.side_effect = ["12345\n", ""]
+        nft_via_nsenter("my-ctr", stdin="flush ruleset")
+        nsenter_call = mock_run.call_args_list[1]
+        self.assertIn("-f", nsenter_call[0][0])
+        self.assertEqual(nsenter_call[1]["stdin"], "flush ruleset")
+
 
 class TestPodmanInspect(unittest.TestCase):
     """Tests for podman_inspect wrapper."""

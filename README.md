@@ -12,7 +12,6 @@ allowed domains.
 ### Features
 
 - **Default-deny egress** with curated domain allowlists
-- **RFC1918/link-local blocking** (LAN isolation)
 - **DNS-based allowlisting** — domains resolved at setup, cached with freshness tracking
 - **Live allow/deny** at runtime for individual containers
 - **Connection audit logging** (JSON-lines)

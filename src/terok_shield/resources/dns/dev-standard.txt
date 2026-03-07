@@ -1,0 +1,32 @@
+# Common development domains
+# Covers the most widely used package registries and source hosts
+
+# Source code hosting
+github.com
+api.github.com
+raw.githubusercontent.com
+objects.githubusercontent.com
+github-releases.githubusercontent.com
+gitlab.com
+
+# Container registries
+registry-1.docker.io
+auth.docker.io
+production.cloudflare.docker.com
+ghcr.io
+
+# Python ecosystem
+pypi.org
+files.pythonhosted.org
+
+# Node.js ecosystem
+registry.npmjs.org
+
+# Rust ecosystem
+crates.io
+static.crates.io
+
+# Go ecosystem
+proxy.golang.org
+sum.golang.org
+storage.googleapis.com

@@ -1,0 +1,12 @@
+# Node.js ecosystem domains
+# For projects that need broader Node/JS infrastructure access
+
+# Package registry (also in dev-standard)
+registry.npmjs.org
+
+# Yarn
+registry.yarnpkg.com
+
+# Package metadata and CDN
+cdn.jsdelivr.net
+unpkg.com

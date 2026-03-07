@@ -10,8 +10,8 @@ so it can be safely imported by the nft.py security boundary.
 NFT_TABLE = "inet terok_shield"
 NFT_TABLE_NAME = "terok_shield"
 
-# Containers must never reach these.  Order is load-bearing
-# (matches nftables chain evaluation order).
+# RFC1918 + link-local ranges: rejected by default, access attempts
+# and whitelisting logged with a notice.
 RFC1918: tuple[str, ...] = (
     "10.0.0.0/8",
     "172.16.0.0/12",

@@ -1,0 +1,12 @@
+# NVIDIA HPC and CUDA domains
+# For GPU-accelerated workloads
+
+# CUDA toolkit and drivers
+developer.download.nvidia.com
+
+# NGC container registry
+nvcr.io
+authn.nvidia.com
+
+# NVIDIA package repos
+cuda-repo.nvidia.com

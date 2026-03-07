@@ -17,7 +17,7 @@ from terok_shield.nft import (
     verify_ruleset,
 )
 
-from .testnet import TEST_IP1, TEST_IP2
+from .testnet import LINK_LOCAL_DNS, TEST_IP1, TEST_IP2, TEST_NET1
 
 
 class TestSafeName(unittest.TestCase):
@@ -70,7 +70,7 @@ class TestSafeIp(unittest.TestCase):
 
     def test_valid_cidr(self) -> None:
         """Accept valid CIDR notation."""
-        self.assertEqual(safe_ip("10.0.0.0/8"), "10.0.0.0/8")
+        self.assertEqual(safe_ip(TEST_NET1), TEST_NET1)
 
     def test_strips_whitespace(self) -> None:
         """Strip surrounding whitespace."""
@@ -105,6 +105,13 @@ class TestStandardRuleset(unittest.TestCase):
         rs = standard_ruleset()
         self.assertIn("policy drop", rs)
 
+    def test_ipv6_dropped(self) -> None:
+        """IPv6 traffic must be dropped before any accept rules."""
+        rs = standard_ruleset()
+        ipv6_pos = rs.index("meta nfproto ipv6 drop")
+        first_accept_pos = rs.index('oifname "lo" accept')
+        self.assertLess(ipv6_pos, first_accept_pos, "IPv6 drop must precede first accept rule")
+
     def test_contains_loopback_accept(self) -> None:
         """Loopback traffic must be accepted."""
         rs = standard_ruleset()
@@ -112,20 +119,20 @@ class TestStandardRuleset(unittest.TestCase):
 
     def test_contains_dns_accept(self) -> None:
         """DNS traffic to the forwarder must be accepted."""
-        rs = standard_ruleset(dns="169.254.0.1")
-        self.assertIn("169.254.0.1", rs)
+        rs = standard_ruleset(dns=LINK_LOCAL_DNS)
+        self.assertIn(LINK_LOCAL_DNS, rs)
 
     def test_contains_gate_port(self) -> None:
         """Gate server port must appear in ruleset."""
         rs = standard_ruleset(gate_port=9418)
         self.assertIn("tcp dport 9418", rs)
 
-    def test_rfc1918_before_allow(self) -> None:
-        """RFC1918 blocks must appear before the allow set."""
+    def test_allow_before_rfc1918(self) -> None:
+        """Allow set must appear before RFC1918 reject rules."""
         rs = standard_ruleset()
-        rfc_pos = rs.index("10.0.0.0/8")
         allow_pos = rs.index("@allow_v4")
-        self.assertLess(rfc_pos, allow_pos, "RFC1918 must appear before allow set")
+        rfc_pos = rs.index(RFC1918[0])
+        self.assertLess(allow_pos, rfc_pos, "Allow set must precede RFC1918 reject")
 
     def test_all_rfc1918_present(self) -> None:
         """All RFC1918 ranges must be blocked."""
@@ -184,6 +191,13 @@ class TestHardenedRuleset(unittest.TestCase):
         rs = hardened_ruleset()
         self.assertIn("policy drop", rs)
 
+    def test_ipv6_dropped(self) -> None:
+        """IPv6 traffic must be dropped before any accept rules."""
+        rs = hardened_ruleset()
+        ipv6_pos = rs.index("meta nfproto ipv6 drop")
+        established_pos = rs.index("ct state established,related accept")
+        self.assertLess(ipv6_pos, established_pos, "IPv6 drop must precede established accept")
+
     def test_forward_chain(self) -> None:
         """Forward chain must be present."""
         rs = hardened_ruleset()
@@ -205,12 +219,12 @@ class TestHardenedRuleset(unittest.TestCase):
         for net in RFC1918:
             self.assertIn(net, rs)
 
-    def test_rfc1918_before_allow_set(self) -> None:
-        """RFC1918 blocks must appear before allow set."""
+    def test_allow_before_rfc1918(self) -> None:
+        """Allow set must appear before RFC1918 reject rules."""
         rs = hardened_ruleset()
-        rfc_pos = rs.index("10.0.0.0/8")
         allow_pos = rs.index("@global_allow_v4")
-        self.assertLess(rfc_pos, allow_pos)
+        rfc_pos = rs.index(RFC1918[0])
+        self.assertLess(allow_pos, rfc_pos, "Allow set must precede RFC1918 reject")
 
     def test_gate_port_present(self) -> None:
         """Gate server port must appear in ruleset."""
@@ -230,7 +244,7 @@ class TestHardenedRuleset(unittest.TestCase):
     def test_icmp_after_rfc1918(self) -> None:
         """ICMP accept must appear after RFC1918 blocks."""
         rs = hardened_ruleset()
-        rfc_pos = rs.index("10.0.0.0/8")
+        rfc_pos = rs.index(RFC1918[0])
         icmp_pos = rs.index("ip protocol icmp accept")
         self.assertGreater(icmp_pos, rfc_pos, "ICMP accept must not bypass RFC1918 blocks")
 
@@ -312,11 +326,38 @@ class TestVerifyRuleset(unittest.TestCase):
         errors = verify_ruleset("")
         self.assertGreater(len(errors), 0)
 
-    def test_rfc1918_after_allow_detected(self) -> None:
-        """Detect RFC1918 blocks after allow set as error."""
+    def test_missing_ipv6_drop(self) -> None:
+        """Report missing IPv6 drop rule."""
+        rfc_rules = "\n".join(
+            f"ip daddr {net} reject with icmp type admin-prohibited" for net in RFC1918
+        )
         bad = (
-            "policy drop admin-prohibited TEROK_SHIELD_DENIED "
-            "@allow_v4 accept 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16"
+            "chain output { type filter hook output priority filter; policy drop;\n"
+            f"TEROK_SHIELD_DENIED\n{rfc_rules}\n@allow_v4 }}"
         )
         errors = verify_ruleset(bad)
-        self.assertTrue(any("after allow set" in e for e in errors))
+        self.assertTrue(any("IPv6" in e for e in errors))
+
+    def test_ipv6_drop_misplaced(self) -> None:
+        """Report IPv6 drop after accept rule."""
+        rfc_rules = "\n".join(
+            f"ip daddr {net} reject with icmp type admin-prohibited" for net in RFC1918
+        )
+        bad = (
+            "chain output { type filter hook output priority filter; policy drop;\n"
+            'oifname "lo" accept\n'
+            "meta nfproto ipv6 drop\n"
+            f"TEROK_SHIELD_DENIED\n{rfc_rules}\n@allow_v4 }}"
+        )
+        errors = verify_ruleset(bad)
+        self.assertTrue(any("misplaced" in e for e in errors))
+
+    def test_rfc1918_present_regardless_of_position(self) -> None:
+        """RFC1918 presence is checked regardless of position relative to allow set."""
+        rfc_rules = "\n".join(
+            f"ip daddr {net} reject with icmp type admin-prohibited" for net in RFC1918
+        )
+        rs = f"policy drop admin-prohibited TEROK_SHIELD_DENIED @allow_v4 accept\n{rfc_rules}"
+        errors = verify_ruleset(rs)
+        rfc_errors = [e for e in errors if "RFC1918" in e]
+        self.assertEqual(rfc_errors, [], "RFC1918 blocks present — no ordering errors expected")

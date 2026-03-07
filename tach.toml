@@ -47,6 +47,31 @@ depends_on = [
     "terok_shield.config",
 ]
 
+# DNS resolution and caching — depends on config + run
+[[modules]]
+path = "terok_shield.dns"
+depends_on = [
+    "terok_shield.config",
+    "terok_shield.run",
+]
+
+# Profile loading — depends on config
+[[modules]]
+path = "terok_shield.profiles"
+depends_on = [
+    "terok_shield.config",
+]
+
+# OCI hook entry point — depends on audit, config, nft, run
+[[modules]]
+path = "terok_shield.hook"
+depends_on = [
+    "terok_shield.audit",
+    "terok_shield.config",
+    "terok_shield.nft",
+    "terok_shield.run",
+]
+
 # CLI — depends on config and package root
 [[modules]]
 path = "terok_shield.cli"

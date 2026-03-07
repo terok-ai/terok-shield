@@ -1,22 +1,67 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""RFC 5737 TEST-NET addresses for use in tests.
+"""Shared test constants: IP addresses, domains, and URLs.
 
-These addresses are reserved for documentation and testing.
-They are guaranteed non-routable — no real host will ever have them,
-and packets to them will be dropped at the network edge.
+RFC 5737 TEST-NET addresses (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24)
+are reserved for documentation and testing.  They are guaranteed non-routable —
+no real host will ever have them, and packets will be dropped at the network edge.
 
-Use these instead of arbitrary IPs (1.2.3.4, 5.6.7.8, etc.) to avoid
-unintended connections in integration tests.
+Public DNS IPs (Cloudflare, Google, Quad9) are used in integration tests that
+verify real network connectivity.  Centralizing them here means SonarCloud only
+flags the constant definition, not every usage.
 """
+
+# ── RFC 5737 TEST-NET addresses (non-routable, safe for unit tests) ──
 
 # TEST-NET-1 (192.0.2.0/24)
 TEST_IP1 = "192.0.2.1"
 TEST_IP2 = "192.0.2.2"
+TEST_IP99 = "192.0.2.99"
 
 # TEST-NET-2 (198.51.100.0/24)
 TEST_IP3 = "198.51.100.1"
 
 # TEST-NET-3 (203.0.113.0/24)
 TEST_IP4 = "203.0.113.1"
+
+# CIDR form for tests that need network notation
+TEST_NET1 = "192.0.2.0/24"
+
+# ── RFC 1918 / link-local addresses (used to test blocking rules) ──
+
+RFC1918_HOST = "10.0.0.1"  # Single host in 10.0.0.0/8
+LINK_LOCAL_DNS = "169.254.0.1"  # Link-local DNS forwarder (pasta-style)
+
+# --8<-- [start:outbound-targets]
+# ── Allowed target: Cloudflare (anycast 1.1.1.1 + 1.0.0.1) ──
+# Both IPs must be in the allow set because Cloudflare's anycast may respond
+# from either address.  The domain resolves to both IPs.
+
+ALLOWED_TARGET_IPS = ["1.1.1.1", "1.0.0.1"]  # Cloudflare anycast pair
+ALLOWED_TARGET_DOMAIN = "one.one.one.one"  # Resolves to both IPs above
+ALLOWED_TARGET_HTTP = "http://1.1.1.1/"  # Plain HTTP (port 80)
+ALLOWED_TARGET_HTTPS = f"https://{ALLOWED_TARGET_DOMAIN}/"  # HTTPS (port 443)
+
+# ── Blocked target: Google DNS (used as a non-allowed destination) ──
+
+BLOCKED_TARGET_IP = "8.8.8.8"  # Google Public DNS
+BLOCKED_TARGET_HTTP = f"http://{BLOCKED_TARGET_IP}/"
+
+# ── Other public DNS resolvers (used in add-elements / multi-IP tests) ──
+
+GOOGLE_DNS_IP = "8.8.8.8"  # Google Public DNS (same as BLOCKED_TARGET_IP)
+QUAD9_DNS_IP = "9.9.9.9"  # Quad9 DNS
+
+# ── Well-known domains (used for DNS resolution tests) ──
+
+CLOUDFLARE_DOMAIN = "one.one.one.one"  # Cloudflare DNS (always resolves)
+GOOGLE_DNS_DOMAIN = "dns.google"  # Google DNS (always resolves)
+NONEXISTENT_DOMAIN = "this-domain-does-not-exist.invalid"  # RFC 2606 reserved
+
+# ── IPv6 targets (used to verify IPv6 is blocked) ──
+
+IPV6_CLOUDFLARE = "2606:4700:4700::1111"  # Cloudflare DNS over IPv6
+IPV6_GOOGLE = "2001:4860:4860::8888"  # Google Public DNS over IPv6
+IPV6_HTTP_URL = f"http://[{IPV6_CLOUDFLARE}]/"  # HTTP via IPv6 literal
+# --8<-- [end:outbound-targets]

@@ -1,0 +1,28 @@
+# Essential infrastructure domains
+# Included by all profiles as a dependency
+
+# DNS root servers (for DNSSEC validation)
+root-servers.net
+
+# NTP time synchronization
+pool.ntp.org
+time.google.com
+time.cloudflare.com
+
+# Certificate revocation / OCSP
+ocsp.digicert.com
+ocsp.pki.goog
+ocsp.sectigo.com
+r3.o.lencr.org
+
+# Ubuntu/Debian package repos
+archive.ubuntu.com
+security.ubuntu.com
+deb.debian.org
+
+# Fedora/RHEL package repos
+mirrors.fedoraproject.org
+dl.fedoraproject.org
+
+# Alpine package repos
+dl-cdn.alpinelinux.org

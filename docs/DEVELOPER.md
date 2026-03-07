@@ -49,7 +49,37 @@ make docs-build  # build documentation for deployment
 ## Testing
 
 ```bash
-make test
+make test        # unit tests (no network, no podman)
+make test-podman # integration tests (requires podman, nft, internet)
+make check       # full CI suite (unit tests + lint + tach + ...)
 ```
 
-Tests live in `tests/` and mirror the source structure. When adding new functionality, add corresponding tests.
+Tests live in `tests/` and mirror the source structure. When adding new functionality,
+add corresponding tests.
+
+### Integration tests and network access
+
+The integration tests in `tests/integration/` exercise real container networking
+and **make outbound connections to the public internet**. They require:
+
+- `podman` and `nft` installed
+- Outbound internet access (HTTP/HTTPS and DNS)
+
+The following external IPs, domains, and URLs are contacted during test runs.
+This list is auto-generated from
+[`tests/testnet.py`](https://github.com/terok-ops/terok-shield/blob/master/tests/testnet.py):
+
+```python
+--8<-- "tests/testnet.py:outbound-targets"
+```
+
+All targets are well-known public DNS services. No private or
+authenticated endpoints are contacted. If your environment blocks
+outbound traffic, these tests will be skipped automatically (the
+`_check_internet()` helper detects missing connectivity).
+
+### Integration tests in CI
+
+Integration tests are excluded from the main CI workflow (`-m "not integration"`).
+A separate **Integration Tests** workflow can be triggered manually from the
+Actions tab (`workflow_dispatch`) — select the workflow, pick the branch, and run.

@@ -8,7 +8,6 @@
 |                                                     |
 |  Every nftables ruleset is generated here.          |
 |  All inputs are validated before interpolation.     |
-|  RFC1918 blocks are structurally before allows.     |
 |  Only stdlib + nft_constants.py imports allowed.    |
 +=====================================================+
 """
@@ -93,10 +92,10 @@ def _audit_allow_rule() -> str:
 def standard_ruleset(dns: str = "169.254.1.1", gate_port: int = 9418) -> str:
     """Generate a per-container nftables ruleset for standard mode.
 
-    Applied by OCI hook into the container's own netns.
+    Applied by the OCI hook into the container's own netns.
 
     Chain order (output):
-        loopback -> established -> DNS -> gate port -> RFC1918 block -> allow set -> deny
+        IPv6 drop -> loopback -> established -> DNS -> gate port -> allow set -> RFC1918 reject -> deny
 
     Args:
         dns: DNS server address (pasta default forwarder).
@@ -110,19 +109,21 @@ def standard_ruleset(dns: str = "169.254.1.1", gate_port: int = 9418) -> str:
 
             chain output {{
                 type filter hook output priority filter; policy drop;
+                meta nfproto ipv6 drop
                 oifname "lo" accept
                 ct state established,related accept
                 udp dport 53 ip daddr {dns} accept
                 tcp dport 53 ip daddr {dns} accept
                 tcp dport {gate_port} oifname "lo" accept
-        {_rfc1918_rules()}
         {_audit_allow_rule()}
                 ip daddr @allow_v4 accept
+        {_rfc1918_rules()}
         {_audit_deny_rule()}
             }}
 
             chain input {{
                 type filter hook input priority filter; policy drop;
+                meta nfproto ipv6 drop
                 iifname "lo" accept
                 ct state established,related accept
                 udp sport 53 accept
@@ -143,7 +144,7 @@ def hardened_ruleset(
     Applied to the forward chain (traffic crosses bridge).
 
     Chain order (forward):
-        established -> DNS -> gate -> RFC1918 block -> ICMP -> intra-bridge -> allow set -> deny
+        IPv6 drop -> established -> DNS -> gate -> allow set -> RFC1918 reject -> ICMP -> intra-bridge -> deny
 
     Args:
         gw: Bridge gateway address.
@@ -159,14 +160,15 @@ def hardened_ruleset(
 
             chain forward {{
                 type filter hook forward priority filter; policy drop;
+                meta nfproto ipv6 drop
                 ct state established,related accept
                 ip daddr {gw} udp dport 53 accept
                 ip daddr {gw} tcp dport 53 accept
                 ip daddr {gw} tcp dport {gate_port} accept
+                ip daddr @global_allow_v4 accept
         {_rfc1918_rules()}
                 ip protocol icmp accept
                 ip daddr {subnet} ip saddr {subnet} accept
-                ip daddr @global_allow_v4 accept
         {_audit_deny_rule()}
             }}
         }}
@@ -206,12 +208,24 @@ def forward_rule(container: str, ip: str, table: str = NFT_TABLE) -> str:
 # ── Verification ─────────────────────────────────────────
 
 
-def _first_allow_set_pos(nft_output: str) -> int:
-    """Return the position of the first allow-set reference, or -1."""
-    positions = [
-        nft_output.find(m) for m in ("@allow_v4", "@global_allow_v4") if nft_output.find(m) != -1
-    ]
-    return min(positions) if positions else -1
+def _has_leading_ipv6_drop(nft_output: str, chain: str) -> bool:
+    """Check that IPv6 drop is the first rule in a chain (before any accept)."""
+    pattern = rf"chain {chain} \{{.*?policy drop;\s*meta nfproto ipv6 drop"
+    return re.search(pattern, nft_output, re.DOTALL) is not None
+
+
+def _verify_rfc1918_blocks(nft_output: str) -> list[str]:
+    """Check RFC1918 reject rules are present in the ruleset.
+
+    Uses a regex to match reject rule context (``ip daddr <net> ... reject``)
+    rather than bare CIDR presence, so set elements don't produce false passes.
+    """
+    errors: list[str] = []
+    for net in RFC1918:
+        pattern = rf"ip daddr {re.escape(net)}.*reject"
+        if not re.search(pattern, nft_output):
+            errors.append(f"RFC1918 reject rule for {net} missing")
+    return errors
 
 
 def verify_ruleset(nft_output: str) -> list[str]:
@@ -219,28 +233,22 @@ def verify_ruleset(nft_output: str) -> list[str]:
 
     Verifies:
     - Default policy is drop
+    - IPv6 drop is the first rule in every chain
     - Reject type is present
     - Deny log prefix is present
-    - All RFC1918 ranges are blocked
-    - RFC1918 blocks appear before allow-set references
+    - All RFC1918 ranges are present (reject rules for non-whitelisted LAN traffic)
     """
     errors: list[str] = []
     if "policy drop" not in nft_output:
         errors.append("policy is not drop")
+    for chain in ("output", "input", "forward"):
+        if f"chain {chain}" in nft_output and not _has_leading_ipv6_drop(nft_output, chain):
+            errors.append(f"IPv6 drop rule missing or misplaced in {chain} chain")
     if "admin-prohibited" not in nft_output:
         errors.append("reject type missing")
     if "TEROK_SHIELD_DENIED" not in nft_output:
         errors.append("deny log prefix missing")
-    for net in RFC1918:
-        if net not in nft_output:
-            errors.append(f"RFC1918 block for {net} missing")
-    # Verify structural ordering: RFC1918 blocks must precede allow sets.
-    allow_pos = _first_allow_set_pos(nft_output)
-    if allow_pos != -1:
-        for net in RFC1918:
-            rfc_pos = nft_output.find(net)
-            if rfc_pos != -1 and rfc_pos > allow_pos:
-                errors.append(f"RFC1918 block for {net} appears after allow set")
+    errors.extend(_verify_rfc1918_blocks(nft_output))
     return errors
 
 

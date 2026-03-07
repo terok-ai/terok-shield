@@ -51,13 +51,20 @@ def nft(*args: str, stdin: str | None = None, check: bool = True) -> str:
     return run(["nft", *args], check=check)
 
 
-def nft_via_nsenter(container: str, *args: str, check: bool = True) -> str:
+def nft_via_nsenter(
+    container: str,
+    *args: str,
+    pid: str | None = None,
+    stdin: str | None = None,
+    check: bool = True,
+) -> str:
     """Run nft inside a running container's network namespace."""
-    pid = podman_inspect(container, "{{.State.Pid}}")
-    return run(
-        ["podman", "unshare", "nsenter", "-t", pid, "-n", "nft", *args],
-        check=check,
-    )
+    if pid is None:
+        pid = podman_inspect(container, "{{.State.Pid}}")
+    cmd = ["podman", "unshare", "nsenter", "-t", pid, "-n", "nft"]
+    if stdin is not None:
+        return run([*cmd, *args, "-f", "-"], stdin=stdin, check=check)
+    return run([*cmd, *args], check=check)
 
 
 def nft_via_rootless_netns(*args: str, stdin: str | None = None, check: bool = True) -> str:
