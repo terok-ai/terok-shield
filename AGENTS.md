@@ -36,6 +36,11 @@ make reuse      # Check REUSE (SPDX license/copyright) compliance
 make check      # Run lint + test + tach + security + docstrings + deadcode + reuse (equivalent to CI)
 ```
 
+**Integration tests (requires podman + nft on the host):**
+```bash
+make test-podman  # Run integration tests against real podman containers
+```
+
 **Other useful commands:**
 ```bash
 make install-dev  # Install all development dependencies
@@ -95,6 +100,14 @@ The project uses [tach](https://github.com/gauge-sh/tach) to enforce module boun
 4. Run `make test` to verify changes
 5. If you added or changed cross-module imports, run `make tach` to verify module boundary rules
 6. Run `make check` before pushing
+
+## Integration Tests
+
+Integration tests live in `tests/integration/` and require podman and nft on the host. They are **not** run in CI (GitHub Actions lacks nftables kernel support for user namespaces). Run them manually via `make test-podman`.
+
+- Tests use `@pytest.mark.integration` and skip markers (`podman_missing`, `nft_unusable`) from `conftest.py`
+- `conftest.py` provides fixtures: `container` (disposable Alpine container), `container_pid`, and the `nsenter_nft()` helper
+- nft commands run inside the container's network namespace via `podman unshare nsenter -t PID -n nft`
 
 ## Key Guidelines
 

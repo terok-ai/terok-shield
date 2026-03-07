@@ -56,6 +56,9 @@ python_files = ["test_*.py"]
 python_classes = ["Test*", "*Tests"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
+markers = [
+  "integration: integration tests requiring podman and nft (run via: make test-podman)",
+]
 
 [tool.ruff]
 target-version = "py312"
