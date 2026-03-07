@@ -19,10 +19,6 @@ import pytest
 IMAGE = "docker.io/library/alpine:latest"
 CTR_PREFIX = "shield-itest"
 
-# RFC 5737 TEST-NET-1 — reserved for documentation/testing, guaranteed non-routable.
-# Use this instead of arbitrary IPs like 1.2.3.4 to avoid unintended connections.
-TEST_IP = "192.0.2.1"
-
 
 def _has(binary: str) -> bool:
     return shutil.which(binary) is not None

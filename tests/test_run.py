@@ -17,6 +17,8 @@ from terok_shield.run import (
     run,
 )
 
+from .testnet import TEST_IP1, TEST_IP2
+
 
 class TestExecError(unittest.TestCase):
     """Tests for ExecError."""
@@ -178,16 +180,16 @@ class TestDig(unittest.TestCase):
     @unittest.mock.patch("terok_shield.run.run")
     def test_returns_ips(self, mock_run: unittest.mock.Mock) -> None:
         """Extract IPv4 addresses from dig output."""
-        mock_run.return_value = "1.2.3.4\n5.6.7.8\n"
+        mock_run.return_value = f"{TEST_IP1}\n{TEST_IP2}\n"
         result = dig("example.com")
-        self.assertEqual(result, ["1.2.3.4", "5.6.7.8"])
+        self.assertEqual(result, [TEST_IP1, TEST_IP2])
 
     @unittest.mock.patch("terok_shield.run.run")
     def test_filters_non_ip(self, mock_run: unittest.mock.Mock) -> None:
         """Filter out CNAME and other non-IP lines."""
-        mock_run.return_value = "alias.example.com.\n1.2.3.4\n"
+        mock_run.return_value = f"alias.example.com.\n{TEST_IP1}\n"
         result = dig("example.com")
-        self.assertEqual(result, ["1.2.3.4"])
+        self.assertEqual(result, [TEST_IP1])
 
     @unittest.mock.patch("terok_shield.run.run")
     def test_empty_on_failure(self, mock_run: unittest.mock.Mock) -> None:
