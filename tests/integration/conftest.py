@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from collections.abc import Iterator
 
 import pytest
 
@@ -44,8 +45,8 @@ nft_missing = pytest.mark.skipif(not _has("nft"), reason="nft not installed")
 # ── Fixtures ─────────────────────────────────────────────
 
 
-@pytest.fixture(scope="session", autouse=True)
-def _pull_image():
+@pytest.fixture(scope="session")
+def _pull_image() -> None:
     """Pull the test image once per session (skipped if already present)."""
     if not _has("podman"):
         pytest.skip("podman not installed")
@@ -54,7 +55,7 @@ def _pull_image():
 
 
 @pytest.fixture(scope="session")
-def nft_in_netns():
+def nft_in_netns(_pull_image: None) -> None:
     """Verify nft works inside a container's network namespace.
 
     Unlike ``podman unshare nft list ruleset`` (which operates on the
@@ -94,7 +95,7 @@ def nft_in_netns():
 
 
 @pytest.fixture
-def container():
+def container(_pull_image: None) -> Iterator[str]:
     """Start a disposable Alpine container, yield its name, clean up after."""
     name = f"{CTR_PREFIX}-{os.getpid()}"
     subprocess.run(["podman", "rm", "-f", name], capture_output=True)

@@ -20,7 +20,6 @@ from terok_shield.config import (
 from .conftest import podman_missing
 
 
-@pytest.mark.integration
 class TestPathResolution:
     """Test XDG path resolution with real environment."""
 

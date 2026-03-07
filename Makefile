@@ -12,14 +12,14 @@ format:
 	poetry run ruff check --fix .
 	poetry run ruff format .
 
-# Run tests with coverage (excludes integration tests)
+# Run tests with coverage (excludes podman-dependent integration tests)
 test:
-	poetry run pytest --cov=terok_shield --cov-report=term-missing --ignore=tests/integration
+	poetry run pytest -m "not integration" --cov=terok_shield --cov-report=term-missing
 	@echo "NOTE: This security-critical package targets 100% test coverage."
 
-# Run integration tests against real podman (requires podman + nft on host)
+# Run all integration tests including podman-dependent (requires podman + nft on host)
 test-podman:
-	poetry run pytest tests/integration/ -v -m integration
+	poetry run pytest tests/integration/ -v
 
 # Check module boundary rules (tach.toml)
 tach:
