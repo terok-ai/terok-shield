@@ -49,6 +49,7 @@ make spdx NAME="Real Human Name" FILES="src/terok_shield/new_file.py"  # Add SPD
 - **Imports**: Sorted with isort (part of ruff)
 - **Type hints**: Use Python 3.12+ type hints
 - **Docstrings**: Required for all public functions, classes, and modules (enforced by `docstr-coverage` at 95% minimum in CI)
+- **Pythonic style**: Prefer modern Pythonic constructs (comprehensions, ternary expressions, walrus operator, unpacking) where they improve readability
 - **Testing**: Add tests for new functionality; maintain coverage
 - **SPDX headers**: Every source file (`.py`, `.sh`, etc.) must have an SPDX header. Use `make spdx` to add or update it — it handles both new files and existing files correctly:
   ```bash
@@ -70,7 +71,7 @@ make spdx NAME="Real Human Name" FILES="src/terok_shield/new_file.py"  # Add SPD
 ## Security Boundary
 
 `nft.py` is the auditable security boundary:
-- **Zero non-stdlib imports** (only `ipaddress`, `re`, `textwrap`)
+- **Only stdlib + `nft_constants.py` imports** (`ipaddress`, `re`, `textwrap`, and the literals-only `nft_constants`)
 - All inputs validated (`safe_ip()`, `safe_name()`) before string interpolation
 - RFC1918 blocks structurally before allow-set checks (ordering is load-bearing)
 - Enforced by AST import isolation test + bandit SAST
