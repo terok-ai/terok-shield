@@ -15,6 +15,7 @@ format:
 # Run tests with coverage
 test:
 	poetry run pytest --cov=terok_shield --cov-report=term-missing
+	@echo "NOTE: This security-critical package targets 100% test coverage."
 
 # Run SAST security scan on shield module
 security:

@@ -31,3 +31,33 @@ def test_cli_help(capsys) -> None:
         assert e.code == 0
     captured = capsys.readouterr()
     assert "terok-shield" in captured.out
+
+
+def test_cli_no_command(capsys) -> None:
+    """CLI with no subcommand prints help and exits 0."""
+    import pytest
+
+    from terok_shield.cli import main
+
+    with pytest.raises(SystemExit, match="0"):
+        main([])
+    captured = capsys.readouterr()
+    assert "terok-shield" in captured.out
+
+
+def test_cli_setup(capsys) -> None:
+    """CLI setup subcommand prints placeholder."""
+    from terok_shield.cli import main
+
+    main(["setup"])
+    captured = capsys.readouterr()
+    assert "terok-shield setup:" in captured.out
+
+
+def test_cli_status(capsys) -> None:
+    """CLI status subcommand prints placeholder."""
+    from terok_shield.cli import main
+
+    main(["status"])
+    captured = capsys.readouterr()
+    assert "terok-shield status:" in captured.out

@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: 2026 Jiri Vyskocil
+# SPDX-License-Identifier: Apache-2.0
+
+"""Shared nftables constants — single source of truth.
+
+This module contains only literals (no logic, no non-stdlib imports)
+so it can be safely imported by the nft.py security boundary.
+"""
+
+NFT_TABLE = "inet terok_shield"
+NFT_TABLE_NAME = "terok_shield"
+
+# Containers must never reach these.  Order is load-bearing
+# (matches nftables chain evaluation order).
+RFC1918: tuple[str, ...] = (
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "169.254.0.0/16",
+)
