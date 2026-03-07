@@ -10,6 +10,7 @@
 - **Package Manager**: Poetry
 - **Testing**: pytest with coverage
 - **Linting/Formatting**: ruff
+- **Module Boundaries**: tach (enforced in CI via `tach.toml`)
 - **Security**: bandit (SAST)
 
 ## Repo layout
@@ -29,9 +30,10 @@ make format    # Auto-fix lint issues if lint fails
 **Before pushing:**
 ```bash
 make test       # Run full test suite with coverage
+make tach       # Check module boundary rules (tach.toml)
 make docstrings # Check docstring coverage (minimum 95%)
 make reuse      # Check REUSE (SPDX license/copyright) compliance
-make check      # Run lint + test + security + docstrings + deadcode + reuse (equivalent to CI)
+make check      # Run lint + test + tach + security + docstrings + deadcode + reuse (equivalent to CI)
 ```
 
 **Other useful commands:**
@@ -76,13 +78,23 @@ make spdx NAME="Real Human Name" FILES="src/terok_shield/new_file.py"  # Add SPD
 - RFC1918 blocks structurally before allow-set checks (ordering is load-bearing)
 - Enforced by AST import isolation test + bandit SAST
 
+## Module Boundaries (tach)
+
+The project uses [tach](https://github.com/gauge-sh/tach) to enforce module boundary rules defined in `tach.toml`. The critical constraint: `nft.py` may only import from `nft_constants.py` (and stdlib). When adding new cross-module imports:
+
+- Check `tach.toml` for allowed dependencies
+- Run `make tach` to verify
+- If adding a new dependency between modules, update `depends_on` in `tach.toml`
+- CI will reject boundary violations
+
 ## Development Workflow
 
 1. Make changes in `src/terok_shield/`
 2. Run `make lint` frequently during development
 3. Add/update tests in `tests/`
 4. Run `make test` to verify changes
-5. Run `make check` before pushing
+5. If you added or changed cross-module imports, run `make tach` to verify module boundary rules
+6. Run `make check` before pushing
 
 ## Key Guidelines
 

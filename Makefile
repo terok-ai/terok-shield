@@ -1,4 +1,4 @@
-.PHONY: all lint format test security docstrings complexity deadcode reuse check install install-dev docs docs-build clean spdx
+.PHONY: all lint format test tach security docstrings complexity deadcode reuse check install install-dev docs docs-build clean spdx
 
 all: check
 
@@ -16,6 +16,10 @@ format:
 test:
 	poetry run pytest --cov=terok_shield --cov-report=term-missing
 	@echo "NOTE: This security-critical package targets 100% test coverage."
+
+# Check module boundary rules (tach.toml)
+tach:
+	poetry run tach check
 
 # Run SAST security scan on shield module
 security:
@@ -48,7 +52,7 @@ endif
 	poetry run reuse annotate --template compact --copyright "$(NAME)" --license Apache-2.0 $(FILES)
 
 # Run all checks (equivalent to CI)
-check: lint test security docstrings deadcode reuse
+check: lint test tach security docstrings deadcode reuse
 
 # Install runtime dependencies only
 install:

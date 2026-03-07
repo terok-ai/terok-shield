@@ -1,0 +1,62 @@
+exclude = [
+    "**/__pycache__",
+    "**/tests/**",
+    "build",
+    "dist",
+    ".venv",
+    "docs",
+]
+
+source_roots = ["src"]
+exact = true
+forbid_circular_dependencies = true
+ignore_type_checking_imports = true
+
+# ── Module Boundaries ───────────────────────────────────────────────
+#
+# Key constraint: nft.py is the auditable security boundary.
+# It may only import from nft_constants (literals-only, no logic).
+# All other modules may import freely within the package.
+
+# Security boundary — literals only, no dependencies
+[[modules]]
+path = "terok_shield.nft_constants"
+depends_on = []
+
+# Security boundary — only stdlib + nft_constants
+[[modules]]
+path = "terok_shield.nft"
+depends_on = [
+    "terok_shield.nft_constants",
+]
+
+# Subprocess helpers — standalone, no internal deps
+[[modules]]
+path = "terok_shield.run"
+depends_on = []
+
+# Configuration — standalone
+[[modules]]
+path = "terok_shield.config"
+depends_on = []
+
+# Audit logging — depends on config for path helpers
+[[modules]]
+path = "terok_shield.audit"
+depends_on = [
+    "terok_shield.config",
+]
+
+# CLI — depends on config and package root
+[[modules]]
+path = "terok_shield.cli"
+depends_on = [
+    "terok_shield",
+]
+
+# Package root — depends on config for public API re-exports
+[[modules]]
+path = "terok_shield"
+depends_on = [
+    "terok_shield.config",
+]

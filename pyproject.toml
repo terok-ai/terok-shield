@@ -33,6 +33,7 @@ docstr-coverage = "^2.3.2"
 complexipy = ">=5.0"
 vulture = ">=2.12"
 reuse = "^6.2.0"
+tach = "^0.33.4"
 
 [tool.poetry.group.test.dependencies]
 pytest = ">=7.0"
