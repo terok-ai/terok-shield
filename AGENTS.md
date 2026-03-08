@@ -62,6 +62,7 @@ make spdx NAME="Real Human Name" FILES="src/terok_shield/new_file.py"  # Add SPD
 - **Docstrings**: Required for all public functions, classes, and modules (enforced by `docstr-coverage` at 95% minimum in CI)
 - **Pythonic style**: Prefer modern Pythonic constructs (comprehensions, ternary expressions, walrus operator, unpacking) where they improve readability
 - **Testing**: Add tests for new functionality; maintain coverage
+- **No literal IPs/URLs in tests**: Never hardcode IP addresses, URLs, or domain names directly in test files. Instead, define named constants in `tests/testnet.py` and import them. This centralizes SonarCloud suppressions and makes network dependencies auditable
 - **SPDX headers**: Every source file (`.py`, `.sh`, etc.) must have an SPDX header. Use `make spdx` to add or update it — it handles both new files and existing files correctly:
   ```bash
   make spdx NAME="Real Human Name" FILES="path/to/file.py"

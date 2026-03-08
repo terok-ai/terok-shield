@@ -77,3 +77,7 @@ Integration tests in `network/` and `podman/` make outbound connections to
 public DNS services (Cloudflare, Google). All targets are defined in
 [`tests/testnet.py`](https://github.com/terok-ai/terok-shield/blob/master/tests/testnet.py).
 No private or authenticated endpoints are contacted.
+
+**Never hardcode IP addresses, URLs, or domain names in test files.** Define
+named constants in `tests/testnet.py` and import them. This centralizes
+SonarCloud suppressions and keeps network dependencies auditable in one place.
