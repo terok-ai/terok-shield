@@ -31,16 +31,16 @@ from .nft import (
 )
 from .nft_constants import NFT_TABLE_NAME
 from .profiles import compose_profiles
-from .run import nft_via_rootless_netns, podman_inspect, run as run_cmd
+from .run import ExecError, nft_via_rootless_netns, podman_inspect, run as run_cmd
 
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
-def setup(config: ShieldConfig) -> None:
+def setup(_config: ShieldConfig) -> None:
     """Verify bridge network exists and create directories.
 
     Args:
-        config: Shield configuration.
+        _config: Shield configuration (unused, kept for API consistency).
 
     Raises:
         RuntimeError: If the bridge network does not exist.
@@ -48,7 +48,7 @@ def setup(config: ShieldConfig) -> None:
     ensure_shield_dirs()
     try:
         run_cmd(["podman", "network", "exists", BRIDGE_NETWORK])
-    except Exception:
+    except ExecError:
         raise RuntimeError(
             f"Bridge network '{BRIDGE_NETWORK}' not found. "
             f"Create it with: podman network create "
@@ -142,7 +142,7 @@ def _read_resolved_cache(container: str) -> list[str]:
 
 
 def post_start(
-    config: ShieldConfig,
+    _config: ShieldConfig,
     container: str,
     profiles: list[str],
 ) -> None:
@@ -306,5 +306,5 @@ def _update_dnsmasq_nftsets(container: str, domains: list[str]) -> None:
         return
     safe = safe_name(container)
     lines = [f"nftset=/{d}/4#inet#{NFT_TABLE_NAME}#{safe}_allow_v4" for d in domains]
-    nftset_file = shield_resolved_dir() / f"{container}.dnsmasq-nftset"
+    nftset_file = shield_resolved_dir() / f"{safe}.dnsmasq-nftset"
     nftset_file.write_text("\n".join(lines) + "\n")

@@ -34,15 +34,16 @@ def _is_ip(value: str) -> bool:
         return False
 
 
-def shield_setup(*, config: ShieldConfig | None = None, hardened: bool = False) -> None:
+def shield_setup(*, config: ShieldConfig | None = None) -> None:
     """Run shield setup (install hook or verify bridge).
+
+    Dispatches to standard or hardened setup based on ``config.mode``.
 
     Args:
         config: Shield configuration (loads default if None).
-        hardened: If True, set up hardened mode (bridge network).
     """
     cfg = _load_config(config)
-    if hardened:
+    if cfg.mode == ShieldMode.HARDENED:
         from . import hardened as hw
 
         hw.setup(cfg)
@@ -94,14 +95,17 @@ def shield_pre_start(
 
     log_event(container, "setup", detail=f"profiles={','.join(profiles)}")
 
+    if cfg.mode == ShieldMode.DISABLED:
+        return []
+
     if cfg.mode == ShieldMode.HARDENED:
         from . import hardened
 
         return hardened.pre_start(cfg, container, profiles)
-    else:
-        from . import standard
 
-        return standard.pre_start(cfg, container, profiles)
+    from . import standard
+
+    return standard.pre_start(cfg, container, profiles)
 
 
 def shield_post_start(
@@ -171,21 +175,30 @@ def shield_allow(
     """
     cfg = _load_config(config)
     ips = [target] if _is_ip(target) else dig(target)
+    allowed: list[str] = []
 
     if cfg.mode == ShieldMode.HARDENED:
         from . import hardened
 
         for ip in ips:
-            hardened.allow_ip(container, ip)
+            try:
+                hardened.allow_ip(container, ip)
+                allowed.append(ip)
+                log_event(container, "allowed", dest=ip, detail=f"target={target}")
+            except Exception:
+                pass
     else:
         from . import standard
 
         for ip in ips:
-            standard.allow_ip(container, ip)
+            try:
+                standard.allow_ip(container, ip)
+                allowed.append(ip)
+                log_event(container, "allowed", dest=ip, detail=f"target={target}")
+            except Exception:
+                pass
 
-    for ip in ips:
-        log_event(container, "allowed", dest=ip, detail=f"target={target}")
-    return ips
+    return allowed
 
 
 def shield_deny(
@@ -209,6 +222,7 @@ def shield_deny(
     """
     cfg = _load_config(config)
     ips = [target] if _is_ip(target) else dig(target)
+    denied: list[str] = []
 
     if cfg.mode == ShieldMode.HARDENED:
         from . import hardened
@@ -216,6 +230,8 @@ def shield_deny(
         for ip in ips:
             try:
                 hardened.deny_ip(container, ip)
+                denied.append(ip)
+                log_event(container, "denied", dest=ip, detail=f"target={target}")
             except Exception:
                 pass
     else:
@@ -224,12 +240,12 @@ def shield_deny(
         for ip in ips:
             try:
                 standard.deny_ip(container, ip)
+                denied.append(ip)
+                log_event(container, "denied", dest=ip, detail=f"target={target}")
             except Exception:
                 pass
 
-    for ip in ips:
-        log_event(container, "denied", dest=ip, detail=f"target={target}")
-    return ips
+    return denied
 
 
 def shield_rules(

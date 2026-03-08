@@ -106,15 +106,12 @@ class TestGenerateHookJson(unittest.TestCase):
 class TestSetup(unittest.TestCase):
     """Test standard mode setup."""
 
-    def test_creates_hook_files(self, tmp_path=None):
+    def test_creates_hook_files(self):
         """Setup creates entrypoint and hook JSON files."""
-        if tmp_path is None:
-            import tempfile
+        import tempfile
 
-            with tempfile.TemporaryDirectory() as td:
-                self._run_setup(Path(td))
-            return
-        self._run_setup(tmp_path)
+        with tempfile.TemporaryDirectory() as td:
+            self._run_setup(Path(td))
 
     def _run_setup(self, tmp_dir):
         config = ShieldConfig(mode=ShieldMode.STANDARD)

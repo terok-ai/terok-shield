@@ -71,11 +71,11 @@ def _generate_hook_json(entrypoint: str) -> str:
     return json.dumps(hook, indent=2) + "\n"
 
 
-def setup(config: ShieldConfig) -> None:
+def setup(_config: ShieldConfig) -> None:
     """Install OCI hook JSON and entrypoint script.
 
     Args:
-        config: Shield configuration.
+        _config: Shield configuration (unused, kept for API consistency).
     """
     ensure_shield_dirs()
 

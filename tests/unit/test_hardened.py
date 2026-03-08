@@ -23,6 +23,7 @@ from terok_shield.hardened import (
     pre_stop,
     setup,
 )
+from terok_shield.run import ExecError
 
 from ..testnet import TEST_IP1, TEST_IP2
 
@@ -40,7 +41,10 @@ class TestSetup(unittest.TestCase):
         mock_run.assert_called_once_with(["podman", "network", "exists", BRIDGE_NETWORK])
 
     @mock.patch("terok_shield.hardened.ensure_shield_dirs")
-    @mock.patch("terok_shield.hardened.run_cmd", side_effect=RuntimeError("not found"))
+    @mock.patch(
+        "terok_shield.hardened.run_cmd",
+        side_effect=ExecError(["podman", "network", "exists"], 1, "not found"),
+    )
     def test_raises_if_network_missing(self, mock_run, mock_dirs):
         """Setup raises RuntimeError if bridge network is absent."""
         config = ShieldConfig(mode=ShieldMode.HARDENED)

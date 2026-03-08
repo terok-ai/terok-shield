@@ -86,15 +86,19 @@ class TestMainDispatch(unittest.TestCase):
 
     @mock.patch("terok_shield.cli.shield_setup")
     def test_setup_standard(self, mock_setup):
-        """CLI setup calls shield_setup."""
+        """CLI setup calls shield_setup with standard config."""
         main(["setup"])
-        mock_setup.assert_called_once_with(hardened=False)
+        mock_setup.assert_called_once()
+        call_kwargs = mock_setup.call_args[1]
+        self.assertEqual(call_kwargs["config"].mode.value, "standard")
 
     @mock.patch("terok_shield.cli.shield_setup")
     def test_setup_hardened(self, mock_setup):
-        """CLI setup --hardened calls shield_setup(hardened=True)."""
+        """CLI setup --hardened calls shield_setup with hardened config."""
         main(["setup", "--hardened"])
-        mock_setup.assert_called_once_with(hardened=True)
+        mock_setup.assert_called_once()
+        call_kwargs = mock_setup.call_args[1]
+        self.assertEqual(call_kwargs["config"].mode.value, "hardened")
 
     @mock.patch("terok_shield.cli.shield_status")
     def test_status(self, mock_status):

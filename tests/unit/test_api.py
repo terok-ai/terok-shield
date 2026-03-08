@@ -36,7 +36,7 @@ class TestShieldSetup(unittest.TestCase):
     def test_hardened_mode(self, mock_setup):
         """shield_setup dispatches to hardened.setup."""
         config = ShieldConfig(mode=ShieldMode.HARDENED)
-        shield_setup(config=config, hardened=True)
+        shield_setup(config=config)
         mock_setup.assert_called_once_with(config)
 
 
@@ -74,6 +74,13 @@ class TestShieldPreStart(unittest.TestCase):
         config = ShieldConfig(mode=ShieldMode.HARDENED)
         shield_pre_start("test", ["dev-hardened"], config=config)
         mock_pre.assert_called_once_with(config, "test", ["dev-hardened"])
+
+    @mock.patch("terok_shield.log_event")
+    def test_disabled_returns_empty(self, _log):
+        """shield_pre_start returns empty list for DISABLED mode."""
+        config = ShieldConfig(mode=ShieldMode.DISABLED)
+        args = shield_pre_start("test", ["dev-standard"], config=config)
+        self.assertEqual(args, [])
 
     @mock.patch("terok_shield.log_event")
     @mock.patch("terok_shield.standard.pre_start", return_value=[])
@@ -145,7 +152,7 @@ class TestShieldDeny(unittest.TestCase):
         """shield_deny ignores errors from deny_ip (best-effort)."""
         config = ShieldConfig(mode=ShieldMode.STANDARD)
         ips = shield_deny("test", TEST_IP1, config=config)
-        self.assertEqual(ips, [TEST_IP1])
+        self.assertEqual(ips, [])
 
 
 class TestShieldRules(unittest.TestCase):

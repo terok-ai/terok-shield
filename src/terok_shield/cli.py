@@ -8,6 +8,8 @@ import json
 import sys
 
 from . import (
+    ShieldConfig,
+    ShieldMode,
     list_log_files,
     shield_allow,
     shield_deny,
@@ -106,9 +108,9 @@ def _dispatch(args: argparse.Namespace) -> None:
 
 def _cmd_setup(hardened: bool) -> None:
     """Run shield setup."""
-    shield_setup(hardened=hardened)
-    mode = "hardened" if hardened else "standard"
-    print(f"Shield setup complete ({mode} mode).")
+    mode = ShieldMode.HARDENED if hardened else ShieldMode.STANDARD
+    shield_setup(config=ShieldConfig(mode=mode))
+    print(f"Shield setup complete ({mode.value} mode).")
 
 
 def _cmd_status() -> None:
