@@ -3,7 +3,6 @@
 
 """Integration tests: DNS resolution with real dig."""
 
-from __future__ import annotations
 
 import shutil
 import tempfile

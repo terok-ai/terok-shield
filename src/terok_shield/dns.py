@@ -3,7 +3,6 @@
 
 """DNS domain resolution with timestamp-based caching."""
 
-from __future__ import annotations
 
 import ipaddress
 import re

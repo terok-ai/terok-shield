@@ -3,7 +3,6 @@
 
 """Basic smoke tests for terok-shield."""
 
-from __future__ import annotations
 
 
 def test_import() -> None:

@@ -15,7 +15,7 @@ class TestNftImportIsolation(unittest.TestCase):
         """Verify nft.py imports only stdlib and nft_constants."""
         source = (Path(__file__).parents[2] / "src" / "terok_shield" / "nft.py").read_text()
         tree = ast.parse(source)
-        stdlib = {"ipaddress", "re", "textwrap", "__future__"}
+        stdlib = {"ipaddress", "re", "textwrap"}
         # nft_constants.py is the only non-stdlib import allowed (literals-only module)
         allowed_relative = {"nft_constants"}
         for node in ast.walk(tree):

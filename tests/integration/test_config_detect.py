@@ -3,7 +3,6 @@
 
 """Integration tests: config path resolution and auto-detect with real podman."""
 
-from __future__ import annotations
 
 from pathlib import Path
 

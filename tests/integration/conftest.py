@@ -8,7 +8,6 @@ These tests require podman and nft on the host. They are NOT run in CI
 Run manually via: make test-podman
 """
 
-from __future__ import annotations
 
 import os
 import shutil

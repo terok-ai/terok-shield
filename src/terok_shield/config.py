@@ -3,7 +3,6 @@
 
 """Shield configuration, constants, and path helpers."""
 
-from __future__ import annotations
 
 import enum
 import os

@@ -3,7 +3,6 @@
 
 """Profile loading and composition from .txt allowlists."""
 
-from __future__ import annotations
 
 import re
 from importlib import resources as importlib_resources

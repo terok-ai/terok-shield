@@ -3,7 +3,6 @@
 
 """Integration tests: profile loading → DNS resolution → cache pipeline."""
 
-from __future__ import annotations
 
 import shutil
 import tempfile

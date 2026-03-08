@@ -3,7 +3,6 @@
 
 """Subprocess helpers for shield.  Every external command goes through here."""
 
-from __future__ import annotations
 
 import re
 import shutil

@@ -8,7 +8,6 @@ Executes complexipy, vulture, and docstr-coverage, then assembles
 the results into a single Markdown page.
 """
 
-from __future__ import annotations
 
 import json
 import subprocess

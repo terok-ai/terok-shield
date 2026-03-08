@@ -3,7 +3,6 @@
 
 """Structured audit logging for shield (JSON-lines format)."""
 
-from __future__ import annotations
 
 import json
 import re
