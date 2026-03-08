@@ -3,7 +3,6 @@
 
 """CLI entry point for terok-shield."""
 
-
 import argparse
 import sys
 

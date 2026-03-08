@@ -3,7 +3,6 @@
 
 """DNS domain resolution with timestamp-based caching."""
 
-
 import ipaddress
 import re
 import time

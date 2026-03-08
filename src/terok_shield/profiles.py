@@ -3,7 +3,6 @@
 
 """Profile loading and composition from .txt allowlists."""
 
-
 import re
 from importlib import resources as importlib_resources
 from pathlib import Path

@@ -3,7 +3,6 @@
 
 """Integration tests: profile loading → DNS resolution → cache pipeline."""
 
-
 import shutil
 import tempfile
 from pathlib import Path

@@ -4,7 +4,6 @@
 """Basic smoke tests for terok-shield."""
 
 
-
 def test_import() -> None:
     """Package is importable."""
     import terok_shield

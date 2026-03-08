@@ -3,7 +3,6 @@
 
 """Integration tests: generate nft ruleset, apply via nsenter, verify."""
 
-
 import subprocess
 
 import pytest

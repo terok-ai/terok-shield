@@ -12,7 +12,6 @@
 +=====================================================+
 """
 
-
 import ipaddress
 import re
 import textwrap

@@ -3,7 +3,6 @@
 
 """Integration tests: audit logging with real filesystem paths."""
 
-
 import json
 from pathlib import Path
 

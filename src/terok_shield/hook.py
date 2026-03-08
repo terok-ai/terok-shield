@@ -11,7 +11,6 @@ The hook is fail-closed: if any step fails, it exits non-zero and
 the container must not start with unrestricted network access.
 """
 
-
 import ipaddress
 import json
 import re

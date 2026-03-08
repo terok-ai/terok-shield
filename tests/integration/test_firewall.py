@@ -10,7 +10,6 @@ podman, nft, and internet access.
 Run via: make test-podman
 """
 
-
 import json
 import subprocess
 import tempfile

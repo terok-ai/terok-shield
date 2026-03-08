@@ -3,7 +3,6 @@
 
 """Structured audit logging for shield (JSON-lines format)."""
 
-
 import json
 import re
 from collections.abc import Iterator

@@ -3,7 +3,6 @@
 
 """Shield configuration, constants, and path helpers."""
 
-
 import enum
 import os
 from dataclasses import dataclass

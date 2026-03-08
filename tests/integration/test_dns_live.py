@@ -3,7 +3,6 @@
 
 """Integration tests: DNS resolution with real dig."""
 
-
 import shutil
 import tempfile
 from pathlib import Path
