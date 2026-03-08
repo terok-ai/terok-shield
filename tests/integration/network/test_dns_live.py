@@ -10,13 +10,12 @@ from pathlib import Path
 import pytest
 
 from terok_shield.dns import resolve_and_cache, resolve_domains
-
-from ..testnet import CLOUDFLARE_DOMAIN, GOOGLE_DNS_DOMAIN, NONEXISTENT_DOMAIN, TEST_IP1
+from tests.testnet import CLOUDFLARE_DOMAIN, GOOGLE_DNS_DOMAIN, NONEXISTENT_DOMAIN, TEST_IP1
 
 dig_missing = pytest.mark.skipif(not shutil.which("dig"), reason="dig not installed")
 
 
-@pytest.mark.integration
+@pytest.mark.needs_internet
 @dig_missing
 class TestResolveLive:
     """DNS resolution against real nameservers."""
@@ -39,7 +38,7 @@ class TestResolveLive:
         assert len(ips) >= 2
 
 
-@pytest.mark.integration
+@pytest.mark.needs_internet
 @dig_missing
 class TestResolveAndCacheLive:
     """Full resolve-and-cache pipeline with real DNS."""

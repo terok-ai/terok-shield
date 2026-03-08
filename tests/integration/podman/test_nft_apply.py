@@ -25,7 +25,7 @@ def _list(pid: str) -> subprocess.CompletedProcess:
     return listed
 
 
-@pytest.mark.integration
+@pytest.mark.needs_podman
 @pytest.mark.usefixtures("nft_in_netns")
 class TestStandardApply:
     """Apply a standard-mode ruleset to a real container netns and verify."""

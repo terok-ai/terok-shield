@@ -17,7 +17,7 @@ import pytest
 from terok_shield.resources.shield_probe import probe
 
 
-@pytest.mark.integration
+@pytest.mark.needs_host_features
 class TestProbeRealSocket(unittest.TestCase):
     """Test probe() against real kernel ICMP via localhost sockets."""
 

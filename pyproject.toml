@@ -57,7 +57,9 @@ python_classes = ["Test*", "*Tests"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
 markers = [
-  "integration: integration tests requiring podman and nft (run via: make test-podman)",
+  "needs_host_features: needs Linux kernel features (IP_RECVERR, etc.) but no containers",
+  "needs_podman: requires podman and nft on the host",
+  "needs_internet: requires outbound internet connectivity (dig, DNS, HTTP)",
 ]
 
 [tool.ruff]

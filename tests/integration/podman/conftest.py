@@ -1,11 +1,17 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""Fixtures for podman integration tests.
+"""Fixtures and skip markers for integration tests.
 
-These tests require podman and nft on the host. They are NOT run in CI
-(GitHub Actions lacks nftables kernel support for user namespaces).
-Run manually via: make test-podman
+Integration tests are organized into tiers by environment requirements:
+
+- ``needs_host_features``: Linux kernel features only (no containers).
+  Run via: ``make test-host`` (also runs in CI).
+- ``needs_internet``: Outbound connectivity + dig (no containers).
+- ``needs_podman``: Podman + nft on the host.
+- ``needs_podman`` + ``needs_internet``: Full firewall tests.
+
+Run all tiers locally via: ``make test-podman``
 """
 
 import os

@@ -132,8 +132,11 @@ jobs:
         if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
         run: poetry install --with test --no-interaction
 
-      - name: Run tests
+      - name: Run unit tests
         run: poetry run pytest tests/unit/ --cov=terok_shield --cov-report=xml --cov-report=term-missing
+
+      - name: Run host-only integration tests
+        run: poetry run pytest tests/integration/host/ -v
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5

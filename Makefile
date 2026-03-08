@@ -1,4 +1,4 @@
-.PHONY: all lint format test test-podman tach security docstrings complexity deadcode reuse check install install-dev docs docs-build clean spdx
+.PHONY: all lint format test test-host test-network test-podman test-integration tach security docstrings complexity deadcode reuse check install install-dev docs docs-build clean spdx
 
 all: check
 
@@ -17,8 +17,18 @@ test:
 	poetry run pytest tests/unit/ --cov=terok_shield --cov-report=term-missing
 	@echo "NOTE: This security-critical package targets 100% test coverage."
 
-# Run all integration tests including podman-dependent (requires podman + nft on host)
+# Integration tests by tier (each target = one directory)
+test-host:
+	poetry run pytest tests/integration/host/ -v
+
+test-network:
+	poetry run pytest tests/integration/network/ -v
+
 test-podman:
+	poetry run pytest tests/integration/podman/ -v
+
+# All integration tests (all tiers)
+test-integration:
 	poetry run pytest tests/integration/ -v
 
 # Check module boundary rules (tach.toml)

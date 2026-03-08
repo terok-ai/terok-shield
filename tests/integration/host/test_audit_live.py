@@ -12,6 +12,7 @@ from terok_shield.audit import list_log_files, log_event, tail_log
 from tests.testnet import TEST_IP1, TEST_IP2
 
 
+@pytest.mark.needs_host_features
 class TestAuditLive:
     """Audit logging with real temp directories."""
 

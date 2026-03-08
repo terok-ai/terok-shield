@@ -36,10 +36,13 @@ make reuse      # Check REUSE (SPDX license/copyright) compliance
 make check      # Run lint + test + tach + security + docstrings + deadcode + reuse (equivalent to CI)
 ```
 
-**Integration tests (requires podman + nft on the host):**
+**Integration tests (each target = one directory):**
 ```bash
 poetry install --with test  # ensure terok-shield is installed in Poetry's venv
-make test-podman            # run integration tests against real podman containers
+make test-host              # tests/integration/host/    (no containers, runs in CI)
+make test-network           # tests/integration/network/ (dig + internet)
+make test-podman            # tests/integration/podman/  (podman + nft + internet)
+make test-integration       # all tiers
 ```
 
 **Other useful commands:**
@@ -104,15 +107,24 @@ The project uses [tach](https://github.com/gauge-sh/tach) to enforce module boun
 
 ## Integration Tests
 
-Integration tests live in `tests/integration/` and require podman and nft on the host. They are **not** run in CI (GitHub Actions lacks nftables kernel support for user namespaces).
+Integration tests live in `tests/integration/` and are organized into subdirectories by environment requirements:
+
+| Directory | Marker | What it needs | CI |
+|-----------|--------|---------------|-----|
+| `host/` | `needs_host_features` | Linux kernel only (IP_RECVERR, filesystem) | Yes |
+| `network/` | `needs_internet` | Outbound connectivity + `dig` | No |
+| `podman/` | `needs_podman` (+ `needs_internet`) | podman + nft (+ internet) | No |
 
 ```bash
 poetry install --with test  # install package + test deps into Poetry's venv
-make test-podman            # run integration tests
+make test-host              # host/ only (fast, runs in CI)
+make test-network           # network/ only (dig + internet)
+make test-podman            # podman/ only (podman + nft + internet)
+make test-integration       # all tiers
 ```
 
-- Tests use `@pytest.mark.integration` and skip markers (`podman_missing`, `nft_missing`) from `conftest.py`
-- `conftest.py` provides fixtures: `container` (disposable Alpine container), `container_pid`, `nft_in_netns` (session-scoped nft capability check), and the `nsenter_nft()` helper
+- Skip markers (`podman_missing`, `nft_missing`, `dig_missing`) handle graceful degradation when binaries are absent
+- `podman/conftest.py` provides fixtures: `container` (disposable Alpine container), `container_pid`, `nft_in_netns` (session-scoped nft capability check), and the `nsenter_nft()` helper
 - nft commands run inside the container's network namespace via `podman unshare nsenter -t PID -n nft` (not the host netns — rootless nft only has `CAP_NET_ADMIN` inside container-owned namespaces)
 
 ## Key Guidelines

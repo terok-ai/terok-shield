@@ -20,8 +20,7 @@ import pytest
 from terok_shield.hook import apply_hook, hook_main
 from terok_shield.nft import add_elements, standard_ruleset, verify_ruleset
 from terok_shield.nft_constants import RFC1918
-
-from ..testnet import (
+from tests.testnet import (
     ALLOWED_TARGET_HTTP,
     ALLOWED_TARGET_HTTPS,
     ALLOWED_TARGET_IPS,
@@ -35,6 +34,7 @@ from ..testnet import (
     RFC1918_HOST,
     TEST_IP1,
 )
+
 from .conftest import nft_missing, nsenter_nft, podman_missing
 
 
@@ -58,7 +58,8 @@ def _wget(container: str, url: str, timeout: int = 5) -> subprocess.CompletedPro
 # ── Firewall enforcement: blocking ──────────────────────
 
 
-@pytest.mark.integration
+@pytest.mark.needs_podman
+@pytest.mark.needs_internet
 @podman_missing
 @nft_missing
 @pytest.mark.usefixtures("nft_in_netns")
@@ -174,7 +175,8 @@ class TestFirewallBlocking:
 # ── ICMP error detection via shield_probe ─────────────
 
 
-@pytest.mark.integration
+@pytest.mark.needs_podman
+@pytest.mark.needs_internet
 @podman_missing
 @nft_missing
 @pytest.mark.usefixtures("nft_in_netns")
@@ -216,7 +218,8 @@ class TestShieldProbe:
 # ── Firewall enforcement: allowing ──────────────────────
 
 
-@pytest.mark.integration
+@pytest.mark.needs_podman
+@pytest.mark.needs_internet
 @podman_missing
 @nft_missing
 @pytest.mark.usefixtures("nft_in_netns")
@@ -273,7 +276,8 @@ class TestFirewallAllowing:
 # ── Add-elements integration ────────────────────────────
 
 
-@pytest.mark.integration
+@pytest.mark.needs_podman
+@pytest.mark.needs_internet
 @podman_missing
 @nft_missing
 @pytest.mark.usefixtures("nft_in_netns")
@@ -308,7 +312,8 @@ class TestAddElementsLive:
 # ── apply_hook end-to-end ────────────────────────────────
 
 
-@pytest.mark.integration
+@pytest.mark.needs_podman
+@pytest.mark.needs_internet
 @podman_missing
 @nft_missing
 @pytest.mark.usefixtures("nft_in_netns")
@@ -421,7 +426,8 @@ class TestApplyHookE2E:
 # ── apply_hook audit trail ────────────────────────────────
 
 
-@pytest.mark.integration
+@pytest.mark.needs_podman
+@pytest.mark.needs_internet
 @podman_missing
 @nft_missing
 @pytest.mark.usefixtures("nft_in_netns")
@@ -488,7 +494,8 @@ class TestApplyHookAudit:
 # ── hook_main end-to-end ─────────────────────────────────
 
 
-@pytest.mark.integration
+@pytest.mark.needs_podman
+@pytest.mark.needs_internet
 @podman_missing
 @nft_missing
 @pytest.mark.usefixtures("nft_in_netns")

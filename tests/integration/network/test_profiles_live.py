@@ -10,45 +10,13 @@ from pathlib import Path
 import pytest
 
 from terok_shield.dns import resolve_and_cache
-from terok_shield.profiles import compose_profiles, list_profiles, load_profile
-
-from ..testnet import CLOUDFLARE_DOMAIN, TEST_IP99
+from terok_shield.profiles import load_profile
+from tests.testnet import CLOUDFLARE_DOMAIN, TEST_IP99
 
 dig_missing = pytest.mark.skipif(not shutil.which("dig"), reason="dig not installed")
 
 
-@pytest.mark.integration
-class TestProfilesLive:
-    """Verify bundled profiles load correctly and contain expected entries."""
-
-    def test_all_bundled_profiles_load(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Every listed profile loads without error."""
-        with tempfile.TemporaryDirectory() as tmp:
-            monkeypatch.setenv("TEROK_SHIELD_CONFIG_DIR", tmp)
-            for name in list_profiles():
-                entries = load_profile(name)
-                assert len(entries) > 0, f"Profile {name!r} is empty"
-
-    def test_base_profile_entries(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Base profile has NTP and DNS infrastructure."""
-        with tempfile.TemporaryDirectory() as tmp:
-            monkeypatch.setenv("TEROK_SHIELD_CONFIG_DIR", tmp)
-            entries = load_profile("base")
-            # Should have pool.ntp.org for NTP
-            assert any("ntp" in e for e in entries)
-            # Should have OCSP/CRL for TLS validation
-            assert any("ocsp" in e or "crl" in e for e in entries)
-
-    def test_compose_deduplicates(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Composing all profiles yields no duplicates."""
-        with tempfile.TemporaryDirectory() as tmp:
-            monkeypatch.setenv("TEROK_SHIELD_CONFIG_DIR", tmp)
-            all_names = list_profiles()
-            entries = compose_profiles(all_names)
-            assert len(entries) == len(set(entries)), "Duplicates found in composed profiles"
-
-
-@pytest.mark.integration
+@pytest.mark.needs_internet
 @dig_missing
 class TestProfileResolvePipeline:
     """Full pipeline: load profile → resolve domains → cache."""

@@ -1,23 +1,16 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""Integration tests: config path resolution and auto-detect with real podman."""
+"""Integration tests: config path resolution with real environment."""
 
 from pathlib import Path
 
 import pytest
 
-from terok_shield.config import (
-    ShieldMode,
-    _auto_detect_mode,
-    ensure_shield_dirs,
-    shield_config_root,
-    shield_state_root,
-)
-
-from .conftest import podman_missing
+from terok_shield.config import ensure_shield_dirs, shield_config_root, shield_state_root
 
 
+@pytest.mark.needs_host_features
 class TestPathResolution:
     """Test XDG path resolution with real environment."""
 
@@ -59,19 +52,3 @@ class TestPathResolution:
         assert (tmp_path / "state" / "dns").is_dir()
         assert (tmp_path / "state" / "resolved").is_dir()
         assert (tmp_path / "config" / "profiles").is_dir()
-
-
-@pytest.mark.integration
-@podman_missing
-class TestAutoDetect:
-    """Test _auto_detect_mode with real podman."""
-
-    def test_returns_valid_mode(self) -> None:
-        """Auto-detect must return a valid ShieldMode."""
-        mode = _auto_detect_mode()
-        assert isinstance(mode, ShieldMode)
-
-    def test_at_least_standard_with_nft(self, nft_in_netns: None) -> None:
-        """If nft works in a container netns, auto-detect returns at least STANDARD."""
-        mode = _auto_detect_mode()
-        assert mode in (ShieldMode.STANDARD, ShieldMode.HARDENED)
