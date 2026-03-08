@@ -17,6 +17,7 @@ Run all tiers locally via: ``make test-podman``
 import os
 import shutil
 import subprocess
+import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -161,3 +162,54 @@ def nsenter_nft(pid: str, *args: str, stdin: str | None = None) -> subprocess.Co
     if stdin is not None:
         cmd.extend(["-f", "-"])
     return subprocess.run(cmd, input=stdin, capture_output=True, text=True, timeout=30)
+
+
+@pytest.fixture
+def shield_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    """Provide an isolated state directory for shield operations.
+
+    Sets ``TEROK_SHIELD_STATE_DIR`` to a temporary directory so that hooks,
+    resolved caches, and logs do not touch the real system.
+
+    Yields:
+        Path to the temporary state directory.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", tmp)
+        yield Path(tmp)
+
+
+@pytest.fixture
+def shielded_container(
+    _pull_image: None,
+    shield_env: Path,
+) -> Iterator[str]:
+    """Start a container with firewall applied via the public API lifecycle.
+
+    1. ``shield_setup()`` installs OCI hook files.
+    2. ``shield_pre_start()`` resolves DNS and returns podman args.
+    3. ``podman run`` starts the container with the hook-dir / annotation.
+    4. Yields the container name.
+    5. Cleanup: ``podman rm -f``.
+
+    Yields:
+        Container name with shield firewall applied.
+    """
+    from terok_shield import ShieldConfig, shield_pre_start, shield_setup
+
+    cfg = ShieldConfig()
+    shield_setup(config=cfg)
+
+    name = f"{CTR_PREFIX}-api-{os.getpid()}"
+    subprocess.run(["podman", "rm", "-f", name], capture_output=True)
+
+    extra_args = shield_pre_start(name, config=cfg)
+
+    subprocess.run(
+        ["podman", "run", "-d", "--name", name, *extra_args, IMAGE, "sleep", "120"],
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+    yield name
+    subprocess.run(["podman", "rm", "-f", name], capture_output=True)

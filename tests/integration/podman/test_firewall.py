@@ -36,24 +36,7 @@ from tests.testnet import (
 )
 
 from .conftest import nft_missing, nsenter_nft, podman_missing
-
-
-def _exec(container: str, *cmd: str, timeout: int = 10) -> subprocess.CompletedProcess:
-    """Run a command inside a container via podman exec."""
-    return subprocess.run(
-        ["podman", "exec", container, *cmd],
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
-
-
-def _wget(container: str, url: str, timeout: int = 5) -> subprocess.CompletedProcess:
-    """Attempt an outbound HTTP/HTTPS request from inside a container."""
-    return _exec(
-        container, "wget", "-q", "--spider", f"--timeout={timeout}", url, timeout=timeout + 5
-    )
-
+from .helpers import exec_in_container as _exec, wget as _wget
 
 # ── Firewall enforcement: blocking ──────────────────────
 
