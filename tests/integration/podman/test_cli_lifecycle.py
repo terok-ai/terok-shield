@@ -127,19 +127,13 @@ class TestCLILifecycle:
         assert "setup" in captured.out
 
 
-# ── CLI error handling ───────────────────────────────────
+# ── CLI error handling (podman-gated) ────────────────────
 
 
 @pytest.mark.needs_podman
 @podman_missing
 class TestCLIErrors:
-    """Verify CLI error handling."""
-
-    def test_cli_no_args_exits_zero(self) -> None:
-        """``main([])`` prints help and exits 0."""
-        with pytest.raises(SystemExit) as exc_info:
-            main([])
-        assert exc_info.value.code == 0
+    """Verify CLI error handling that requires podman."""
 
     def test_cli_allow_bad_container(self, shield_env: Path) -> None:
         """Allowing on a nonexistent container exits 1."""

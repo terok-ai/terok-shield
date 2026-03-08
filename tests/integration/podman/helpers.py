@@ -81,11 +81,15 @@ def assert_blocked(container: str, url: str, timeout: int = 10) -> None:
 def assert_reachable(container: str, url: str, timeout: int = 10) -> None:
     """Assert that a URL is reachable (wget succeeds) from inside a container.
 
+    Verifies the container is running first to avoid misattributing
+    a dead container as a firewall block.
+
     Args:
         container: Container name or ID.
         url: URL that should be reachable.
         timeout: wget timeout in seconds.
     """
+    _assert_container_running(container)
     r = wget(container, url, timeout=timeout)
     assert r.returncode == 0, f"Expected {url} to be reachable, but it was blocked: {r.stderr}"
 

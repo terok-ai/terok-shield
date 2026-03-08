@@ -20,16 +20,13 @@ from terok_shield import (
     shield_allow,
     shield_deny,
     shield_pre_start,
-    shield_resolve,
     shield_rules,
     shield_setup,
-    shield_status,
 )
 from tests.testnet import (
     ALLOWED_TARGET_HTTP,
     ALLOWED_TARGET_IPS,
     BLOCKED_TARGET_HTTP,
-    TEST_IP4,
 )
 
 from .conftest import nft_missing, podman_missing
@@ -147,64 +144,3 @@ class TestShieldLifecycle:
         rules = shield_rules(shielded_container)
         assert "terok_shield" in rules
         assert "allow_v4" in rules
-
-
-# ── shield_resolve ───────────────────────────────────────
-
-
-@pytest.mark.needs_podman
-@pytest.mark.needs_internet
-@podman_missing
-@nft_missing
-class TestShieldResolve:
-    """Verify ``shield_resolve()`` resolves DNS profiles."""
-
-    def test_resolve_returns_ips(self, shield_env: Path) -> None:
-        """``shield_resolve()`` returns a list of IPs."""
-        ips = shield_resolve("resolve-test-ctr")
-        assert len(ips) > 0, "Resolve should return at least one IP"
-        # IPs should be strings matching IPv4 pattern
-        for ip in ips:
-            assert isinstance(ip, str)
-
-    def test_resolve_creates_cache(self, shield_env: Path) -> None:
-        """A cache file exists after ``shield_resolve()``."""
-        shield_resolve("cache-test-ctr")
-
-        resolved_dir = shield_env / "resolved"
-        assert resolved_dir.is_dir()
-        cache_files = list(resolved_dir.iterdir())
-        assert any("cache-test-ctr" in f.name for f in cache_files)
-
-    def test_resolve_force_bypasses_cache(self, shield_env: Path) -> None:
-        """``force=True`` re-resolves even if cache is fresh."""
-        # Seed the cache with a sentinel IP that real DNS will never return
-        resolved_dir = shield_env / "resolved"
-        resolved_dir.mkdir(exist_ok=True)
-        cache_file = resolved_dir / "force-test-ctr.resolved"
-        cache_file.write_text(f"{TEST_IP4}\n")
-
-        ips = shield_resolve("force-test-ctr", force=True)
-
-        assert ips, "Force-resolve should return at least one IP"
-        assert TEST_IP4 not in ips, "Sentinel IP should be replaced by real resolution"
-        assert TEST_IP4 not in cache_file.read_text(), "Cache should be overwritten"
-
-
-# ── shield_status ────────────────────────────────────────
-
-
-@pytest.mark.needs_podman
-@podman_missing
-class TestShieldStatus:
-    """Verify ``shield_status()`` returns expected structure."""
-
-    def test_status_returns_dict(self, shield_env: Path) -> None:
-        """Status dict contains expected keys."""
-        status = shield_status()
-        assert isinstance(status, dict)
-        assert "mode" in status
-        assert "profiles" in status
-        assert "audit_enabled" in status
-        assert "log_files" in status
-        assert isinstance(status["profiles"], list)

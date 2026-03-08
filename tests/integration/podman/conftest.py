@@ -17,7 +17,6 @@ Run all tiers locally via: ``make test-podman``
 import os
 import shutil
 import subprocess
-import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -162,21 +161,6 @@ def nsenter_nft(pid: str, *args: str, stdin: str | None = None) -> subprocess.Co
     if stdin is not None:
         cmd.extend(["-f", "-"])
     return subprocess.run(cmd, input=stdin, capture_output=True, text=True, timeout=30)
-
-
-@pytest.fixture
-def shield_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
-    """Provide an isolated state directory for shield operations.
-
-    Sets ``TEROK_SHIELD_STATE_DIR`` to a temporary directory so that hooks,
-    resolved caches, and logs do not touch the real system.
-
-    Yields:
-        Path to the temporary state directory.
-    """
-    with tempfile.TemporaryDirectory() as tmp:
-        monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", tmp)
-        yield Path(tmp)
 
 
 @pytest.fixture
