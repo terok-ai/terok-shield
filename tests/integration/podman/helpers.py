@@ -45,14 +45,35 @@ def wget(container: str, url: str, timeout: int = 5) -> subprocess.CompletedProc
     )
 
 
+def _assert_container_running(container: str) -> None:
+    """Assert that a container is running (guard against false positives).
+
+    Args:
+        container: Container name or ID.
+    """
+    r = subprocess.run(
+        ["podman", "inspect", "--format", "{{.State.Running}}", container],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert r.returncode == 0 and r.stdout.strip() == "true", (
+        f"Container {container} is not running — cannot assert network behavior: {r.stderr}"
+    )
+
+
 def assert_blocked(container: str, url: str, timeout: int = 10) -> None:
     """Assert that a URL is blocked (wget fails) from inside a container.
+
+    Verifies the container is running first to avoid false positives from
+    a dead container or failed ``podman exec``.
 
     Args:
         container: Container name or ID.
         url: URL that should be unreachable.
         timeout: wget timeout in seconds.
     """
+    _assert_container_running(container)
     r = wget(container, url, timeout=timeout)
     assert r.returncode != 0, f"Expected {url} to be blocked, but it was reachable"
 

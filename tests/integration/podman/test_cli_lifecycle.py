@@ -123,8 +123,8 @@ class TestCLILifecycle:
         # The shielded_container fixture logs a "setup" event via shield_pre_start
         main(["logs", "--container", shielded_container])
         captured = capsys.readouterr()
-        # Audit log should have at least the setup entry
-        assert "setup" in captured.out or captured.out.strip() == ""
+        # Audit log must have the setup entry from shield_pre_start
+        assert "setup" in captured.out
 
 
 # ── CLI error handling ───────────────────────────────────
@@ -142,7 +142,7 @@ class TestCLIErrors:
         assert exc_info.value.code == 0
 
     def test_cli_allow_bad_container(self, shield_env: Path) -> None:
-        """``main(["allow", "nonexistent", "1.2.3.4"])`` exits 1."""
+        """Allowing on a nonexistent container exits 1."""
         with pytest.raises(SystemExit) as exc_info:
             main(["allow", "nonexistent-container-xyz", TEST_IP1])
         assert exc_info.value.code == 1

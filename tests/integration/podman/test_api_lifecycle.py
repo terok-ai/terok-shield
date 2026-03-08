@@ -29,6 +29,7 @@ from tests.testnet import (
     ALLOWED_TARGET_HTTP,
     ALLOWED_TARGET_IPS,
     BLOCKED_TARGET_HTTP,
+    TEST_IP4,
 )
 
 from .conftest import nft_missing, podman_missing
@@ -90,6 +91,7 @@ class TestShieldPreStart:
         with pytest.raises(RuntimeError, match="hook not installed"):
             shield_pre_start("test-container", config=cfg)
 
+    @pytest.mark.needs_internet
     def test_pre_start_resolves_dns(self, shield_env: Path) -> None:
         """The resolved cache file is created after ``shield_pre_start()``."""
         cfg = ShieldConfig()
@@ -176,11 +178,17 @@ class TestShieldResolve:
 
     def test_resolve_force_bypasses_cache(self, shield_env: Path) -> None:
         """``force=True`` re-resolves even if cache is fresh."""
-        ips1 = shield_resolve("force-test-ctr")
-        ips2 = shield_resolve("force-test-ctr", force=True)
-        # Both should return IPs (content may be identical for stable domains)
-        assert len(ips1) > 0
-        assert len(ips2) > 0
+        # Seed the cache with a sentinel IP that real DNS will never return
+        resolved_dir = shield_env / "resolved"
+        resolved_dir.mkdir(exist_ok=True)
+        cache_file = resolved_dir / "force-test-ctr.resolved"
+        cache_file.write_text(f"{TEST_IP4}\n")
+
+        ips = shield_resolve("force-test-ctr", force=True)
+
+        assert ips, "Force-resolve should return at least one IP"
+        assert TEST_IP4 not in ips, "Sentinel IP should be replaced by real resolution"
+        assert TEST_IP4 not in cache_file.read_text(), "Cache should be overwritten"
 
 
 # ── shield_status ────────────────────────────────────────
