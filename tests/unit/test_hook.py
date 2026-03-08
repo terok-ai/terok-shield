@@ -13,7 +13,7 @@ from terok_shield.hook import _parse_oci_state, _read_resolved_ips, apply_hook, 
 from terok_shield.nft_constants import RFC1918
 from terok_shield.run import ExecError
 
-from .testnet import TEST_IP1, TEST_IP2
+from ..testnet import TEST_IP1, TEST_IP2
 
 # Mock output that passes verify_ruleset (must have chain structure
 # and RFC1918 reject rules in proper context for regex matching)

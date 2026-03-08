@@ -15,7 +15,7 @@ from terok_shield.profiles import (
     load_profile,
 )
 
-from .testnet import TEST_IP1
+from ..testnet import TEST_IP1
 
 
 class TestParseEntries(unittest.TestCase):

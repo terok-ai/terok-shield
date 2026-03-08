@@ -17,7 +17,7 @@ from terok_shield.run import (
     run,
 )
 
-from .testnet import TEST_IP1, TEST_IP2
+from ..testnet import TEST_IP1, TEST_IP2
 
 
 class TestExecError(unittest.TestCase):

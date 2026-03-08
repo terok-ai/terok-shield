@@ -16,7 +16,7 @@ from terok_shield.dns import (
     resolve_domains,
 )
 
-from .testnet import TEST_IP1, TEST_IP2, TEST_IP3, TEST_NET1
+from ..testnet import TEST_IP1, TEST_IP2, TEST_IP3, TEST_NET1
 
 
 class TestIsIp(unittest.TestCase):

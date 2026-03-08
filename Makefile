@@ -14,7 +14,7 @@ format:
 
 # Run tests with coverage (excludes podman-dependent integration tests)
 test:
-	poetry run pytest -m "not integration" --cov=terok_shield --cov-report=term-missing
+	poetry run pytest tests/unit/ --cov=terok_shield --cov-report=term-missing
 	@echo "NOTE: This security-critical package targets 100% test coverage."
 
 # Run all integration tests including podman-dependent (requires podman + nft on host)

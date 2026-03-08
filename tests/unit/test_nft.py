@@ -17,7 +17,7 @@ from terok_shield.nft import (
     verify_ruleset,
 )
 
-from .testnet import LINK_LOCAL_DNS, TEST_IP1, TEST_IP2, TEST_NET1
+from ..testnet import LINK_LOCAL_DNS, TEST_IP1, TEST_IP2, TEST_NET1
 
 
 class TestSafeName(unittest.TestCase):

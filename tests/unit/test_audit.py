@@ -11,7 +11,7 @@ from pathlib import Path
 
 from terok_shield.audit import list_log_files, log_event, tail_log
 
-from .testnet import TEST_IP1
+from ..testnet import TEST_IP1
 
 
 class TestLogEvent(unittest.TestCase):
