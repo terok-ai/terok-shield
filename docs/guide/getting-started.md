@@ -9,6 +9,7 @@ and running your first shielded container.
 - **Podman** (rootless mode)
 - **Python 3.12+**
 - **`dig`** (from `dnsutils` or `bind-utils`) for DNS resolution
+- **`dnsmasq`** (optional, only for [hardened mode](modes.md#hardened-mode))
 
 ## Install
 

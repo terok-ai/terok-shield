@@ -23,6 +23,7 @@ destinations — everything else is dropped.
 - Podman (rootless)
 - Python 3.12+
 - `dig` (from `dnsutils` / `bind-utils`) for DNS resolution
+- `dnsmasq` (optional, only for [hardened mode](https://terok-ai.github.io/terok-shield/guide/modes/#hardened-mode))
 
 ## Installation
 
