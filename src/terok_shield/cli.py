@@ -139,7 +139,8 @@ def _cmd_allow(container: str, target: str) -> None:
     if ips:
         print(f"Allowed {target} -> {', '.join(ips)} for {container}")
     else:
-        print(f"No IPs allowed for {container}")
+        print(f"Error: no IPs allowed for {container}", file=sys.stderr)
+        sys.exit(1)
 
 
 def _cmd_deny(container: str, target: str) -> None:
@@ -148,7 +149,8 @@ def _cmd_deny(container: str, target: str) -> None:
     if ips:
         print(f"Denied {target} ({', '.join(ips)}) for {container}")
     else:
-        print(f"No IPs denied for {container}")
+        print(f"Error: no IPs denied for {container}", file=sys.stderr)
+        sys.exit(1)
 
 
 def _cmd_rules(container: str) -> None:

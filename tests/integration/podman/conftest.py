@@ -146,11 +146,11 @@ def probe_container(_pull_image: None) -> Iterator[str]:
             timeout=120,
         )
         # Copy the probe script into the container.
-        probe_src = Path(__file__).resolve().parent.parent.parent / (
+        probe_src = Path(__file__).resolve().parent.parent.parent.parent / (
             "src/terok_shield/resources/shield_probe.py"
         )
         if not probe_src.exists():
-            pytest.skip(f"shield_probe.py not found at {probe_src}")
+            pytest.fail(f"shield_probe.py not found at {probe_src}")
         subprocess.run(
             ["podman", "cp", str(probe_src), f"{name}:/usr/local/bin/shield_probe.py"],
             check=True,
@@ -193,13 +193,15 @@ def shielded_container(
     name = f"{CTR_PREFIX}-api-{os.getpid()}"
     subprocess.run(["podman", "rm", "-f", name], capture_output=True)
 
-    extra_args = shield_pre_start(name, config=cfg)
+    try:
+        extra_args = shield_pre_start(name, config=cfg)
 
-    subprocess.run(
-        ["podman", "run", "-d", "--name", name, *extra_args, IMAGE, "sleep", "120"],
-        check=True,
-        capture_output=True,
-        timeout=30,
-    )
-    yield name
-    subprocess.run(["podman", "rm", "-f", name], capture_output=True)
+        subprocess.run(
+            ["podman", "run", "-d", "--name", name, *extra_args, IMAGE, "sleep", "120"],
+            check=True,
+            capture_output=True,
+            timeout=30,
+        )
+        yield name
+    finally:
+        subprocess.run(["podman", "rm", "-f", name], capture_output=True)
