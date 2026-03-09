@@ -86,9 +86,10 @@ class TestAPILifecycle:
             # 10. Verify audit trail
             events = list(tail_log(name))
             actions = [e["action"] for e in events]
-            assert "setup" in actions
-            assert "allowed" in actions
-            assert "denied" in actions
+            setup_i = actions.index("setup")
+            allowed_i = actions.index("allowed")
+            denied_i = actions.index("denied")
+            assert setup_i < allowed_i < denied_i
 
         finally:
             subprocess.run(["podman", "rm", "-f", name], capture_output=True, timeout=30)
