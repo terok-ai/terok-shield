@@ -10,7 +10,6 @@ import sys
 from . import (
     ExecError,
     ShieldConfig,
-    ShieldMode,
     list_log_files,
     shield_allow,
     shield_deny,
@@ -35,13 +34,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command")
 
-    p_setup = sub.add_parser("setup", help="Install firewall hook or verify bridge")
-    p_setup.add_argument(
-        "--bridge",
-        action="store_true",
-        default=False,
-        help="Use bridge mode (bridge network + rootless-netns)",
-    )
+    sub.add_parser("setup", help="Install firewall hook")
 
     sub.add_parser("status", help="Show shield status")
 
@@ -92,7 +85,7 @@ def _dispatch(args: argparse.Namespace) -> None:
     """Dispatch to the appropriate subcommand handler."""
     cmd = args.command
     if cmd == "setup":
-        _cmd_setup(bridge=args.bridge)
+        _cmd_setup()
     elif cmd == "status":
         _cmd_status()
     elif cmd == "resolve":
@@ -107,11 +100,10 @@ def _dispatch(args: argparse.Namespace) -> None:
         _cmd_logs(container=args.container, n=args.n)
 
 
-def _cmd_setup(bridge: bool) -> None:
+def _cmd_setup() -> None:
     """Run shield setup."""
-    mode = ShieldMode.BRIDGE if bridge else ShieldMode.HOOK
-    shield_setup(config=ShieldConfig(mode=mode))
-    print(f"Shield setup complete ({mode.value} mode).")
+    shield_setup(config=ShieldConfig())
+    print("Shield setup complete (hook mode).")
 
 
 def _cmd_status() -> None:

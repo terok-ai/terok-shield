@@ -1,8 +1,8 @@
 # Architecture
 
-## Firewall modes
+## Firewall mode
 
-### Standard mode
+### Hook mode
 
 Uses OCI hooks to apply per-container nftables rules inside the container's own
 network namespace. Each container gets an isolated firewall. Works with pasta
@@ -10,16 +10,6 @@ network namespace. Each container gets an isolated firewall. Works with pasta
 
 Lifecycle: `shield_setup()` installs the OCI hook script. On each container
 start, the hook applies the ruleset and loads cached IPs into the allow set.
-
-### Hardened mode
-
-Uses a dedicated bridge network (`ctr-egress`) and applies nftables rules in
-podman's rootless-netns. All container traffic traverses the bridge and is
-filtered at the forward chain. Requires `dnsmasq` for bridge DNS.
-
-Lifecycle: `shield_setup()` verifies the bridge network exists.
-`shield_pre_start()` returns network args, `shield_post_start()` applies the
-ruleset after the container joins the bridge, `shield_pre_stop()` cleans up.
 
 ## Allowlisting
 
@@ -74,11 +64,9 @@ The package exports a lifecycle-oriented API for integration with
 
 | Function | Purpose |
 |----------|---------|
-| `shield_setup()` | Install OCI hook or verify bridge |
+| `shield_setup()` | Install OCI hook |
 | `shield_status()` | Return mode, profiles, audit config |
-| `shield_pre_start()` | Return extra podman args (hardened: network) |
-| `shield_post_start()` | Apply ruleset after container start (hardened only) |
-| `shield_pre_stop()` | Clean up before container stop (hardened only) |
+| `shield_pre_start()` | Return extra podman args |
 | `shield_resolve()` | Resolve DNS profiles and cache results |
 | `shield_allow()` | Live-allow a domain/IP for a running container |
 | `shield_deny()` | Live-deny a domain/IP (best-effort) |
@@ -98,9 +86,8 @@ directly — never the CLI.
 | `nft.py` | **Security boundary** — ruleset generation, input validation, self-verification |
 | `nft_constants.py` | Shared literals (`NFT_TABLE`, `RFC1918`) — no logic |
 | `config.py` | `ShieldConfig`, `ShieldMode`, path helpers, config loading |
-| `standard.py` | Standard mode lifecycle (OCI hooks, per-container netns) |
-| `hardened.py` | Hardened mode lifecycle (bridge network, rootless-netns) |
-| `hook.py` | OCI hook entry point — fail-closed firewall application |
+| `mode_hook.py` | Hook mode lifecycle (OCI hooks, per-container netns) |
+| `oci_hook.py` | OCI hook entry point — fail-closed firewall application |
 | `dns.py` | DNS resolution via `dig`, timestamp-based caching |
 | `profiles.py` | Profile loading and composition |
 | `audit.py` | JSON-lines audit logging |

@@ -70,13 +70,12 @@ depends_on = [
     "terok_shield.config",
 ]
 
-# OCI hook entry point — depends on audit, config, nft, run, mode_bridge
+# OCI hook entry point — depends on audit, config, nft, run
 [[modules]]
 path = "terok_shield.oci_hook"
 depends_on = [
     "terok_shield.audit",
     "terok_shield.config",
-    "terok_shield.mode_bridge",
     "terok_shield.nft",
     "terok_shield.run",
 ]
@@ -90,20 +89,6 @@ depends_on = [
     "terok_shield.nft",
     "terok_shield.profiles",
     "terok_shield.run",
-]
-
-# Bridge mode — bridge network, rootless-netns
-[[modules]]
-path = "terok_shield.mode_bridge"
-depends_on = [
-    "terok_shield.config",
-    "terok_shield.dns",
-    "terok_shield.mode_hook",
-    "terok_shield.nft",
-    "terok_shield.nft_constants",
-    "terok_shield.profiles",
-    "terok_shield.run",
-    "terok_shield.util",
 ]
 
 # CLI — depends on package root (public API)
@@ -120,7 +105,6 @@ depends_on = [
     "terok_shield.audit",
     "terok_shield.config",
     "terok_shield.dns",
-    "terok_shield.mode_bridge",
     "terok_shield.mode_hook",
     "terok_shield.profiles",
     "terok_shield.run",

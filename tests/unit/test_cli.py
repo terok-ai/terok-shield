@@ -21,12 +21,6 @@ class TestBuildParser(unittest.TestCase):
             ns = parser.parse_args([cmd] if cmd in ("setup", "status", "logs") else [cmd, "ctr"])
             self.assertEqual(ns.command, cmd)
 
-    def test_setup_bridge_flag(self):
-        """Setup subcommand accepts --bridge."""
-        parser = _build_parser()
-        ns = parser.parse_args(["setup", "--bridge"])
-        self.assertTrue(ns.bridge)
-
     def test_resolve_requires_container(self):
         """Resolve subcommand requires container arg."""
         parser = _build_parser()
@@ -92,14 +86,6 @@ class TestMainDispatch(unittest.TestCase):
         mock_setup.assert_called_once()
         call_kwargs = mock_setup.call_args[1]
         self.assertEqual(call_kwargs["config"].mode.value, "hook")
-
-    @mock.patch("terok_shield.cli.shield_setup")
-    def test_setup_bridge(self, mock_setup):
-        """CLI setup --bridge calls shield_setup with bridge config."""
-        main(["setup", "--bridge"])
-        mock_setup.assert_called_once()
-        call_kwargs = mock_setup.call_args[1]
-        self.assertEqual(call_kwargs["config"].mode.value, "bridge")
 
     @mock.patch("terok_shield.cli.shield_status")
     def test_status(self, mock_status):

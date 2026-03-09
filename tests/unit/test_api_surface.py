@@ -26,9 +26,7 @@ EXPECTED_ALL = [
     "log_event",
     "shield_allow",
     "shield_deny",
-    "shield_post_start",
     "shield_pre_start",
-    "shield_pre_stop",
     "shield_resolve",
     "shield_rules",
     "shield_setup",
@@ -49,9 +47,9 @@ class TestAPISurface(unittest.TestCase):
     # ── ShieldMode ───────────────────────────────────────
 
     def test_shield_mode_members(self):
-        """ShieldMode has exactly HOOK and BRIDGE."""
+        """ShieldMode has exactly HOOK."""
         members = {m.name: m.value for m in ShieldMode}
-        self.assertEqual(members, {"HOOK": "hook", "BRIDGE": "bridge"})
+        self.assertEqual(members, {"HOOK": "hook"})
 
     # ── ShieldConfig ─────────────────────────────────────
 
@@ -74,7 +72,7 @@ class TestAPISurface(unittest.TestCase):
         """ShieldConfig is frozen — assignment raises FrozenInstanceError."""
         cfg = ShieldConfig()
         with self.assertRaises(dataclasses.FrozenInstanceError):
-            cfg.mode = ShieldMode.BRIDGE  # type: ignore[misc]
+            cfg.mode = ShieldMode.HOOK  # type: ignore[misc]
 
     # ── ExecError ────────────────────────────────────────
 
@@ -138,23 +136,6 @@ class TestAPISurface(unittest.TestCase):
                     ("config", KW, None, cfg_or_none),
                 ],
                 list[str],
-            ),
-            (
-                terok_shield.shield_post_start,
-                [
-                    ("container", POS, empty, str),
-                    ("profiles", POS, None, str_list_or_none),
-                    ("config", KW, None, cfg_or_none),
-                ],
-                None,
-            ),
-            (
-                terok_shield.shield_pre_stop,
-                [
-                    ("container", POS, empty, str),
-                    ("config", KW, None, cfg_or_none),
-                ],
-                None,
             ),
             (
                 terok_shield.shield_allow,

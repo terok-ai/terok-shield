@@ -4,13 +4,8 @@
 """OCI hook entry point for container firewall.
 
 This module is invoked by podman as an OCI hook at ``createRuntime``
-and ``poststop`` stages.  It reads annotations from the OCI state to
-determine the firewall mode (hook or bridge) and dispatches accordingly.
-
-- **Hook mode** (default): applies nftables rules inside the container's
-  network namespace via ``nsenter``.
-- **Bridge mode**: creates per-container nft sets and forward rules in
-  podman's rootless-netns.
+and ``poststop`` stages.  It reads annotations from the OCI state and
+applies the hook-mode firewall.
 
 The hook is fail-closed: if any step fails during ``createRuntime``,
 it exits non-zero and the container must not start with unrestricted
@@ -23,7 +18,7 @@ import re
 import sys
 
 from .audit import log_event
-from .config import ANNOTATION_KEY, ANNOTATION_MODE_KEY, ANNOTATION_NAME_KEY, shield_resolved_dir
+from .config import shield_resolved_dir
 from .nft import add_elements, hook_ruleset, verify_ruleset
 from .run import ExecError, nft_via_nsenter
 
@@ -194,38 +189,19 @@ def hook_main(stdin_data: str | None = None, stage: str = "createRuntime") -> in
         stdin_data = sys.stdin.read()
 
     try:
-        container_id, pid, annotations = _parse_oci_state(stdin_data)
+        container_id, pid, _annotations = _parse_oci_state(stdin_data)
     except ValueError as e:
         print(f"terok-shield hook: {e}", file=sys.stderr)
         return 1
 
-    mode = annotations.get(ANNOTATION_MODE_KEY, "")
-    container_name = annotations.get(ANNOTATION_NAME_KEY, "")
-
     try:
         if stage == "poststop":
-            if mode == "bridge" and container_name:
-                from .mode_bridge import apply_bridge_cleanup
-
-                apply_bridge_cleanup(container_name)
-                log_event(container_name, "teardown", detail="bridge cleanup via hook")
             return 0
 
         # createRuntime (default)
-        if mode == "bridge":
-            if not container_name:
-                raise RuntimeError("Bridge mode requires terok.shield.name annotation")
-            profiles_str = annotations.get(ANNOTATION_KEY, "")
-            profiles = [p for p in profiles_str.split(",") if p]
-
-            from .mode_bridge import apply_bridge_setup
-
-            apply_bridge_setup(container_id, container_name, profiles)
-            log_event(container_name, "setup", detail="bridge firewall applied via hook")
-        else:
-            if not pid:
-                raise RuntimeError("Hook mode requires a valid PID in OCI state")
-            apply_hook(container_id, pid)
+        if not pid:
+            raise RuntimeError("Hook mode requires a valid PID in OCI state")
+        apply_hook(container_id, pid)
     except RuntimeError as e:
         print(f"terok-shield hook: {e}", file=sys.stderr)
         return 1

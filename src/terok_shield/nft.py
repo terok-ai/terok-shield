@@ -17,15 +17,11 @@ import re
 import textwrap
 
 from .nft_constants import (
-    BRIDGE_GATEWAY,
-    BRIDGE_SUBNET,
     DEFAULT_GATE_PORT,
     NFT_TABLE,
     PASTA_DNS,
     RFC1918,
 )
-
-_SAFE_NAME = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 # ── Validation ───────────────────────────────────────────
 
@@ -37,20 +33,6 @@ def _safe_port(port: int) -> int:
     if not 1 <= port <= 65535:
         raise ValueError(f"Port out of range: {port}")
     return port
-
-
-def safe_name(name: str) -> str:
-    """Validate and normalize name for nft identifiers.
-
-    Raises ValueError if the name contains unsafe characters.
-    Hyphens are replaced with underscores for nft compatibility.
-
-    Note: this mapping is lossy due to nft limitations (``a-b`` and ``a_b`` collide).
-    Callers that need uniqueness across both forms should use distinct base names.
-    """
-    if not _SAFE_NAME.match(name):
-        raise ValueError(f"Unsafe nft identifier: {name!r}")
-    return name.replace("-", "_")
 
 
 def safe_ip(value: str) -> str:
@@ -139,47 +121,6 @@ def hook_ruleset(dns: str = PASTA_DNS, gate_port: int = DEFAULT_GATE_PORT) -> st
     """)
 
 
-def bridge_ruleset(
-    gw: str = BRIDGE_GATEWAY,
-    subnet: str = BRIDGE_SUBNET,
-    gate_port: int = DEFAULT_GATE_PORT,
-) -> str:
-    """Generate rootless-netns nftables ruleset for bridge mode.
-
-    Applied to the forward chain (traffic crosses bridge).
-
-    Chain order (forward):
-        IPv6 drop -> established -> DNS -> gate -> allow set -> RFC1918 reject -> ICMP -> intra-bridge -> deny
-
-    Args:
-        gw: Bridge gateway address.
-        subnet: Bridge subnet CIDR.
-        gate_port: Gate server port to allow via gateway.
-    """
-    safe_ip(gw)
-    safe_ip(subnet)
-    _safe_port(gate_port)
-    return textwrap.dedent(f"""\
-        table {NFT_TABLE} {{
-            set global_allow_v4 {{ type ipv4_addr; flags interval; }}
-
-            chain forward {{
-                type filter hook forward priority filter; policy drop;
-                meta nfproto ipv6 drop
-                ct state established,related accept
-                ip daddr {gw} udp dport 53 accept
-                ip daddr {gw} tcp dport 53 accept
-                ip daddr {gw} tcp dport {gate_port} accept
-                ip daddr @global_allow_v4 accept
-        {_rfc1918_rules()}
-                ip protocol icmp accept
-                ip daddr {subnet} ip saddr {subnet} accept
-        {_audit_deny_rule()}
-            }}
-        }}
-    """)
-
-
 # ── Set operations ───────────────────────────────────────
 
 
@@ -192,22 +133,6 @@ def add_elements(set_name: str, ips: list[str], table: str = NFT_TABLE) -> str:
     if not valid:
         return ""
     return f"add element {table} {set_name} {{ {', '.join(valid)} }}\n"
-
-
-def create_set(name: str, table: str = NFT_TABLE) -> str:
-    """Generate nft command to create a per-container allow set."""
-    n = safe_name(name)
-    return f"add set {table} {n}_allow_v4 {{ type ipv4_addr; flags interval; }}\n"
-
-
-def forward_rule(container: str, ip: str, table: str = NFT_TABLE) -> str:
-    """Generate a per-container forward rule for bridge mode."""
-    n = safe_name(container)
-    safe_ip(ip)
-    return (
-        f"add rule {table} forward ip saddr {ip} "
-        f'ip daddr @{n}_allow_v4 accept comment "terok_shield:{n}"\n'
-    )
 
 
 # ── Verification ─────────────────────────────────────────

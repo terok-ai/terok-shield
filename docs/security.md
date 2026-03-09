@@ -10,7 +10,7 @@ access. The container boundary (rootless Podman + user namespaces) is assumed
 intact. terok-shield adds the network layer: even with full container control,
 the workload cannot reach arbitrary internet hosts.
 
-**Host privilege model:** no root required. Both firewall modes operate within
+**Host privilege model:** no root required. The firewall operates within
 rootless Podman's user namespace.
 
 **Goals:**
@@ -83,16 +83,10 @@ The workload cannot modify nftables rules because `CAP_NET_ADMIN` is dropped,
 
 ## Chain evaluation order
 
-**Standard mode** (per-container netns, output chain):
+**Hook mode** (per-container netns, output chain):
 
 ```text
 IPv6 drop → loopback → established → DNS → gate port → allow_v4 → RFC1918 reject → deny all
-```
-
-**Hardened mode** (rootless-netns, forward chain):
-
-```text
-IPv6 drop → established → DNS → gate → allow_v4 → RFC1918 reject → ICMP → intra-bridge → deny all
 ```
 
 **Rule ordering rationale:** the allow set (`@allow_v4`) is evaluated *before*

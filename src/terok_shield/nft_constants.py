@@ -14,8 +14,6 @@ NFT_TABLE_NAME = "terok_shield"
 # Used as parameter defaults in nft.py and re-exported by config.py.
 
 PASTA_DNS = "169.254.1.1"  # pasta default DNS forwarder (link-local)
-BRIDGE_GATEWAY = "10.91.0.1"  # hardened-mode bridge gateway
-BRIDGE_SUBNET = "10.91.0.0/24"  # hardened-mode bridge subnet
 DEFAULT_GATE_PORT = 9418  # gate server port
 
 # RFC1918 + link-local ranges: rejected by default, access attempts

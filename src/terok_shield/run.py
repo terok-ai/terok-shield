@@ -65,14 +65,6 @@ def nft_via_nsenter(
     return run([*cmd, *args], check=check)
 
 
-def nft_via_rootless_netns(*args: str, stdin: str | None = None, check: bool = True) -> str:
-    """Run nft inside podman's rootless-netns (bridge mode)."""
-    cmd = ["podman", "unshare", "--rootless-netns", "nft"]
-    if stdin is not None:
-        return run([*cmd, *args, "-f", "-"], stdin=stdin, check=check)
-    return run([*cmd, *args], check=check)
-
-
 # ── Other helpers ────────────────────────────────────────
 
 

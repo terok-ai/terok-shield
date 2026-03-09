@@ -12,7 +12,6 @@ from terok_shield.run import (
     has,
     nft,
     nft_via_nsenter,
-    nft_via_rootless_netns,
     podman_inspect,
     run,
 )
@@ -115,31 +114,6 @@ class TestNft(unittest.TestCase):
         mock_run.return_value = ""
         nft(stdin="table ip test {}")
         mock_run.assert_called_once_with(["nft", "-f", "-"], stdin="table ip test {}", check=True)
-
-
-class TestNftViaRootlessNetns(unittest.TestCase):
-    """Tests for nft_via_rootless_netns wrapper."""
-
-    @unittest.mock.patch("terok_shield.run.run")
-    def test_with_args(self, mock_run: unittest.mock.Mock) -> None:
-        """Pass arguments via podman unshare."""
-        mock_run.return_value = "output"
-        result = nft_via_rootless_netns("list", "ruleset")
-        mock_run.assert_called_once_with(
-            ["podman", "unshare", "--rootless-netns", "nft", "list", "ruleset"], check=True
-        )
-        self.assertEqual(result, "output")
-
-    @unittest.mock.patch("terok_shield.run.run")
-    def test_with_stdin(self, mock_run: unittest.mock.Mock) -> None:
-        """Pipe rules on stdin via podman unshare, preserving extra args."""
-        mock_run.return_value = ""
-        nft_via_rootless_netns("-c", stdin="table ip test {}")
-        mock_run.assert_called_once_with(
-            ["podman", "unshare", "--rootless-netns", "nft", "-c", "-f", "-"],
-            stdin="table ip test {}",
-            check=True,
-        )
 
 
 class TestNftViaNsenter(unittest.TestCase):

@@ -8,7 +8,7 @@ Optional. Located at `~/.config/terok-shield/config.yml`
 (or `$XDG_CONFIG_HOME/terok-shield/config.yml`).
 
 ```yaml
-mode: auto              # auto, hook, or bridge
+mode: hook              # currently only "hook" is supported
 default_profiles:
   - dev-standard
 gate_port: 9418
@@ -19,7 +19,7 @@ audit:
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `mode` | `auto` | Firewall mode. `auto` detects the best available mode |
+| `mode` | `auto` | Firewall mode. `auto` selects the best available mode |
 | `default_profiles` | `["dev-standard"]` | Profiles used when resolving without explicit profile list |
 | `gate_port` | `9418` | Loopback port allowed for the gate server |
 | `audit.enabled` | `true` | Enable JSON-lines audit logging |
@@ -27,13 +27,11 @@ audit:
 
 If the config file is missing or unparseable, defaults are used.
 
-### Mode auto-detection
+### Mode selection
 
-When `mode: auto` (the default):
-
-1. Check for bridge mode prerequisites (bridge network + dnsmasq) → use bridge
-2. Check for `nft` binary → use hook
-3. Neither available → error
+Currently only hook mode is supported. Setting `mode: auto` or `mode: hook`
+both resolve to hook mode. Future modes may be added for different network
+topologies.
 
 ## Directories
 

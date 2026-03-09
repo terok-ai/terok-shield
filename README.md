@@ -19,7 +19,6 @@ destinations — everything else is dropped.
 - **DNS-based allowlisting** — domain names resolved before container start, cached automatically
 - **Live allow/deny** at runtime for individual containers
 - **Connection audit logging** (JSON-lines lifecycle logs + kernel-level per-packet nftables logs)
-- **Two modes**: hook (OCI hook, self-contained) and bridge (bridge network + rootless-netns)
 - **Fail-closed**: hook failure prevents the container from starting
 
 ### Requirements
@@ -28,7 +27,6 @@ destinations — everything else is dropped.
 - Podman (rootless)
 - Python 3.12+
 - `dig` (from `dnsutils` / `bind-utils`) for DNS resolution
-- `dnsmasq` (optional, only for [bridge mode](https://terok-ai.github.io/terok-shield/guide/modes/#bridge-mode))
 
 ## Installation
 

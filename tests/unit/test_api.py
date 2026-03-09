@@ -12,7 +12,6 @@ from terok_shield import (
     shield_allow,
     shield_deny,
     shield_pre_start,
-    shield_pre_stop,
     shield_resolve,
     shield_rules,
     shield_setup,
@@ -29,13 +28,6 @@ class TestShieldSetup(unittest.TestCase):
     def test_hook_mode(self, mock_setup):
         """shield_setup dispatches to mode_hook.setup."""
         config = ShieldConfig(mode=ShieldMode.HOOK)
-        shield_setup(config=config)
-        mock_setup.assert_called_once_with(config)
-
-    @mock.patch("terok_shield.mode_bridge.setup")
-    def test_bridge_mode(self, mock_setup):
-        """shield_setup dispatches to mode_bridge.setup."""
-        config = ShieldConfig(mode=ShieldMode.BRIDGE)
         shield_setup(config=config)
         mock_setup.assert_called_once_with(config)
 
@@ -68,34 +60,12 @@ class TestShieldPreStart(unittest.TestCase):
         self.assertIn("--network", args)
 
     @mock.patch("terok_shield.log_event")
-    @mock.patch("terok_shield.mode_bridge.pre_start", return_value=["--network", "ctr-egress"])
-    def test_bridge_dispatch(self, mock_pre, _log):
-        """shield_pre_start dispatches to mode_bridge.pre_start."""
-        config = ShieldConfig(mode=ShieldMode.BRIDGE)
-        shield_pre_start("test", ["dev-hardened"], config=config)
-        mock_pre.assert_called_once_with(config, "test", ["dev-hardened"])
-
-    @mock.patch("terok_shield.log_event")
     @mock.patch("terok_shield.mode_hook.pre_start", return_value=[])
     def test_uses_default_profiles(self, mock_pre, _log):
         """shield_pre_start uses config.default_profiles if none given."""
         config = ShieldConfig(mode=ShieldMode.HOOK, default_profiles=("base",))
         shield_pre_start("test", config=config)
         mock_pre.assert_called_once_with(config, "test", ["base"])
-
-
-class TestShieldPreStop(unittest.TestCase):
-    """Test shield_pre_stop (no-op — handled by OCI hook)."""
-
-    def test_hook_noop(self):
-        """shield_pre_stop is a no-op in hook mode."""
-        config = ShieldConfig(mode=ShieldMode.HOOK)
-        shield_pre_stop("test", config=config)
-
-    def test_bridge_noop(self):
-        """shield_pre_stop is a no-op in bridge mode (handled by OCI hook)."""
-        config = ShieldConfig(mode=ShieldMode.BRIDGE)
-        shield_pre_stop("test", config=config)
 
 
 class TestShieldAllow(unittest.TestCase):

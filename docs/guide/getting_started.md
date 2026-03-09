@@ -9,7 +9,6 @@ and running your first shielded container.
 - **Podman** (rootless mode)
 - **Python 3.12+**
 - **`dig`** (from `dnsutils` or `bind-utils`) for DNS resolution
-- **`dnsmasq`** (optional, only for [bridge mode](modes.md#bridge-mode))
 
 ## Install
 
@@ -139,5 +138,5 @@ terok-shield logs --container my-container -n 10
 ## Next steps
 
 - [Allowlist Profiles](profiles.md) — customize what your containers can reach
-- [Firewall Modes](modes.md) — understand hook vs. bridge mode
+- [Firewall Modes](modes.md) — understand hook mode
 - [CLI Reference](cli.md) — full command reference

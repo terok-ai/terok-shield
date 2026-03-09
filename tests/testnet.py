@@ -33,7 +33,6 @@ BROAD_CIDR_8 = "203.0.0.0/8"  # Broad CIDR (prefix <= 16) for classification tes
 
 RFC1918_HOST = "10.0.0.1"  # Single host in 10.0.0.0/8
 LINK_LOCAL_DNS = "169.254.0.1"  # Link-local DNS forwarder (pasta-style)
-BRIDGE_CONTAINER_IP = "10.91.0.5"  # Container IP on the bridge network (hardened mode)
 
 # --8<-- [start:outbound-targets]
 # ── Allowed target: Cloudflare (anycast 1.1.1.1 + 1.0.0.1) ──

@@ -5,61 +5,15 @@
 
 import unittest
 
-from terok_shield.config import BRIDGE_GATEWAY, BRIDGE_SUBNET
 from terok_shield.nft import (
     RFC1918,
     add_elements,
-    bridge_ruleset,
-    create_set,
-    forward_rule,
     hook_ruleset,
     safe_ip,
-    safe_name,
     verify_ruleset,
 )
 
-from ..testnet import BRIDGE_CONTAINER_IP, LINK_LOCAL_DNS, TEST_IP1, TEST_IP2, TEST_NET1
-
-
-class TestSafeName(unittest.TestCase):
-    """Tests for safe_name validator."""
-
-    def test_valid_alphanumeric(self) -> None:
-        """Accept plain alphanumeric names."""
-        self.assertEqual(safe_name("mycontainer"), "mycontainer")
-
-    def test_hyphen_replaced(self) -> None:
-        """Replace hyphens with underscores."""
-        self.assertEqual(safe_name("my-container"), "my_container")
-
-    def test_underscore_preserved(self) -> None:
-        """Preserve underscores as-is."""
-        self.assertEqual(safe_name("my_container"), "my_container")
-
-    def test_rejects_special_chars(self) -> None:
-        """Reject names with shell-special characters."""
-        with self.assertRaises(ValueError):
-            safe_name("my;container")
-
-    def test_rejects_spaces(self) -> None:
-        """Reject names with spaces."""
-        with self.assertRaises(ValueError):
-            safe_name("my container")
-
-    def test_rejects_empty(self) -> None:
-        """Reject empty string."""
-        with self.assertRaises(ValueError):
-            safe_name("")
-
-    def test_rejects_shell_injection(self) -> None:
-        """Reject command substitution attempts."""
-        with self.assertRaises(ValueError):
-            safe_name("$(whoami)")
-
-    def test_rejects_braces(self) -> None:
-        """Reject brace expansion attempts."""
-        with self.assertRaises(ValueError):
-            safe_name("test{evil}")
+from ..testnet import LINK_LOCAL_DNS, TEST_IP1, TEST_IP2, TEST_NET1
 
 
 class TestSafeIp(unittest.TestCase):
@@ -184,78 +138,6 @@ class TestHookRuleset(unittest.TestCase):
             hook_ruleset(gate_port=True)
 
 
-class TestBridgeRuleset(unittest.TestCase):
-    """Tests for bridge mode ruleset generation."""
-
-    def test_contains_policy_drop(self) -> None:
-        """Default policy must be drop."""
-        rs = bridge_ruleset()
-        self.assertIn("policy drop", rs)
-
-    def test_ipv6_dropped(self) -> None:
-        """IPv6 traffic must be dropped before any accept rules."""
-        rs = bridge_ruleset()
-        ipv6_pos = rs.index("meta nfproto ipv6 drop")
-        established_pos = rs.index("ct state established,related accept")
-        self.assertLess(ipv6_pos, established_pos, "IPv6 drop must precede established accept")
-
-    def test_forward_chain(self) -> None:
-        """Forward chain must be present."""
-        rs = bridge_ruleset()
-        self.assertIn("chain forward", rs)
-
-    def test_defaults_match_config(self) -> None:
-        """No-arg call uses BRIDGE_GATEWAY and BRIDGE_SUBNET from config."""
-        rs = bridge_ruleset()
-        self.assertIn(BRIDGE_GATEWAY, rs)
-        self.assertIn(BRIDGE_SUBNET, rs)
-
-    def test_contains_bridge_gateway(self) -> None:
-        """Bridge gateway must appear in ruleset."""
-        rs = bridge_ruleset(gw=BRIDGE_GATEWAY)
-        self.assertIn(BRIDGE_GATEWAY, rs)
-
-    def test_contains_bridge_subnet(self) -> None:
-        """Bridge subnet must appear in ruleset."""
-        rs = bridge_ruleset(subnet=BRIDGE_SUBNET)
-        self.assertIn(BRIDGE_SUBNET, rs)
-
-    def test_all_rfc1918_present(self) -> None:
-        """All RFC1918 ranges must be blocked."""
-        rs = bridge_ruleset()
-        for net in RFC1918:
-            self.assertIn(net, rs)
-
-    def test_allow_before_rfc1918(self) -> None:
-        """Allow set must appear before RFC1918 reject rules."""
-        rs = bridge_ruleset()
-        allow_pos = rs.index("@global_allow_v4")
-        rfc_pos = rs.index(RFC1918[0])
-        self.assertLess(allow_pos, rfc_pos, "Allow set must precede RFC1918 reject")
-
-    def test_gate_port_present(self) -> None:
-        """Gate server port must appear in ruleset."""
-        rs = bridge_ruleset(gate_port=9418)
-        self.assertIn("tcp dport 9418", rs)
-
-    def test_rejects_invalid_gw(self) -> None:
-        """Reject invalid gateway address."""
-        with self.assertRaises(ValueError):
-            bridge_ruleset(gw="not-an-ip")
-
-    def test_rejects_invalid_gate_port(self) -> None:
-        """Reject out-of-range port in bridge mode."""
-        with self.assertRaises(ValueError):
-            bridge_ruleset(gate_port=0)
-
-    def test_icmp_after_rfc1918(self) -> None:
-        """ICMP accept must appear after RFC1918 blocks."""
-        rs = bridge_ruleset()
-        rfc_pos = rs.index(RFC1918[0])
-        icmp_pos = rs.index("ip protocol icmp accept")
-        self.assertGreater(icmp_pos, rfc_pos, "ICMP accept must not bypass RFC1918 blocks")
-
-
 class TestAddElements(unittest.TestCase):
     """Tests for add_elements."""
 
@@ -281,31 +163,6 @@ class TestAddElements(unittest.TestCase):
         """Return empty string when all IPs are invalid."""
         result = add_elements("allow_v4", ["bad", "worse"])
         self.assertEqual(result, "")
-
-
-class TestCreateSet(unittest.TestCase):
-    """Tests for create_set."""
-
-    def test_basic(self) -> None:
-        """Generate set creation command."""
-        result = create_set("mycontainer")
-        self.assertIn("mycontainer_allow_v4", result)
-
-    def test_hyphen_normalized(self) -> None:
-        """Normalize hyphens in set names."""
-        result = create_set("my-container")
-        self.assertIn("my_container_allow_v4", result)
-
-
-class TestForwardRule(unittest.TestCase):
-    """Tests for forward_rule."""
-
-    def test_basic(self) -> None:
-        """Generate forward rule with container name and IP."""
-        result = forward_rule("mycontainer", BRIDGE_CONTAINER_IP)
-        self.assertIn(BRIDGE_CONTAINER_IP, result)
-        self.assertIn("mycontainer_allow_v4", result)
-        self.assertIn("terok_shield:mycontainer", result)
 
 
 class TestVerifyRuleset(unittest.TestCase):
