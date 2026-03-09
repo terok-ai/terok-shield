@@ -4,13 +4,15 @@ nftables-based egress firewalling for rootless Podman containers.
 
 ## What it does
 
-terok-shield enforces **default-deny outbound** network filtering on Podman containers using nftables. Containers can only reach explicitly allowed destinations — everything else is rejected with an ICMP error.
+terok-shield enforces **default-deny outbound** network filtering on Podman
+containers using nftables. Containers can only reach explicitly allowed
+destinations — everything else is rejected with an ICMP error.
 
 ### Key properties
 
 - **Default-deny egress** — containers start with no outbound access
 - **DNS-based allowlisting** — allowed destinations specified as domain names, resolved and cached automatically
-- **RFC1918 blocking** — private networks and link-local addresses rejected by default (with opt-in whitelisting for local infrastructure)
+- **RFC1918 awareness** — allowlisting private network or link-local addresses generates a notice in the audit log
 - **IPv6 dropped** — all IPv6 traffic unconditionally dropped (IPv4-only allow sets)
 - **Fail-closed** — if the firewall hook fails, the container is torn down
 - **Audit logging** — JSON-lines lifecycle logs + kernel-level per-packet nftables logs
@@ -23,50 +25,62 @@ terok-shield enforces **default-deny outbound** network filtering on Podman cont
 | **Standard** | pasta/slirp (rootless default) | Per-container netns via OCI hook | `nft` binary |
 | **Hardened** | Named bridge (`ctr-egress`) | rootless-netns (shared) | `nft` + `dnsmasq` + bridge network |
 
+See [Firewall Modes](guide/modes.md) for details on when to use each.
+
 ## Quick start
+
+### 1. Install and set up
 
 ```bash
 pip install terok-shield
 
-terok-shield setup        # install OCI hook (standard) or verify bridge (hardened)
-terok-shield status       # verify mode, profiles, audit config
-terok-shield resolve      # resolve DNS allowlists and cache IPs
+terok-shield setup        # install OCI hook
+terok-shield status       # verify
 ```
 
-### CLI commands
+No changes to your Dockerfiles or container images are needed — the firewall
+is applied externally at container creation time.
 
-| Command | Description |
-|---------|-------------|
-| `setup` | Install OCI hook or verify bridge network |
-| `status` | Show mode, active profiles, log file locations |
-| `resolve` | Resolve DNS profiles and cache results |
-| `allow <container> <target>` | Live-allow a domain or IP for a running container |
-| `deny <container> <target>` | Live-deny a domain or IP (best-effort) |
-| `rules <container>` | Show current nft ruleset for a container |
-| `logs [container]` | Tail audit logs (all or per-container) |
+### 2. Start a shielded container
 
-## Library API
+```bash
+terok-shield resolve my-container    # pre-resolve DNS → cached IPs
 
-terok-shield exposes a Python API for integration with [terok](https://github.com/terok-ai/terok):
-
-```python
-from terok_shield import (
-    ShieldConfig, ShieldMode, ExecError,
-    shield_setup, shield_status,
-    shield_pre_start, shield_post_start, shield_pre_stop,
-    shield_allow, shield_deny, shield_rules,
-    shield_resolve, list_profiles,
-    log_event, tail_log, list_log_files,
-    load_shield_config,
-)
+podman run --rm -it \
+  --name my-container \
+  --annotation terok.shield.profiles=dev-standard \
+  --hooks-dir ~/.local/state/terok-shield/hooks \
+  --cap-drop NET_ADMIN --cap-drop NET_RAW \
+  --security-opt no-new-privileges \
+  alpine:latest sh
 ```
 
-See [API Reference](reference/) for full documentation.
+The container starts with a default-deny firewall — only destinations in the
+`dev-standard` [allowlist profile](guide/profiles.md) are reachable.
 
-## Documentation
+### 3. Allow a domain at runtime
 
-- [Security & Design](SECURITY.md) — threat model, security boundary, chain evaluation order
-- [Architecture](DESIGN.md) — modes, allowlisting, audit logging, public API
-- [Contributing](DEVELOPER.md) — development setup, testing, conventions
-- [Code Quality](quality-report.md) — auto-generated quality metrics
-- [API Reference](reference/) — auto-generated from docstrings
+While the container is running, you can add or remove destinations:
+
+```bash
+terok-shield allow my-container example.com
+# Allowed example.com -> <resolved-ip> for my-container
+
+terok-shield deny my-container example.com   # revoke later
+```
+
+### 4. Inspect
+
+```bash
+terok-shield rules my-container     # show active nft rules
+terok-shield logs --container my-container -n 10   # recent audit log
+```
+
+## Next steps
+
+- [Getting Started](guide/getting-started.md) — full setup walkthrough
+- [Allowlist Profiles](guide/profiles.md) — bundled profiles and custom allowlists
+- [CLI Reference](guide/cli.md) — all commands and options
+- [Firewall Modes](guide/modes.md) — standard vs. hardened
+- [Configuration](guide/configuration.md) — config file, paths, caching
+- [Audit Logging](guide/logging.md) — log format and inspection

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`terok-shield` provides nftables-based egress firewalling for rootless Podman containers. It enforces default-deny outbound network filtering with curated domain allowlists, RFC1918/link-local reject rules, and connection audit logging.
+`terok-shield` provides nftables-based egress firewalling for rootless Podman containers. It enforces default-deny outbound network filtering with curated allowlists (domains and IPs) and connection audit logging.
 
 ## Technology Stack
 
@@ -85,7 +85,7 @@ make spdx NAME="Real Human Name" FILES="src/terok_shield/new_file.py"  # Add SPD
 `nft.py` is the auditable security boundary:
 - **Only stdlib + `nft_constants.py` imports** (`ipaddress`, `re`, `textwrap`, and the literals-only `nft_constants`)
 - All inputs validated (`safe_ip()`, `safe_name()`) before string interpolation
-- Allow-set evaluates before RFC1918 reject rules (operators can whitelist specific RFC1918 addresses)
+- Allowlisting RFC1918 addresses or large CIDRs generates a notice in the audit log
 - Enforced by AST import isolation test + bandit SAST
 
 ## Module Boundaries (tach)
