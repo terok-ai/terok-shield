@@ -202,7 +202,7 @@ if __name__ == "__main__":
     docs_dir = ROOT / "docs"
     if docs_dir.is_dir():
         out_path = docs_dir / "TEST_MAP.md"
-        out_path.write_text(output)
+        out_path.write_text(output, encoding="utf-8")
         print(f"Wrote {out_path}")
     else:
         print(output)
