@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from terok_shield.hook import apply_hook, hook_main
 from terok_shield.nft import verify_ruleset
+from terok_shield.oci_hook import apply_hook, hook_main
 from tests.testnet import (
     ALLOWED_TARGET_HTTP,
     ALLOWED_TARGET_IPS,

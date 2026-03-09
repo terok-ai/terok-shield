@@ -27,6 +27,7 @@ TEST_IP4 = "203.0.113.1"
 
 # CIDR form for tests that need network notation
 TEST_NET1 = "192.0.2.0/24"
+BROAD_CIDR_8 = "203.0.0.0/8"  # Broad CIDR (prefix <= 16) for classification tests
 
 # ── RFC 1918 / link-local addresses (used to test blocking rules) ──
 

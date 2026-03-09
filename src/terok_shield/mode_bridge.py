@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""Hardened mode: named bridge + rootless-netns.
+"""Bridge mode: named bridge + rootless-netns.
 
 Uses a dedicated bridge network (``ctr-egress``) and applies nftables
 rules in podman's rootless-netns.  All container traffic traverses the
@@ -23,9 +23,9 @@ from .config import (
 from .dns import resolve_and_cache
 from .nft import (
     add_elements,
+    bridge_ruleset,
     create_set,
     forward_rule,
-    hardened_ruleset,
     safe_ip,
     safe_name,
 )
@@ -73,7 +73,7 @@ def _ensure_netns(gate_port: int) -> None:
     Raises:
         RuntimeError: If the table cannot be loaded.
     """
-    expected = hardened_ruleset(BRIDGE_GATEWAY, BRIDGE_SUBNET, gate_port)
+    expected = bridge_ruleset(BRIDGE_GATEWAY, BRIDGE_SUBNET, gate_port)
 
     out = nft_via_rootless_netns(
         "list",
@@ -111,7 +111,7 @@ def pre_start(
     container: str,
     profiles: list[str],
 ) -> list[str]:
-    """Prepare for container start in hardened mode.
+    """Prepare for container start in bridge mode.
 
     Ensures the rootless-netns table is loaded, resolves DNS profiles,
     and returns podman CLI arguments.
@@ -196,7 +196,7 @@ def post_start(
 def pre_stop(container: str) -> None:
     """Remove per-container forward rules and allow set.
 
-    Call before ``podman stop`` to clean up hardened-mode nft state.
+    Call before ``podman stop`` to clean up bridge-mode nft state.
 
     Args:
         container: Container name.

@@ -21,11 +21,11 @@ class TestBuildParser(unittest.TestCase):
             ns = parser.parse_args([cmd] if cmd in ("setup", "status", "logs") else [cmd, "ctr"])
             self.assertEqual(ns.command, cmd)
 
-    def test_setup_hardened_flag(self):
-        """Setup subcommand accepts --hardened."""
+    def test_setup_bridge_flag(self):
+        """Setup subcommand accepts --bridge."""
         parser = _build_parser()
-        ns = parser.parse_args(["setup", "--hardened"])
-        self.assertTrue(ns.hardened)
+        ns = parser.parse_args(["setup", "--bridge"])
+        self.assertTrue(ns.bridge)
 
     def test_resolve_requires_container(self):
         """Resolve subcommand requires container arg."""
@@ -86,26 +86,26 @@ class TestMainDispatch(unittest.TestCase):
     """Test CLI subcommand dispatch."""
 
     @mock.patch("terok_shield.cli.shield_setup")
-    def test_setup_standard(self, mock_setup):
-        """CLI setup calls shield_setup with standard config."""
+    def test_setup_hook(self, mock_setup):
+        """CLI setup calls shield_setup with hook config."""
         main(["setup"])
         mock_setup.assert_called_once()
         call_kwargs = mock_setup.call_args[1]
-        self.assertEqual(call_kwargs["config"].mode.value, "standard")
+        self.assertEqual(call_kwargs["config"].mode.value, "hook")
 
     @mock.patch("terok_shield.cli.shield_setup")
-    def test_setup_hardened(self, mock_setup):
-        """CLI setup --hardened calls shield_setup with hardened config."""
-        main(["setup", "--hardened"])
+    def test_setup_bridge(self, mock_setup):
+        """CLI setup --bridge calls shield_setup with bridge config."""
+        main(["setup", "--bridge"])
         mock_setup.assert_called_once()
         call_kwargs = mock_setup.call_args[1]
-        self.assertEqual(call_kwargs["config"].mode.value, "hardened")
+        self.assertEqual(call_kwargs["config"].mode.value, "bridge")
 
     @mock.patch("terok_shield.cli.shield_status")
     def test_status(self, mock_status):
         """CLI status calls shield_status."""
         mock_status.return_value = {
-            "mode": "standard",
+            "mode": "hook",
             "audit_enabled": True,
             "profiles": ["dev-standard"],
             "log_files": [],

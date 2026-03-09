@@ -4,9 +4,9 @@ terok-shield supports two operating modes. Both enforce the same default-deny
 policy — they differ in where the nftables rules are applied and how traffic
 flows.
 
-## Standard mode
+## Hook mode
 
-**Default.** Uses an OCI hook to apply nftables rules inside each container's
+Self-contained. Uses an OCI hook to apply nftables rules inside each container's
 own network namespace.
 
 ```text
@@ -65,11 +65,11 @@ podman run \
   my-image
 ```
 
-## Hardened mode
+## Bridge mode
 
 Uses a dedicated bridge network (`ctr-egress`) with nftables rules applied in
 podman's rootless-netns. All container traffic traverses the bridge and is
-filtered centrally.
+filtered centrally. Requires infrastructure (`ctr-egress` bridge + `dnsmasq`).
 
 ```text
 ┌─────────────────────────────────────────────────┐
@@ -112,7 +112,7 @@ IPv6 drop → established → DNS → gate → allow_v4 → RFC1918 reject → I
 
 - Multiple containers that share a controlled network
 - When you want centralized firewall management
-- Higher security — rules live outside the container's namespace entirely
+- Rules live outside the container's namespace entirely
 
 ### Prerequisites
 
@@ -127,12 +127,12 @@ podman network create --subnet 10.91.0.0/24 --gateway 10.91.0.1 ctr-egress
 ### Setup
 
 ```bash
-terok-shield setup --hardened
+terok-shield setup --bridge
 ```
 
 ### Running containers (via Python API)
 
-Hardened mode is typically used via the Python API rather than the CLI, because
+Bridge mode is typically used via the Python API rather than the CLI, because
 it requires lifecycle hooks around `podman run`:
 
 ```python
@@ -153,12 +153,12 @@ shield_pre_stop("my-container")
 
 ## Comparison
 
-| | Standard | Hardened |
-|--|----------|----------|
+| | Hook | Bridge |
+|--|------|--------|
 | **Network** | pasta/slirp (default) | Named bridge (`ctr-egress`) |
 | **Firewall location** | Container's netns | rootless-netns (shared) |
 | **Isolation** | Per-container | Centralized |
 | **Requirements** | `nft` | `nft` + `dnsmasq` + bridge |
-| **Setup** | `terok-shield setup` | Bridge creation + `terok-shield setup --hardened` |
+| **Setup** | `terok-shield setup` | Bridge creation + `terok-shield setup --bridge` |
 | **Container start** | Podman annotation + hooks-dir | Python API lifecycle hooks |
-| **Best for** | Simple deployments | Multi-container, higher security |
+| **Best for** | Simple deployments | Multi-container environments |

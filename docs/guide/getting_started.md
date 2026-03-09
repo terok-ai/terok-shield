@@ -9,7 +9,7 @@ and running your first shielded container.
 - **Podman** (rootless mode)
 - **Python 3.12+**
 - **`dig`** (from `dnsutils` or `bind-utils`) for DNS resolution
-- **`dnsmasq`** (optional, only for [hardened mode](modes.md#hardened-mode))
+- **`dnsmasq`** (optional, only for [bridge mode](modes.md#bridge-mode))
 
 ## Install
 
@@ -29,7 +29,7 @@ terok-shield --version
 terok-shield setup
 ```
 
-This creates an [OCI hook](modes.md#standard-mode) that podman will fire
+This creates an [OCI hook](modes.md#hook-mode) that podman will fire
 whenever an annotated container starts. The hook applies nftables rules inside
 the container's network namespace before the workload begins.
 
@@ -43,7 +43,7 @@ terok-shield status
 ```
 
 ```text
-Mode:     standard
+Mode:     hook
 Audit:    enabled
 Profiles: base, dev-node, dev-python, dev-standard, nvidia-hpc
 ```
@@ -139,5 +139,5 @@ terok-shield logs --container my-container -n 10
 ## Next steps
 
 - [Allowlist Profiles](profiles.md) — customize what your containers can reach
-- [Firewall Modes](modes.md) — understand standard vs. hardened mode
+- [Firewall Modes](modes.md) — understand hook vs. bridge mode
 - [CLI Reference](cli.md) — full command reference

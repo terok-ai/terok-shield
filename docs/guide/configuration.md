@@ -8,7 +8,7 @@ Optional. Located at `~/.config/terok-shield/config.yml`
 (or `$XDG_CONFIG_HOME/terok-shield/config.yml`).
 
 ```yaml
-mode: auto              # auto, standard, or hardened
+mode: auto              # auto, hook, or bridge
 default_profiles:
   - dev-standard
 gate_port: 9418
@@ -31,8 +31,8 @@ If the config file is missing or unparseable, defaults are used.
 
 When `mode: auto` (the default):
 
-1. Check for hardened mode prerequisites (bridge network + dnsmasq) → use hardened
-2. Check for `nft` binary → use standard
+1. Check for bridge mode prerequisites (bridge network + dnsmasq) → use bridge
+2. Check for `nft` binary → use hook
 3. Neither available → error
 
 ## Directories

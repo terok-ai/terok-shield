@@ -5,7 +5,7 @@
 
 import pytest
 
-from terok_shield.nft import standard_ruleset
+from terok_shield.nft import hook_ruleset
 from terok_shield.nft_constants import RFC1918
 from tests.testnet import (
     ALLOWED_TARGET_HTTP,
@@ -30,7 +30,7 @@ class TestFirewallBlocking:
 
     def test_http_blocked_after_ruleset(self, container: str, container_pid: str) -> None:
         """Outbound HTTP to an external IP is rejected after applying the ruleset."""
-        r = nsenter_nft(container_pid, stdin=standard_ruleset())
+        r = nsenter_nft(container_pid, stdin=hook_ruleset())
         assert r.returncode == 0, f"Ruleset apply failed: {r.stderr}"
 
         post = _wget(container, ALLOWED_TARGET_HTTP, timeout=10)
@@ -38,7 +38,7 @@ class TestFirewallBlocking:
 
     def test_https_blocked_after_ruleset(self, container: str, container_pid: str) -> None:
         """Outbound HTTPS is rejected after applying the ruleset."""
-        r = nsenter_nft(container_pid, stdin=standard_ruleset())
+        r = nsenter_nft(container_pid, stdin=hook_ruleset())
         assert r.returncode == 0, f"Ruleset apply failed: {r.stderr}"
 
         post = _wget(container, ALLOWED_TARGET_HTTPS, timeout=10)
@@ -51,7 +51,7 @@ class TestFirewallBlocking:
         pre_ping = _exec(container, "ping", "-6", "-c1", "-W2", IPV6_CLOUDFLARE, timeout=5)
         ipv6_available = pre_ping.returncode == 0
 
-        nsenter_nft(container_pid, stdin=standard_ruleset())
+        nsenter_nft(container_pid, stdin=hook_ruleset())
 
         # Structural check: IPv6 drop is present and before first accept rule
         listed = nsenter_nft(container_pid, "list", "ruleset")
@@ -90,7 +90,7 @@ class TestFirewallBlocking:
         """
         import time
 
-        r = nsenter_nft(container_pid, stdin=standard_ruleset())
+        r = nsenter_nft(container_pid, stdin=hook_ruleset())
         assert r.returncode == 0, f"Ruleset apply failed: {r.stderr}"
 
         wget_timeout = 10
@@ -108,7 +108,7 @@ class TestFirewallBlocking:
         self, container: str, container_pid: str
     ) -> None:
         """RFC1918 addresses are rejected when not in the allow set."""
-        nsenter_nft(container_pid, stdin=standard_ruleset())
+        nsenter_nft(container_pid, stdin=hook_ruleset())
 
         # Structural: all RFC1918 reject rules present
         listed = nsenter_nft(container_pid, "list", "ruleset")

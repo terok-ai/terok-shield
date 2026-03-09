@@ -12,7 +12,7 @@ import pytest
 _NONEXISTENT_PID = "4000000"  # Well above typical PID range
 
 from terok_shield.audit import list_log_files, log_event, tail_log
-from terok_shield.hook import apply_hook
+from terok_shield.oci_hook import apply_hook
 from tests.testnet import ALLOWED_TARGET_IPS, TEST_IP1, TEST_IP2
 
 from ..conftest import nft_missing, podman_missing

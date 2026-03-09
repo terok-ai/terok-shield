@@ -10,7 +10,7 @@ import unittest
 
 import pytest
 
-from terok_shield.nft import standard_ruleset
+from terok_shield.nft import hook_ruleset
 from terok_shield.resources.shield_probe import probe
 from tests.testnet import ALLOWED_TARGET_IPS, BLOCKED_TARGET_IP
 
@@ -71,14 +71,14 @@ class TestShieldProbe:
 
     def test_admin_prohibited_detected(self, probe_container: str) -> None:
         """Blocked traffic reports ICMP type 3, code 13 (admin-prohibited)."""
-        # Apply the standard-mode firewall.
+        # Apply the hook-mode firewall.
         pid = subprocess.run(
             ["podman", "inspect", "--format", "{{.State.Pid}}", probe_container],
             capture_output=True,
             text=True,
             timeout=10,
         ).stdout.strip()
-        r = nsenter_nft(pid, stdin=standard_ruleset())
+        r = nsenter_nft(pid, stdin=hook_ruleset())
         assert r.returncode == 0, f"Ruleset apply failed: {r.stderr}"
 
         result = self._run_probe(probe_container, BLOCKED_TARGET_IP)

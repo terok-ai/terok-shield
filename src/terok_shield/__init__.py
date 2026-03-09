@@ -23,33 +23,33 @@ def _load_config(config: ShieldConfig | None) -> ShieldConfig:
 
 def _mode_module(mode: ShieldMode):  # noqa: ANN202 – returns module
     """Return the backend module for the given mode."""
-    if mode == ShieldMode.HARDENED:
-        from . import hardened
+    if mode == ShieldMode.BRIDGE:
+        from . import mode_bridge
 
-        return hardened
+        return mode_bridge
 
-    from . import standard
+    from . import mode_hook
 
-    return standard
+    return mode_hook
 
 
 def shield_setup(*, config: ShieldConfig | None = None) -> None:
     """Run shield setup (install hook or verify bridge).
 
-    Dispatches to standard or hardened setup based on ``config.mode``.
+    Dispatches to hook or bridge setup based on ``config.mode``.
 
     Args:
         config: Shield configuration (loads default if None).
     """
     cfg = _load_config(config)
-    if cfg.mode == ShieldMode.HARDENED:
-        from . import hardened as hw
+    if cfg.mode == ShieldMode.BRIDGE:
+        from . import mode_bridge
 
-        hw.setup(cfg)
+        mode_bridge.setup(cfg)
     else:
-        from . import standard as sw
+        from . import mode_hook
 
-        sw.setup(cfg)
+        mode_hook.setup(cfg)
 
 
 def shield_status(*, config: ShieldConfig | None = None) -> dict:
@@ -92,14 +92,14 @@ def shield_pre_start(
     if profiles is None:
         profiles = list(cfg.default_profiles)
 
-    if cfg.mode == ShieldMode.HARDENED:
-        from . import hardened
+    if cfg.mode == ShieldMode.BRIDGE:
+        from . import mode_bridge
 
-        result = hardened.pre_start(cfg, container, profiles)
+        result = mode_bridge.pre_start(cfg, container, profiles)
     else:
-        from . import standard
+        from . import mode_hook
 
-        result = standard.pre_start(cfg, container, profiles)
+        result = mode_hook.pre_start(cfg, container, profiles)
 
     if cfg.audit_enabled:
         log_event(container, "setup", detail=f"profiles={','.join(profiles)}")
@@ -112,7 +112,7 @@ def shield_post_start(
     *,
     config: ShieldConfig | None = None,
 ) -> None:
-    """Post-start hook.  Only needed for hardened mode.
+    """Post-start hook.  Only needed for bridge mode.
 
     Args:
         container: Container name.
@@ -120,17 +120,17 @@ def shield_post_start(
         config: Shield configuration (loads default if None).
     """
     cfg = _load_config(config)
-    if cfg.mode != ShieldMode.HARDENED:
+    if cfg.mode != ShieldMode.BRIDGE:
         return
 
     if profiles is None:
         profiles = list(cfg.default_profiles)
 
-    from . import hardened
+    from . import mode_bridge
 
-    hardened.post_start(cfg, container, profiles)
+    mode_bridge.post_start(cfg, container, profiles)
     if cfg.audit_enabled:
-        log_event(container, "setup", detail="hardened post_start complete")
+        log_event(container, "setup", detail="bridge post_start complete")
 
 
 def shield_pre_stop(
@@ -138,19 +138,19 @@ def shield_pre_stop(
     *,
     config: ShieldConfig | None = None,
 ) -> None:
-    """Pre-stop hook.  Only needed for hardened mode.
+    """Pre-stop hook.  Only needed for bridge mode.
 
     Args:
         container: Container name.
         config: Shield configuration (loads default if None).
     """
     cfg = _load_config(config)
-    if cfg.mode != ShieldMode.HARDENED:
+    if cfg.mode != ShieldMode.BRIDGE:
         return
 
-    from . import hardened
+    from . import mode_bridge
 
-    hardened.pre_stop(container)
+    mode_bridge.pre_stop(container)
     if cfg.audit_enabled:
         log_event(container, "teardown")
 

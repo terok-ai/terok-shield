@@ -22,8 +22,8 @@ destinations — everything else is rejected with an ICMP error.
 
 | Mode | Network | Firewall scope | Requirements |
 |------|---------|----------------|--------------|
-| **Standard** | pasta/slirp (rootless default) | Per-container netns via OCI hook | `nft` binary |
-| **Hardened** | Named bridge (`ctr-egress`) | rootless-netns (shared) | `nft` + `dnsmasq` + bridge network |
+| **Hook** | pasta/slirp (rootless default) | Per-container netns via OCI hook | `nft` binary |
+| **Bridge** | Named bridge (`ctr-egress`) | rootless-netns (shared) | `nft` + `dnsmasq` + bridge network |
 
 See [Firewall Modes](guide/modes.md) for details on when to use each.
 
@@ -81,6 +81,6 @@ terok-shield logs --container my-container -n 10   # recent audit log
 - [Getting Started](guide/getting_started.md) — full setup walkthrough
 - [Allowlist Profiles](guide/profiles.md) — bundled profiles and custom allowlists
 - [CLI Reference](guide/cli.md) — all commands and options
-- [Firewall Modes](guide/modes.md) — standard vs. hardened
+- [Firewall Modes](guide/modes.md) — hook vs. bridge
 - [Configuration](guide/configuration.md) — config file, paths, caching
 - [Audit Logging](guide/logging.md) — log format and inspection

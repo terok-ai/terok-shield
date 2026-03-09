@@ -72,7 +72,7 @@ depends_on = [
 
 # OCI hook entry point — depends on audit, config, nft, run
 [[modules]]
-path = "terok_shield.hook"
+path = "terok_shield.oci_hook"
 depends_on = [
     "terok_shield.audit",
     "terok_shield.config",
@@ -80,9 +80,9 @@ depends_on = [
     "terok_shield.run",
 ]
 
-# Standard mode — OCI hooks, per-container netns
+# Hook mode — OCI hooks, per-container netns
 [[modules]]
-path = "terok_shield.standard"
+path = "terok_shield.mode_hook"
 depends_on = [
     "terok_shield.config",
     "terok_shield.dns",
@@ -91,9 +91,9 @@ depends_on = [
     "terok_shield.run",
 ]
 
-# Hardened mode — bridge network, rootless-netns
+# Bridge mode — bridge network, rootless-netns
 [[modules]]
-path = "terok_shield.hardened"
+path = "terok_shield.mode_bridge"
 depends_on = [
     "terok_shield.config",
     "terok_shield.dns",
@@ -118,9 +118,9 @@ depends_on = [
     "terok_shield.audit",
     "terok_shield.config",
     "terok_shield.dns",
-    "terok_shield.hardened",
+    "terok_shield.mode_bridge",
+    "terok_shield.mode_hook",
     "terok_shield.profiles",
     "terok_shield.run",
-    "terok_shield.standard",
     "terok_shield.util",
 ]

@@ -7,14 +7,14 @@ import subprocess
 
 import pytest
 
-from terok_shield.nft import standard_ruleset, verify_ruleset
+from terok_shield.nft import hook_ruleset, verify_ruleset
 
 from ..conftest import nsenter_nft
 
 
 def _apply(pid: str) -> None:
-    """Apply standard ruleset and assert success."""
-    result = nsenter_nft(pid, stdin=standard_ruleset())
+    """Apply hook ruleset and assert success."""
+    result = nsenter_nft(pid, stdin=hook_ruleset())
     assert result.returncode == 0, f"nft apply failed: {result.stderr}"
 
 
@@ -27,17 +27,17 @@ def _list(pid: str) -> subprocess.CompletedProcess:
 
 @pytest.mark.needs_podman
 @pytest.mark.usefixtures("nft_in_netns")
-class TestStandardApply:
-    """Apply a standard-mode ruleset to a real container netns and verify."""
+class TestHookApply:
+    """Apply a hook-mode ruleset to a real container netns and verify."""
 
     def test_apply_and_list(self, container_pid: str) -> None:
-        """Apply standard ruleset via nsenter and list it back."""
+        """Apply hook ruleset via nsenter and list it back."""
         _apply(container_pid)
         listed = _list(container_pid)
         assert "terok_shield" in listed.stdout
 
     def test_verify_applied_ruleset(self, container_pid: str) -> None:
-        """Apply standard ruleset and run verify_ruleset against the output."""
+        """Apply hook ruleset and run verify_ruleset against the output."""
         _apply(container_pid)
         listed = _list(container_pid)
         errors = verify_ruleset(listed.stdout)

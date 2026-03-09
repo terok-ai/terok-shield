@@ -37,10 +37,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_setup = sub.add_parser("setup", help="Install firewall hook or verify bridge")
     p_setup.add_argument(
-        "--hardened",
+        "--bridge",
         action="store_true",
         default=False,
-        help="Use hardened mode (bridge network + rootless-netns)",
+        help="Use bridge mode (bridge network + rootless-netns)",
     )
 
     sub.add_parser("status", help="Show shield status")
@@ -92,7 +92,7 @@ def _dispatch(args: argparse.Namespace) -> None:
     """Dispatch to the appropriate subcommand handler."""
     cmd = args.command
     if cmd == "setup":
-        _cmd_setup(hardened=args.hardened)
+        _cmd_setup(bridge=args.bridge)
     elif cmd == "status":
         _cmd_status()
     elif cmd == "resolve":
@@ -107,9 +107,9 @@ def _dispatch(args: argparse.Namespace) -> None:
         _cmd_logs(container=args.container, n=args.n)
 
 
-def _cmd_setup(hardened: bool) -> None:
+def _cmd_setup(bridge: bool) -> None:
     """Run shield setup."""
-    mode = ShieldMode.HARDENED if hardened else ShieldMode.STANDARD
+    mode = ShieldMode.BRIDGE if bridge else ShieldMode.HOOK
     shield_setup(config=ShieldConfig(mode=mode))
     print(f"Shield setup complete ({mode.value} mode).")
 

@@ -4,19 +4,19 @@ All commands are invoked as `terok-shield <command> [options]`.
 
 ## setup
 
-Install the firewall hook (standard mode) or verify bridge prerequisites
-(hardened mode).
+Install the firewall hook (hook mode) or verify bridge prerequisites
+(bridge mode).
 
 ```bash
-terok-shield setup              # standard mode — installs OCI hook
-terok-shield setup --hardened   # hardened mode — verifies bridge network
+terok-shield setup              # hook mode — installs OCI hook
+terok-shield setup --bridge     # bridge mode — verifies bridge network
 ```
 
 **What it does:**
 
 - Creates shield directories (`hooks/`, `logs/`, `dns/`, `resolved/`, `profiles/`)
-- **Standard**: generates the OCI hook entrypoint script and JSON descriptor
-- **Hardened**: verifies that the `ctr-egress` bridge network exists
+- **Hook**: generates the OCI hook entrypoint script and JSON descriptor
+- **Bridge**: verifies that the `ctr-egress` bridge network exists
 
 Run this once after installation.
 
@@ -29,7 +29,7 @@ terok-shield status
 ```
 
 ```text
-Mode:     standard
+Mode:     hook
 Audit:    enabled
 Profiles: base, dev-node, dev-python, dev-standard, nvidia-hpc
 Logs:     2 container(s)

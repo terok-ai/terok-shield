@@ -43,7 +43,7 @@ def has(name: str) -> bool:
 
 
 def nft(*args: str, stdin: str | None = None, check: bool = True) -> str:
-    """Run nft command directly (standard mode, inside container netns)."""
+    """Run nft command directly (hook mode, inside container netns)."""
     if stdin is not None:
         return run(["nft", *args, "-f", "-"], stdin=stdin, check=check)
     return run(["nft", *args], check=check)
@@ -66,7 +66,7 @@ def nft_via_nsenter(
 
 
 def nft_via_rootless_netns(*args: str, stdin: str | None = None, check: bool = True) -> str:
-    """Run nft inside podman's rootless-netns (hardened mode)."""
+    """Run nft inside podman's rootless-netns (bridge mode)."""
     cmd = ["podman", "unshare", "--rootless-netns", "nft"]
     if stdin is not None:
         return run([*cmd, *args, "-f", "-"], stdin=stdin, check=check)

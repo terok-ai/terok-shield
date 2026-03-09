@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for standard mode lifecycle."""
+"""Tests for hook mode lifecycle."""
 
 import json
 import sys
@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest import mock
 
 from terok_shield.config import ANNOTATION_KEY, ShieldConfig, ShieldMode
-from terok_shield.standard import (
+from terok_shield.mode_hook import (
     _detect_rootless_network_mode,
     _generate_entrypoint,
     _generate_hook_json,
@@ -27,37 +27,37 @@ from ..testnet import TEST_IP1
 class TestDetectRootlessNetworkMode(unittest.TestCase):
     """Test rootless network mode detection."""
 
-    @mock.patch("terok_shield.standard.run_cmd")
+    @mock.patch("terok_shield.mode_hook.run_cmd")
     def test_pasta_from_podman_info(self, mock_run):
         """Detect pasta mode from podman info output."""
         mock_run.return_value = json.dumps({"host": {"rootlessNetworkCmd": "pasta"}})
         self.assertEqual(_detect_rootless_network_mode(), "pasta")
 
-    @mock.patch("terok_shield.standard.run_cmd")
+    @mock.patch("terok_shield.mode_hook.run_cmd")
     def test_slirp4netns_from_podman_info(self, mock_run):
         """Detect slirp4netns mode from podman info output."""
         mock_run.return_value = json.dumps({"host": {"rootlessNetworkCmd": "slirp4netns"}})
         self.assertEqual(_detect_rootless_network_mode(), "slirp4netns")
 
-    @mock.patch("terok_shield.standard.run_cmd")
+    @mock.patch("terok_shield.mode_hook.run_cmd")
     def test_fallback_on_empty_output(self, mock_run):
         """Default to pasta when podman info returns nothing."""
         mock_run.return_value = ""
         self.assertEqual(_detect_rootless_network_mode(), "pasta")
 
-    @mock.patch("terok_shield.standard.run_cmd")
+    @mock.patch("terok_shield.mode_hook.run_cmd")
     def test_fallback_on_invalid_json(self, mock_run):
         """Default to pasta when podman info returns invalid JSON."""
         mock_run.return_value = "not json"
         self.assertEqual(_detect_rootless_network_mode(), "pasta")
 
-    @mock.patch("terok_shield.standard.run_cmd")
+    @mock.patch("terok_shield.mode_hook.run_cmd")
     def test_fallback_on_missing_field(self, mock_run):
         """Default to pasta when rootlessNetworkCmd is absent."""
         mock_run.return_value = json.dumps({"host": {}})
         self.assertEqual(_detect_rootless_network_mode(), "pasta")
 
-    @mock.patch("terok_shield.standard.run_cmd")
+    @mock.patch("terok_shield.mode_hook.run_cmd")
     def test_fallback_on_unknown_mode(self, mock_run):
         """Default to pasta for unrecognised network modes."""
         mock_run.return_value = json.dumps({"host": {"rootlessNetworkCmd": "unknown"}})
@@ -75,7 +75,7 @@ class TestGenerateEntrypoint(unittest.TestCase):
     def test_contains_module_invocation(self):
         """Entrypoint invokes the hook module."""
         ep = _generate_entrypoint()
-        self.assertIn("-m terok_shield.hook", ep)
+        self.assertIn("-m terok_shield.oci_hook", ep)
 
     def test_starts_with_shebang(self):
         """Entrypoint starts with a shebang line."""
@@ -104,7 +104,7 @@ class TestGenerateHookJson(unittest.TestCase):
 
 
 class TestSetup(unittest.TestCase):
-    """Test standard mode setup."""
+    """Test hook mode setup."""
 
     def test_creates_hook_files(self):
         """Setup creates entrypoint and hook JSON files."""
@@ -114,24 +114,24 @@ class TestSetup(unittest.TestCase):
             self._run_setup(Path(td))
 
     def _run_setup(self, tmp_dir):
-        config = ShieldConfig(mode=ShieldMode.STANDARD)
+        config = ShieldConfig(mode=ShieldMode.HOOK)
         with (
             mock.patch(
-                "terok_shield.standard.shield_hook_entrypoint",
+                "terok_shield.mode_hook.shield_hook_entrypoint",
                 return_value=tmp_dir / "terok-shield-hook",
             ),
             mock.patch(
-                "terok_shield.standard.shield_hooks_dir",
+                "terok_shield.mode_hook.shield_hooks_dir",
                 return_value=tmp_dir / "hooks",
             ),
-            mock.patch("terok_shield.standard.ensure_shield_dirs"),
+            mock.patch("terok_shield.mode_hook.ensure_shield_dirs"),
         ):
             (tmp_dir / "hooks").mkdir(parents=True, exist_ok=True)
             setup(config)
 
         ep = tmp_dir / "terok-shield-hook"
         self.assertTrue(ep.exists())
-        self.assertIn("-m terok_shield.hook", ep.read_text())
+        self.assertIn("-m terok_shield.oci_hook", ep.read_text())
 
         hook_json = tmp_dir / "hooks" / "terok-shield-hook.json"
         self.assertTrue(hook_json.exists())
@@ -140,7 +140,7 @@ class TestSetup(unittest.TestCase):
 
 
 class TestPreStart(unittest.TestCase):
-    """Test standard mode pre_start."""
+    """Test hook mode pre_start."""
 
     def setUp(self):
         """Create a temporary hooks directory with entrypoint for each test."""
@@ -155,11 +155,11 @@ class TestPreStart(unittest.TestCase):
         ep.write_text("#!/bin/sh\n")
         ep.chmod(0o755)
         self._hooks_patch = mock.patch(
-            "terok_shield.standard.shield_hooks_dir",
+            "terok_shield.mode_hook.shield_hooks_dir",
             return_value=hooks_dir,
         )
         self._ep_patch = mock.patch(
-            "terok_shield.standard.shield_hook_entrypoint",
+            "terok_shield.mode_hook.shield_hook_entrypoint",
             return_value=ep,
         )
         self._hooks_patch.start()
@@ -172,11 +172,11 @@ class TestPreStart(unittest.TestCase):
         self._tmpdir_obj.cleanup()
 
     def _config(self, gate_port=9418):
-        return ShieldConfig(mode=ShieldMode.STANDARD, gate_port=gate_port)
+        return ShieldConfig(mode=ShieldMode.HOOK, gate_port=gate_port)
 
-    @mock.patch("terok_shield.standard.resolve_and_cache")
-    @mock.patch("terok_shield.standard.compose_profiles", return_value=["github.com"])
-    @mock.patch("terok_shield.standard._detect_rootless_network_mode", return_value="pasta")
+    @mock.patch("terok_shield.mode_hook.resolve_and_cache")
+    @mock.patch("terok_shield.mode_hook.compose_profiles", return_value=["github.com"])
+    @mock.patch("terok_shield.mode_hook._detect_rootless_network_mode", return_value="pasta")
     @mock.patch("os.geteuid", return_value=1000)
     def test_pasta_args(self, _euid, _mode, _compose, _resolve):
         """Pre-start returns pasta network args for rootless mode."""
@@ -185,9 +185,9 @@ class TestPreStart(unittest.TestCase):
         pasta_idx = args.index("--network") + 1
         self.assertIn("pasta:", args[pasta_idx])
 
-    @mock.patch("terok_shield.standard.resolve_and_cache")
-    @mock.patch("terok_shield.standard.compose_profiles", return_value=["github.com"])
-    @mock.patch("terok_shield.standard._detect_rootless_network_mode", return_value="slirp4netns")
+    @mock.patch("terok_shield.mode_hook.resolve_and_cache")
+    @mock.patch("terok_shield.mode_hook.compose_profiles", return_value=["github.com"])
+    @mock.patch("terok_shield.mode_hook._detect_rootless_network_mode", return_value="slirp4netns")
     @mock.patch("os.geteuid", return_value=1000)
     def test_slirp4netns_args(self, _euid, _mode, _compose, _resolve):
         """Pre-start returns slirp4netns args when detected."""
@@ -195,8 +195,8 @@ class TestPreStart(unittest.TestCase):
         net_idx = args.index("--network") + 1
         self.assertIn("slirp4netns", args[net_idx])
 
-    @mock.patch("terok_shield.standard.resolve_and_cache")
-    @mock.patch("terok_shield.standard.compose_profiles", return_value=[])
+    @mock.patch("terok_shield.mode_hook.resolve_and_cache")
+    @mock.patch("terok_shield.mode_hook.compose_profiles", return_value=[])
     @mock.patch("os.geteuid", return_value=0)
     def test_root_no_network_args(self, _euid, _compose, _resolve):
         """Root user gets no special network args."""
@@ -205,10 +205,10 @@ class TestPreStart(unittest.TestCase):
         before_annotation = args[: args.index("--annotation")]
         self.assertNotIn("--network", before_annotation)
 
-    @mock.patch("terok_shield.standard.resolve_and_cache")
-    @mock.patch("terok_shield.standard.compose_profiles", return_value=["github.com"])
+    @mock.patch("terok_shield.mode_hook.resolve_and_cache")
+    @mock.patch("terok_shield.mode_hook.compose_profiles", return_value=["github.com"])
     @mock.patch("os.geteuid", return_value=1000)
-    @mock.patch("terok_shield.standard._detect_rootless_network_mode", return_value="pasta")
+    @mock.patch("terok_shield.mode_hook._detect_rootless_network_mode", return_value="pasta")
     def test_shield_args(self, _mode, _euid, _compose, _resolve):
         """Pre-start includes cap-drop and no-new-privileges."""
         args = pre_start(self._config(), "test", ["dev-standard"])
@@ -218,18 +218,18 @@ class TestPreStart(unittest.TestCase):
         self.assertIn("--security-opt", args)
         self.assertIn("no-new-privileges", args)
 
-    @mock.patch("terok_shield.standard.compose_profiles", return_value=[])
+    @mock.patch("terok_shield.mode_hook.compose_profiles", return_value=[])
     def test_missing_hook_raises(self, _compose):
         """Pre-start raises RuntimeError if hook not installed."""
         self._hooks_patch.stop()
         self._ep_patch.stop()
         with (
             mock.patch(
-                "terok_shield.standard.shield_hooks_dir",
+                "terok_shield.mode_hook.shield_hooks_dir",
                 return_value=Path("/nonexistent"),
             ),
             mock.patch(
-                "terok_shield.standard.shield_hook_entrypoint",
+                "terok_shield.mode_hook.shield_hook_entrypoint",
                 return_value=Path("/nonexistent/ep"),
             ),
             self.assertRaises(RuntimeError),
@@ -238,20 +238,20 @@ class TestPreStart(unittest.TestCase):
         self._hooks_patch.start()
         self._ep_patch.start()
 
-    @mock.patch("terok_shield.standard.resolve_and_cache")
-    @mock.patch("terok_shield.standard.compose_profiles", return_value=["github.com"])
+    @mock.patch("terok_shield.mode_hook.resolve_and_cache")
+    @mock.patch("terok_shield.mode_hook.compose_profiles", return_value=["github.com"])
     @mock.patch("os.geteuid", return_value=1000)
-    @mock.patch("terok_shield.standard._detect_rootless_network_mode", return_value="pasta")
+    @mock.patch("terok_shield.mode_hook._detect_rootless_network_mode", return_value="pasta")
     def test_custom_gate_port(self, _mode, _euid, _compose, _resolve):
         """Gate port from config appears in pasta network args."""
         args = pre_start(self._config(gate_port=1234), "test", ["dev-standard"])
         net_idx = args.index("--network") + 1
         self.assertIn("1234", args[net_idx])
 
-    @mock.patch("terok_shield.standard.resolve_and_cache")
-    @mock.patch("terok_shield.standard.compose_profiles", return_value=["github.com"])
+    @mock.patch("terok_shield.mode_hook.resolve_and_cache")
+    @mock.patch("terok_shield.mode_hook.compose_profiles", return_value=["github.com"])
     @mock.patch("os.geteuid", return_value=1000)
-    @mock.patch("terok_shield.standard._detect_rootless_network_mode", return_value="pasta")
+    @mock.patch("terok_shield.mode_hook._detect_rootless_network_mode", return_value="pasta")
     def test_annotation_includes_profiles(self, _mode, _euid, _compose, _resolve):
         """Annotation arg lists the profile names."""
         args = pre_start(self._config(), "test", ["dev-standard", "base"])
@@ -263,7 +263,7 @@ class TestPreStart(unittest.TestCase):
 class TestAllowDenyIp(unittest.TestCase):
     """Test live allow/deny via nsenter."""
 
-    @mock.patch("terok_shield.standard.nft_via_nsenter")
+    @mock.patch("terok_shield.mode_hook.nft_via_nsenter")
     def test_allow_ip(self, mock_nsenter):
         """allow_ip adds element to allow_v4 set."""
         allow_ip("test", TEST_IP1)
@@ -273,7 +273,7 @@ class TestAllowDenyIp(unittest.TestCase):
         self.assertIn("add", call_args)
         self.assertIn("allow_v4", call_args)
 
-    @mock.patch("terok_shield.standard.nft_via_nsenter")
+    @mock.patch("terok_shield.mode_hook.nft_via_nsenter")
     def test_deny_ip(self, mock_nsenter):
         """deny_ip removes element from allow_v4 set."""
         deny_ip("test", TEST_IP1)
@@ -295,7 +295,7 @@ class TestAllowDenyIp(unittest.TestCase):
 class TestListRules(unittest.TestCase):
     """Test list_rules."""
 
-    @mock.patch("terok_shield.standard.nft_via_nsenter", return_value="table inet terok_shield {}")
+    @mock.patch("terok_shield.mode_hook.nft_via_nsenter", return_value="table inet terok_shield {}")
     def test_returns_output(self, mock_nsenter):
         """list_rules returns nft output."""
         result = list_rules("test")

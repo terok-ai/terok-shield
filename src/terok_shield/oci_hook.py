@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""OCI hook entry point for standard-mode firewall.
+"""OCI hook entry point for hook-mode firewall.
 
 This module is invoked by podman as a ``createRuntime`` OCI hook.
 It receives the OCI state as JSON on stdin and applies nftables
@@ -18,7 +18,7 @@ import sys
 
 from .audit import log_event
 from .config import shield_resolved_dir
-from .nft import add_elements, standard_ruleset, verify_ruleset
+from .nft import add_elements, hook_ruleset, verify_ruleset
 from .run import ExecError, nft_via_nsenter
 
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -139,7 +139,7 @@ def _load_and_add_ips(container: str, pid: str) -> int:
 
 
 def apply_hook(container: str, pid: str) -> None:
-    """Apply the standard-mode firewall to a container.
+    """Apply the hook-mode firewall to a container.
 
     This is the core hook logic, separated from stdin parsing
     for testability.
@@ -151,7 +151,7 @@ def apply_hook(container: str, pid: str) -> None:
     Raises:
         RuntimeError: If ruleset application or verification fails.
     """
-    _nft_exec(container, pid, stdin=standard_ruleset())
+    _nft_exec(container, pid, stdin=hook_ruleset())
     log_event(container, "setup", detail="ruleset applied")
 
     ip_count = _load_and_add_ips(container, pid)

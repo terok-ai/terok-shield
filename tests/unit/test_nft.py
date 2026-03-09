@@ -9,12 +9,12 @@ from terok_shield.config import BRIDGE_GATEWAY, BRIDGE_SUBNET
 from terok_shield.nft import (
     RFC1918,
     add_elements,
+    bridge_ruleset,
     create_set,
     forward_rule,
-    hardened_ruleset,
+    hook_ruleset,
     safe_ip,
     safe_name,
-    standard_ruleset,
     verify_ruleset,
 )
 
@@ -98,159 +98,159 @@ class TestSafeIp(unittest.TestCase):
             safe_ip("::1")
 
 
-class TestStandardRuleset(unittest.TestCase):
-    """Tests for standard mode ruleset generation."""
+class TestHookRuleset(unittest.TestCase):
+    """Tests for hook mode ruleset generation."""
 
     def test_contains_policy_drop(self) -> None:
         """Default policy must be drop."""
-        rs = standard_ruleset()
+        rs = hook_ruleset()
         self.assertIn("policy drop", rs)
 
     def test_ipv6_dropped(self) -> None:
         """IPv6 traffic must be dropped before any accept rules."""
-        rs = standard_ruleset()
+        rs = hook_ruleset()
         ipv6_pos = rs.index("meta nfproto ipv6 drop")
         first_accept_pos = rs.index('oifname "lo" accept')
         self.assertLess(ipv6_pos, first_accept_pos, "IPv6 drop must precede first accept rule")
 
     def test_contains_loopback_accept(self) -> None:
         """Loopback traffic must be accepted."""
-        rs = standard_ruleset()
+        rs = hook_ruleset()
         self.assertIn('oifname "lo" accept', rs)
 
     def test_contains_dns_accept(self) -> None:
         """DNS traffic to the forwarder must be accepted."""
-        rs = standard_ruleset(dns=LINK_LOCAL_DNS)
+        rs = hook_ruleset(dns=LINK_LOCAL_DNS)
         self.assertIn(LINK_LOCAL_DNS, rs)
 
     def test_contains_gate_port(self) -> None:
         """Gate server port must appear in ruleset."""
-        rs = standard_ruleset(gate_port=9418)
+        rs = hook_ruleset(gate_port=9418)
         self.assertIn("tcp dport 9418", rs)
 
     def test_allow_before_rfc1918(self) -> None:
         """Allow set must appear before RFC1918 reject rules."""
-        rs = standard_ruleset()
+        rs = hook_ruleset()
         allow_pos = rs.index("@allow_v4")
         rfc_pos = rs.index(RFC1918[0])
         self.assertLess(allow_pos, rfc_pos, "Allow set must precede RFC1918 reject")
 
     def test_all_rfc1918_present(self) -> None:
         """All RFC1918 ranges must be blocked."""
-        rs = standard_ruleset()
+        rs = hook_ruleset()
         for net in RFC1918:
             self.assertIn(net, rs)
 
     def test_deny_log_present(self) -> None:
         """Deny log prefix must be present."""
-        rs = standard_ruleset()
+        rs = hook_ruleset()
         self.assertIn("TEROK_SHIELD_DENIED", rs)
 
     def test_reject_type_present(self) -> None:
         """ICMP reject type must be present."""
-        rs = standard_ruleset()
+        rs = hook_ruleset()
         self.assertIn("admin-prohibited", rs)
 
     def test_audit_allow_present(self) -> None:
         """Allow audit log prefix must be present."""
-        rs = standard_ruleset()
+        rs = hook_ruleset()
         self.assertIn("TEROK_SHIELD_ALLOWED", rs)
 
     def test_input_chain_present(self) -> None:
         """Input chain must be present."""
-        rs = standard_ruleset()
+        rs = hook_ruleset()
         self.assertIn("chain input", rs)
 
     def test_rejects_invalid_dns(self) -> None:
         """Reject invalid DNS address."""
         with self.assertRaises(ValueError):
-            standard_ruleset(dns="not-an-ip")
+            hook_ruleset(dns="not-an-ip")
 
     def test_custom_gate_port(self) -> None:
         """Custom gate port must appear in ruleset."""
-        rs = standard_ruleset(gate_port=12345)
+        rs = hook_ruleset(gate_port=12345)
         self.assertIn("tcp dport 12345", rs)
 
     def test_rejects_invalid_gate_port(self) -> None:
         """Reject out-of-range port."""
         with self.assertRaises(ValueError):
-            standard_ruleset(gate_port=0)
+            hook_ruleset(gate_port=0)
         with self.assertRaises(ValueError):
-            standard_ruleset(gate_port=99999)
+            hook_ruleset(gate_port=99999)
 
     def test_rejects_bool_gate_port(self) -> None:
         """Reject boolean port (bool is subclass of int)."""
         with self.assertRaises(ValueError):
-            standard_ruleset(gate_port=True)
+            hook_ruleset(gate_port=True)
 
 
-class TestHardenedRuleset(unittest.TestCase):
-    """Tests for hardened mode ruleset generation."""
+class TestBridgeRuleset(unittest.TestCase):
+    """Tests for bridge mode ruleset generation."""
 
     def test_contains_policy_drop(self) -> None:
         """Default policy must be drop."""
-        rs = hardened_ruleset()
+        rs = bridge_ruleset()
         self.assertIn("policy drop", rs)
 
     def test_ipv6_dropped(self) -> None:
         """IPv6 traffic must be dropped before any accept rules."""
-        rs = hardened_ruleset()
+        rs = bridge_ruleset()
         ipv6_pos = rs.index("meta nfproto ipv6 drop")
         established_pos = rs.index("ct state established,related accept")
         self.assertLess(ipv6_pos, established_pos, "IPv6 drop must precede established accept")
 
     def test_forward_chain(self) -> None:
         """Forward chain must be present."""
-        rs = hardened_ruleset()
+        rs = bridge_ruleset()
         self.assertIn("chain forward", rs)
 
     def test_defaults_match_config(self) -> None:
         """No-arg call uses BRIDGE_GATEWAY and BRIDGE_SUBNET from config."""
-        rs = hardened_ruleset()
+        rs = bridge_ruleset()
         self.assertIn(BRIDGE_GATEWAY, rs)
         self.assertIn(BRIDGE_SUBNET, rs)
 
     def test_contains_bridge_gateway(self) -> None:
         """Bridge gateway must appear in ruleset."""
-        rs = hardened_ruleset(gw=BRIDGE_GATEWAY)
+        rs = bridge_ruleset(gw=BRIDGE_GATEWAY)
         self.assertIn(BRIDGE_GATEWAY, rs)
 
     def test_contains_bridge_subnet(self) -> None:
         """Bridge subnet must appear in ruleset."""
-        rs = hardened_ruleset(subnet=BRIDGE_SUBNET)
+        rs = bridge_ruleset(subnet=BRIDGE_SUBNET)
         self.assertIn(BRIDGE_SUBNET, rs)
 
     def test_all_rfc1918_present(self) -> None:
         """All RFC1918 ranges must be blocked."""
-        rs = hardened_ruleset()
+        rs = bridge_ruleset()
         for net in RFC1918:
             self.assertIn(net, rs)
 
     def test_allow_before_rfc1918(self) -> None:
         """Allow set must appear before RFC1918 reject rules."""
-        rs = hardened_ruleset()
+        rs = bridge_ruleset()
         allow_pos = rs.index("@global_allow_v4")
         rfc_pos = rs.index(RFC1918[0])
         self.assertLess(allow_pos, rfc_pos, "Allow set must precede RFC1918 reject")
 
     def test_gate_port_present(self) -> None:
         """Gate server port must appear in ruleset."""
-        rs = hardened_ruleset(gate_port=9418)
+        rs = bridge_ruleset(gate_port=9418)
         self.assertIn("tcp dport 9418", rs)
 
     def test_rejects_invalid_gw(self) -> None:
         """Reject invalid gateway address."""
         with self.assertRaises(ValueError):
-            hardened_ruleset(gw="not-an-ip")
+            bridge_ruleset(gw="not-an-ip")
 
     def test_rejects_invalid_gate_port(self) -> None:
-        """Reject out-of-range port in hardened mode."""
+        """Reject out-of-range port in bridge mode."""
         with self.assertRaises(ValueError):
-            hardened_ruleset(gate_port=0)
+            bridge_ruleset(gate_port=0)
 
     def test_icmp_after_rfc1918(self) -> None:
         """ICMP accept must appear after RFC1918 blocks."""
-        rs = hardened_ruleset()
+        rs = bridge_ruleset()
         rfc_pos = rs.index(RFC1918[0])
         icmp_pos = rs.index("ip protocol icmp accept")
         self.assertGreater(icmp_pos, rfc_pos, "ICMP accept must not bypass RFC1918 blocks")
@@ -312,8 +312,8 @@ class TestVerifyRuleset(unittest.TestCase):
     """Tests for verify_ruleset."""
 
     def test_valid_ruleset(self) -> None:
-        """Standard ruleset passes all checks."""
-        rs = standard_ruleset()
+        """Hook ruleset passes all checks."""
+        rs = hook_ruleset()
         errors = verify_ruleset(rs)
         self.assertEqual(errors, [])
 

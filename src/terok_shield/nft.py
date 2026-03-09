@@ -94,8 +94,8 @@ def _audit_allow_rule() -> str:
     return '        ip daddr @allow_v4 limit rate 10/second log prefix "TEROK_SHIELD_ALLOWED: " counter accept'
 
 
-def standard_ruleset(dns: str = PASTA_DNS, gate_port: int = DEFAULT_GATE_PORT) -> str:
-    """Generate a per-container nftables ruleset for standard mode.
+def hook_ruleset(dns: str = PASTA_DNS, gate_port: int = DEFAULT_GATE_PORT) -> str:
+    """Generate a per-container nftables ruleset for hook mode.
 
     Applied by the OCI hook into the container's own netns.
 
@@ -139,12 +139,12 @@ def standard_ruleset(dns: str = PASTA_DNS, gate_port: int = DEFAULT_GATE_PORT) -
     """)
 
 
-def hardened_ruleset(
+def bridge_ruleset(
     gw: str = BRIDGE_GATEWAY,
     subnet: str = BRIDGE_SUBNET,
     gate_port: int = DEFAULT_GATE_PORT,
 ) -> str:
-    """Generate rootless-netns nftables ruleset for hardened mode.
+    """Generate rootless-netns nftables ruleset for bridge mode.
 
     Applied to the forward chain (traffic crosses bridge).
 
@@ -201,7 +201,7 @@ def create_set(name: str, table: str = NFT_TABLE) -> str:
 
 
 def forward_rule(container: str, ip: str, table: str = NFT_TABLE) -> str:
-    """Generate a per-container forward rule for hardened mode."""
+    """Generate a per-container forward rule for bridge mode."""
     n = safe_name(container)
     safe_ip(ip)
     return (

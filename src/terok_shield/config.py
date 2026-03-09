@@ -23,15 +23,15 @@ ANNOTATION_KEY = "terok.shield.profiles"
 class ShieldMode(enum.Enum):
     """Operating mode for the shield firewall."""
 
-    STANDARD = "standard"
-    HARDENED = "hardened"
+    HOOK = "hook"
+    BRIDGE = "bridge"
 
 
 @dataclass(frozen=True)
 class ShieldConfig:
     """Resolved shield configuration."""
 
-    mode: ShieldMode = ShieldMode.STANDARD
+    mode: ShieldMode = ShieldMode.HOOK
     default_profiles: tuple[str, ...] = ("dev-standard",)
     gate_port: int = DEFAULT_GATE_PORT
     audit_enabled: bool = True
@@ -185,8 +185,8 @@ def get_shield_gate_port() -> int:
 def _auto_detect_mode() -> ShieldMode:
     """Auto-detect the best available shield mode.
 
-    Checks for hardened mode prerequisites (podman bridge network + dnsmasq),
-    falls back to standard mode (nft binary).
+    Checks for bridge mode prerequisites (podman bridge network + dnsmasq),
+    falls back to hook mode (nft binary).
 
     Raises:
         RuntimeError: If no supported shield mode is available.
@@ -194,23 +194,23 @@ def _auto_detect_mode() -> ShieldMode:
     import shutil
     import subprocess
 
-    # Check for hardened mode prerequisites (bridge network)
+    # Check for bridge mode prerequisites (bridge network + dnsmasq + nft)
     try:
         subprocess.run(
             ["podman", "network", "exists", BRIDGE_NETWORK],
             check=True,
             capture_output=True,
         )
-        if shutil.which("dnsmasq"):
-            return ShieldMode.HARDENED
+        if shutil.which("dnsmasq") and shutil.which("nft"):
+            return ShieldMode.BRIDGE
     except (subprocess.CalledProcessError, FileNotFoundError):
         pass
 
-    # Standard mode requires OCI hook support (nft binary)
+    # Hook mode requires OCI hook support (nft binary)
     if shutil.which("nft"):
-        return ShieldMode.STANDARD
+        return ShieldMode.HOOK
 
     raise RuntimeError(
         "No supported shield mode available. "
-        "Install nft (standard mode) or set up a podman bridge network with dnsmasq (hardened mode)."
+        "Install nft (hook mode) or set up a podman bridge network with dnsmasq (bridge mode)."
     )

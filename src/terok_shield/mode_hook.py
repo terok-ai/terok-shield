@@ -1,11 +1,11 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""Standard mode: OCI hooks + per-container netns.
+"""Hook mode: OCI hooks + per-container netns.
 
 Uses OCI hooks to apply per-container nftables rules inside each
 container's network namespace.  No root required — only podman and nft.
-The OCI hook (``hook.py``) applies the ruleset at container creation;
+The OCI hook (``oci_hook.py``) applies the ruleset at container creation;
 this module handles setup, DNS pre-resolution, and live allow/deny.
 """
 
@@ -51,7 +51,7 @@ def _generate_entrypoint() -> str:
     Uses the current Python interpreter so the hook runs in the
     same environment where terok-shield is installed.
     """
-    return f"#!/bin/sh\nexec {shlex.quote(sys.executable)} -m terok_shield.hook\n"
+    return f"#!/bin/sh\nexec {shlex.quote(sys.executable)} -m terok_shield.oci_hook\n"
 
 
 def _generate_hook_json(entrypoint: str) -> str:
@@ -93,7 +93,7 @@ def pre_start(
     container: str,
     profiles: list[str],
 ) -> list[str]:
-    """Prepare for container start in standard mode.
+    """Prepare for container start in hook mode.
 
     Composes profiles, resolves DNS domains, caches results, and
     returns the podman CLI arguments needed for shield protection.
