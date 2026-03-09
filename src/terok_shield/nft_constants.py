@@ -10,6 +10,14 @@ so it can be safely imported by the nft.py security boundary.
 NFT_TABLE = "inet terok_shield"
 NFT_TABLE_NAME = "terok_shield"
 
+# ── Network defaults ────────────────────────────────────
+# Used as parameter defaults in nft.py and re-exported by config.py.
+
+PASTA_DNS = "169.254.1.1"  # pasta default DNS forwarder (link-local)
+BRIDGE_GATEWAY = "10.91.0.1"  # hardened-mode bridge gateway
+BRIDGE_SUBNET = "10.91.0.0/24"  # hardened-mode bridge subnet
+DEFAULT_GATE_PORT = 9418  # gate server port
+
 # RFC1918 + link-local ranges: rejected by default, access attempts
 # and whitelisting logged with a notice.
 RFC1918: tuple[str, ...] = (

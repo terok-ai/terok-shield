@@ -40,10 +40,12 @@ depends_on = []
 path = "terok_shield.run"
 depends_on = []
 
-# Configuration — standalone
+# Configuration — depends on nft_constants for network defaults
 [[modules]]
 path = "terok_shield.config"
-depends_on = []
+depends_on = [
+    "terok_shield.nft_constants",
+]
 
 # Audit logging — depends on config for path helpers
 [[modules]]

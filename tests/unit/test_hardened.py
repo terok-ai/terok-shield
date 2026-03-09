@@ -11,6 +11,7 @@ from unittest import mock
 from terok_shield.config import (
     BRIDGE_GATEWAY,
     BRIDGE_NETWORK,
+    DEFAULT_GATE_PORT,
     ShieldConfig,
     ShieldMode,
 )
@@ -28,7 +29,7 @@ from terok_shield.hardened import (
 )
 from terok_shield.run import ExecError
 
-from ..testnet import TEST_IP1, TEST_IP2
+from ..testnet import BRIDGE_CONTAINER_IP, TEST_IP1, TEST_IP2
 
 
 class TestSetup(unittest.TestCase):
@@ -59,7 +60,7 @@ class TestSetup(unittest.TestCase):
 class TestPreStart(unittest.TestCase):
     """Test hardened mode pre_start."""
 
-    def _config(self, gate_port=9418):
+    def _config(self, gate_port=DEFAULT_GATE_PORT):
         return ShieldConfig(mode=ShieldMode.HARDENED, gate_port=gate_port)
 
     @mock.patch("terok_shield.hardened.resolve_and_cache")
@@ -67,7 +68,7 @@ class TestPreStart(unittest.TestCase):
     @mock.patch("terok_shield.hardened.nft_via_rootless_netns")
     def test_returns_bridge_args(self, mock_nft, _compose, _resolve):
         """Pre-start returns bridge network args."""
-        mock_nft.return_value = "table inet terok_shield { th dport 9418 }"
+        mock_nft.return_value = f"table inet terok_shield {{ th dport {DEFAULT_GATE_PORT} }}"
         args = pre_start(self._config(), "test", ["dev-hardened"])
 
         self.assertIn("--network", args)
@@ -79,7 +80,7 @@ class TestPreStart(unittest.TestCase):
     @mock.patch("terok_shield.hardened.nft_via_rootless_netns")
     def test_includes_dns_and_security(self, mock_nft, _compose, _resolve):
         """Pre-start includes DNS, cap-drop, and no-new-privileges args."""
-        mock_nft.return_value = "table inet terok_shield { th dport 9418 }"
+        mock_nft.return_value = f"table inet terok_shield {{ th dport {DEFAULT_GATE_PORT} }}"
         args = pre_start(self._config(), "test", ["dev-hardened"])
 
         self.assertIn("--dns", args)
@@ -95,7 +96,7 @@ class TestPreStart(unittest.TestCase):
     @mock.patch("terok_shield.hardened.nft_via_rootless_netns")
     def test_resolve_called_with_empty_entries(self, mock_nft, _compose, mock_resolve):
         """Pre-start calls resolve_and_cache even with empty entries (clears stale cache)."""
-        mock_nft.return_value = "table inet terok_shield { th dport 9418 }"
+        mock_nft.return_value = f"table inet terok_shield {{ th dport {DEFAULT_GATE_PORT} }}"
         pre_start(self._config(), "test", [])
         mock_resolve.assert_called_once_with([], "test")
 
@@ -148,7 +149,7 @@ class TestPostStart(unittest.TestCase):
 
     @mock.patch("terok_shield.hardened._update_dnsmasq_nftsets")
     @mock.patch("terok_shield.hardened.nft_via_rootless_netns")
-    @mock.patch("terok_shield.hardened.podman_inspect", return_value="10.90.0.2")
+    @mock.patch("terok_shield.hardened.podman_inspect", return_value=BRIDGE_CONTAINER_IP)
     @mock.patch("terok_shield.hardened.compose_profiles", return_value=["github.com"])
     @mock.patch("terok_shield.hardened._read_resolved_cache", return_value=[])
     def test_creates_set_and_forward(self, _cache, _compose, mock_inspect, mock_nft, _dnsmasq):
@@ -159,7 +160,7 @@ class TestPostStart(unittest.TestCase):
 
     @mock.patch("terok_shield.hardened._update_dnsmasq_nftsets")
     @mock.patch("terok_shield.hardened.nft_via_rootless_netns")
-    @mock.patch("terok_shield.hardened.podman_inspect", return_value="10.90.0.2")
+    @mock.patch("terok_shield.hardened.podman_inspect", return_value=BRIDGE_CONTAINER_IP)
     @mock.patch("terok_shield.hardened.compose_profiles", return_value=["github.com"])
     @mock.patch(
         "terok_shield.hardened._read_resolved_cache",

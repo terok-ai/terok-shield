@@ -16,7 +16,14 @@ import ipaddress
 import re
 import textwrap
 
-from .nft_constants import NFT_TABLE, RFC1918
+from .nft_constants import (
+    BRIDGE_GATEWAY,
+    BRIDGE_SUBNET,
+    DEFAULT_GATE_PORT,
+    NFT_TABLE,
+    PASTA_DNS,
+    RFC1918,
+)
 
 _SAFE_NAME = re.compile(r"^[a-zA-Z0-9_-]+$")
 
@@ -87,7 +94,7 @@ def _audit_allow_rule() -> str:
     return '        ip daddr @allow_v4 limit rate 10/second log prefix "TEROK_SHIELD_ALLOWED: " counter accept'
 
 
-def standard_ruleset(dns: str = "169.254.1.1", gate_port: int = 9418) -> str:
+def standard_ruleset(dns: str = PASTA_DNS, gate_port: int = DEFAULT_GATE_PORT) -> str:
     """Generate a per-container nftables ruleset for standard mode.
 
     Applied by the OCI hook into the container's own netns.
@@ -133,9 +140,9 @@ def standard_ruleset(dns: str = "169.254.1.1", gate_port: int = 9418) -> str:
 
 
 def hardened_ruleset(
-    gw: str = "10.91.0.1",
-    subnet: str = "10.91.0.0/24",
-    gate_port: int = 9418,
+    gw: str = BRIDGE_GATEWAY,
+    subnet: str = BRIDGE_SUBNET,
+    gate_port: int = DEFAULT_GATE_PORT,
 ) -> str:
     """Generate rootless-netns nftables ruleset for hardened mode.
 

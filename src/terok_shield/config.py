@@ -8,15 +8,14 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-# ── Network constants ────────────────────────────────────
-# NFT_TABLE, NFT_TABLE_NAME, RFC1918 live in nft_constants.py (single source of truth).
+from .nft_constants import (
+    BRIDGE_GATEWAY as BRIDGE_GATEWAY,  # noqa: F401
+    BRIDGE_SUBNET as BRIDGE_SUBNET,  # noqa: F401
+    DEFAULT_GATE_PORT as DEFAULT_GATE_PORT,
+    PASTA_DNS as PASTA_DNS,  # noqa: F401
+)
 
 BRIDGE_NETWORK = "ctr-egress"
-BRIDGE_SUBNET = "10.91.0.0/24"
-BRIDGE_GATEWAY = "10.91.0.1"
-PASTA_DNS = "169.254.1.1"
-
-DEFAULT_GATE_PORT = 9418
 
 ANNOTATION_KEY = "terok.shield.profiles"
 
