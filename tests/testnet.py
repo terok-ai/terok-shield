@@ -12,6 +12,10 @@ verify real network connectivity.  Centralizing them here means SonarCloud only
 flags the constant definition, not every usage.
 """
 
+# ── Test domain (used as mock compose_profiles return value) ──
+
+TEST_DOMAIN = "github.com"
+
 # ── RFC 5737 TEST-NET addresses (non-routable, safe for unit tests) ──
 
 # TEST-NET-1 (192.0.2.0/24)

@@ -189,6 +189,7 @@ def hook_main(stdin_data: str | None = None, stage: str = "createRuntime") -> in
         stdin_data = sys.stdin.read()
 
     try:
+        # _annotations intentionally captured — preserves mode-dispatch infrastructure
         container_id, pid, _annotations = _parse_oci_state(stdin_data)
     except ValueError as e:
         print(f"terok-shield hook: {e}", file=sys.stderr)

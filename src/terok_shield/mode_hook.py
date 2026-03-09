@@ -74,8 +74,7 @@ def _generate_hook_json(entrypoint: str, stage: str) -> str:
 def install_hooks() -> None:
     """Install OCI hook entrypoint and hook JSON files.
 
-    Shared by both hook and bridge modes.  Installs hooks for
-    ``createRuntime`` and ``poststop`` stages.
+    Installs hooks for the ``createRuntime`` and ``poststop`` stages.
     """
     ensure_shield_dirs()
 

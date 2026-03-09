@@ -27,7 +27,8 @@ class TestShieldSetup:
         shield_setup(config=cfg)
 
         hooks_dir = shield_env / "hooks"
-        assert (hooks_dir / "terok-shield-hook.json").is_file()
+        assert (hooks_dir / "terok-shield-createRuntime.json").is_file()
+        assert (hooks_dir / "terok-shield-poststop.json").is_file()
         entrypoint = shield_env / "terok-shield-hook"
         assert entrypoint.is_file()
         assert entrypoint.stat().st_mode & 0o100, "Entrypoint must be executable"
@@ -39,7 +40,8 @@ class TestShieldSetup:
         shield_setup(config=cfg)
 
         hooks_dir = shield_env / "hooks"
-        assert (hooks_dir / "terok-shield-hook.json").is_file()
+        assert (hooks_dir / "terok-shield-createRuntime.json").is_file()
+        assert (hooks_dir / "terok-shield-poststop.json").is_file()
         entrypoint = shield_env / "terok-shield-hook"
         assert entrypoint.is_file()
         assert entrypoint.stat().st_mode & 0o100, "Entrypoint must be executable after re-setup"
@@ -59,7 +61,8 @@ class TestCLISetup:
         main(["setup"])
 
         hooks_dir = shield_env / "hooks"
-        assert (hooks_dir / "terok-shield-hook.json").is_file()
+        assert (hooks_dir / "terok-shield-createRuntime.json").is_file()
+        assert (hooks_dir / "terok-shield-poststop.json").is_file()
         entrypoint = shield_env / "terok-shield-hook"
         assert entrypoint.is_file()
         assert entrypoint.stat().st_mode & 0o100, "Entrypoint must be executable"
@@ -70,7 +73,8 @@ class TestCLISetup:
         main(["setup"])
 
         hooks_dir = shield_env / "hooks"
-        assert (hooks_dir / "terok-shield-hook.json").is_file()
+        assert (hooks_dir / "terok-shield-createRuntime.json").is_file()
+        assert (hooks_dir / "terok-shield-poststop.json").is_file()
         entrypoint = shield_env / "terok-shield-hook"
         assert entrypoint.is_file()
         assert entrypoint.stat().st_mode & 0o100, "Entrypoint must be executable after re-setup"

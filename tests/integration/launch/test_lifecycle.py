@@ -64,9 +64,11 @@ class TestAPILifecycle:
             assert "terok_shield" in rules
             assert "allow_v4" in rules
 
-            # 5. Allow target IP
-            allowed = shield_allow(name, ALLOWED_TARGET_IPS[0], config=cfg)
-            assert ALLOWED_TARGET_IPS[0] in allowed
+            # 5. Allow target IPs (Cloudflare anycast may respond from either)
+            allowed: list[str] = []
+            for ip in ALLOWED_TARGET_IPS:
+                allowed = shield_allow(name, ip, config=cfg)
+            assert all(ip in allowed for ip in ALLOWED_TARGET_IPS)
 
             # 6. Verify traffic flows
             assert_reachable(name, ALLOWED_TARGET_HTTP)
