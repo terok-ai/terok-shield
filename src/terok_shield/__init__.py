@@ -6,7 +6,7 @@
 Public API for standalone use and integration with terok.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 from .audit import list_log_files, log_event, tail_log
 from .config import ShieldConfig, ShieldMode, load_shield_config
