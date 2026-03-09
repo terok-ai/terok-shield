@@ -133,6 +133,15 @@ class TestApplyHookE2E:
             assert errors == [], f"Re-apply verification failed: {errors}"
 
 
+# ── hook_main (pure parsing — no container needed) ───────
+
+
+def test_hook_main_invalid_json() -> None:
+    """hook_main returns 1 for invalid OCI state."""
+    rc = hook_main("not json")
+    assert rc == 1
+
+
 # ── hook_main end-to-end ─────────────────────────────────
 
 
@@ -157,11 +166,6 @@ class TestHookMainE2E:
 
             listed = nsenter_nft(container_pid, "list", "ruleset")
             assert "terok_shield" in listed.stdout
-
-    def test_hook_main_invalid_json(self) -> None:
-        """hook_main returns 1 for invalid OCI state."""
-        rc = hook_main("not json")
-        assert rc == 1
 
     def test_hook_main_bad_pid(self, container: str, monkeypatch: pytest.MonkeyPatch) -> None:
         """hook_main returns 1 for unreachable PID."""

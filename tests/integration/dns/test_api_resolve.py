@@ -11,8 +11,6 @@ from terok_shield import shield_resolve
 from terok_shield.cli import main
 from tests.testnet import TEST_IP4
 
-from ..conftest import nft_missing, podman_missing
-
 # ── Public API resolve ───────────────────────────────────
 
 
@@ -54,10 +52,7 @@ class TestShieldResolve:
 # ── CLI resolve ──────────────────────────────────────────
 
 
-@pytest.mark.needs_podman
 @pytest.mark.needs_internet
-@podman_missing
-@nft_missing
 class TestCLIResolve:
     """Verify ``terok-shield resolve`` via CLI."""
 

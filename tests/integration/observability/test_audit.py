@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+_NONEXISTENT_PID = "4000000"  # Well above typical PID range
+
 from terok_shield.audit import list_log_files, log_event, tail_log
 from terok_shield.hook import apply_hook
 from tests.testnet import ALLOWED_TARGET_IPS, TEST_IP1, TEST_IP2
@@ -134,7 +136,7 @@ class TestApplyHookAudit:
         with tempfile.TemporaryDirectory() as tmp:
             monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", tmp)
             with pytest.raises(RuntimeError):
-                apply_hook(container, "999999")
+                apply_hook(container, _NONEXISTENT_PID)
 
             log_file = Path(tmp) / "logs" / f"{container}.jsonl"
             assert log_file.is_file(), "Audit log must be created even on failure"

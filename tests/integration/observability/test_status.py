@@ -10,8 +10,6 @@ import pytest
 from terok_shield import shield_status
 from terok_shield.cli import main
 
-from ..conftest import podman_missing
-
 # ── Public API status ────────────────────────────────────
 
 
@@ -33,8 +31,7 @@ class TestShieldStatus:
 # ── CLI status ───────────────────────────────────────────
 
 
-@pytest.mark.needs_podman
-@podman_missing
+@pytest.mark.needs_host_features
 class TestCLIStatus:
     """Verify ``terok-shield status`` via CLI."""
 

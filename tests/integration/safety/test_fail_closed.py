@@ -3,6 +3,7 @@
 
 """Integration tests: fail-closed error paths."""
 
+import uuid
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,7 @@ class TestCLIErrors:
 
     def test_cli_allow_bad_container(self, shield_env: Path) -> None:
         """Allowing on a nonexistent container exits 1."""
+        bogus = f"nonexistent-{uuid.uuid4().hex[:12]}"
         with pytest.raises(SystemExit) as exc_info:
-            main(["allow", "nonexistent-container-xyz", TEST_IP1])
+            main(["allow", bogus, TEST_IP1])
         assert exc_info.value.code == 1

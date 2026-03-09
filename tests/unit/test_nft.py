@@ -204,6 +204,12 @@ class TestHardenedRuleset(unittest.TestCase):
         rs = hardened_ruleset()
         self.assertIn("chain forward", rs)
 
+    def test_defaults_match_config(self) -> None:
+        """No-arg call uses BRIDGE_GATEWAY and BRIDGE_SUBNET from config."""
+        rs = hardened_ruleset()
+        self.assertIn(BRIDGE_GATEWAY, rs)
+        self.assertIn(BRIDGE_SUBNET, rs)
+
     def test_contains_bridge_gateway(self) -> None:
         """Bridge gateway must appear in ruleset."""
         rs = hardened_ruleset(gw=BRIDGE_GATEWAY)
