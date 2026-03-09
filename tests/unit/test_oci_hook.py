@@ -55,7 +55,7 @@ class TestParseOciState(unittest.TestCase):
     def test_with_annotations(self) -> None:
         """Parse state with annotations."""
         ann = {ANNOTATION_KEY: "dev-standard", ANNOTATION_NAME_KEY: "my-ctr"}
-        cid, pid, annotations = _parse_oci_state(_oci_state("abc", 1, annotations=ann))
+        _, _, annotations = _parse_oci_state(_oci_state("abc", 1, annotations=ann))
         self.assertEqual(annotations[ANNOTATION_KEY], "dev-standard")
         self.assertEqual(annotations[ANNOTATION_NAME_KEY], "my-ctr")
 
@@ -418,8 +418,10 @@ class TestHookMain(unittest.TestCase):
         rc = hook_main(json.dumps({"id": "abc", "pid": 0}))
         self.assertEqual(rc, 1)
 
-    def test_poststop_noop(self) -> None:
-        """Poststop is a no-op returning 0."""
+    @unittest.mock.patch("terok_shield.oci_hook.apply_hook")
+    def test_poststop_noop(self, mock_apply: unittest.mock.Mock) -> None:
+        """Poststop is a no-op returning 0 without calling apply_hook."""
         state = _oci_state(pid=0)
         rc = hook_main(state, stage="poststop")
         self.assertEqual(rc, 0)
+        mock_apply.assert_not_called()

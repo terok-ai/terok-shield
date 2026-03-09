@@ -22,7 +22,7 @@ from terok_shield.mode_hook import (
     setup,
 )
 
-from ..testnet import TEST_IP1
+from ..testnet import TEST_DOMAIN, TEST_IP1
 
 
 class TestDetectRootlessNetworkMode(unittest.TestCase):
@@ -215,7 +215,7 @@ class TestPreStart(unittest.TestCase):
         return ShieldConfig(mode=ShieldMode.HOOK, gate_port=gate_port)
 
     @mock.patch("terok_shield.mode_hook.resolve_and_cache")
-    @mock.patch("terok_shield.mode_hook.compose_profiles", return_value=["github.com"])
+    @mock.patch("terok_shield.mode_hook.compose_profiles", return_value=[TEST_DOMAIN])
     @mock.patch("terok_shield.mode_hook._detect_rootless_network_mode", return_value="pasta")
     @mock.patch("os.geteuid", return_value=1000)
     def test_pasta_args(self, _euid, _mode, _compose, _resolve):
@@ -226,7 +226,7 @@ class TestPreStart(unittest.TestCase):
         self.assertIn("pasta:", args[pasta_idx])
 
     @mock.patch("terok_shield.mode_hook.resolve_and_cache")
-    @mock.patch("terok_shield.mode_hook.compose_profiles", return_value=["github.com"])
+    @mock.patch("terok_shield.mode_hook.compose_profiles", return_value=[TEST_DOMAIN])
     @mock.patch("terok_shield.mode_hook._detect_rootless_network_mode", return_value="slirp4netns")
     @mock.patch("os.geteuid", return_value=1000)
     def test_slirp4netns_args(self, _euid, _mode, _compose, _resolve):
@@ -246,7 +246,7 @@ class TestPreStart(unittest.TestCase):
         self.assertNotIn("--network", before_annotation)
 
     @mock.patch("terok_shield.mode_hook.resolve_and_cache")
-    @mock.patch("terok_shield.mode_hook.compose_profiles", return_value=["github.com"])
+    @mock.patch("terok_shield.mode_hook.compose_profiles", return_value=[TEST_DOMAIN])
     @mock.patch("os.geteuid", return_value=1000)
     @mock.patch("terok_shield.mode_hook._detect_rootless_network_mode", return_value="pasta")
     def test_shield_args(self, _mode, _euid, _compose, _resolve):
@@ -279,7 +279,7 @@ class TestPreStart(unittest.TestCase):
         self._ep_patch.start()
 
     @mock.patch("terok_shield.mode_hook.resolve_and_cache")
-    @mock.patch("terok_shield.mode_hook.compose_profiles", return_value=["github.com"])
+    @mock.patch("terok_shield.mode_hook.compose_profiles", return_value=[TEST_DOMAIN])
     @mock.patch("os.geteuid", return_value=1000)
     @mock.patch("terok_shield.mode_hook._detect_rootless_network_mode", return_value="pasta")
     def test_custom_gate_port(self, _mode, _euid, _compose, _resolve):
@@ -289,7 +289,7 @@ class TestPreStart(unittest.TestCase):
         self.assertIn("1234", args[net_idx])
 
     @mock.patch("terok_shield.mode_hook.resolve_and_cache")
-    @mock.patch("terok_shield.mode_hook.compose_profiles", return_value=["github.com"])
+    @mock.patch("terok_shield.mode_hook.compose_profiles", return_value=[TEST_DOMAIN])
     @mock.patch("os.geteuid", return_value=1000)
     @mock.patch("terok_shield.mode_hook._detect_rootless_network_mode", return_value="pasta")
     def test_annotation_includes_profiles(self, _mode, _euid, _compose, _resolve):
@@ -300,7 +300,7 @@ class TestPreStart(unittest.TestCase):
         self.assertIn("dev-standard,base", args[ann_idx])
 
     @mock.patch("terok_shield.mode_hook.resolve_and_cache")
-    @mock.patch("terok_shield.mode_hook.compose_profiles", return_value=["github.com"])
+    @mock.patch("terok_shield.mode_hook.compose_profiles", return_value=[TEST_DOMAIN])
     @mock.patch("os.geteuid", return_value=1000)
     @mock.patch("terok_shield.mode_hook._detect_rootless_network_mode", return_value="pasta")
     def test_annotation_includes_name(self, _mode, _euid, _compose, _resolve):

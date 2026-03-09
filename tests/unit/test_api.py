@@ -18,7 +18,7 @@ from terok_shield import (
     shield_status,
 )
 
-from ..testnet import TEST_IP1
+from ..testnet import TEST_DOMAIN, TEST_IP1
 
 
 class TestShieldSetup(unittest.TestCase):
@@ -86,8 +86,8 @@ class TestShieldAllow(unittest.TestCase):
     def test_resolves_domain(self, mock_dig, mock_allow, _log):
         """shield_allow resolves domains via dig."""
         config = ShieldConfig(mode=ShieldMode.HOOK)
-        ips = shield_allow("test", "example.com", config=config)
-        mock_dig.assert_called_once_with("example.com")
+        ips = shield_allow("test", TEST_DOMAIN, config=config)
+        mock_dig.assert_called_once_with(TEST_DOMAIN)
         mock_allow.assert_called_once_with("test", TEST_IP1)
         self.assertEqual(ips, [TEST_IP1])
 
@@ -131,7 +131,7 @@ class TestShieldResolve(unittest.TestCase):
     """Test shield_resolve."""
 
     @mock.patch("terok_shield.resolve_and_cache", return_value=[TEST_IP1])
-    @mock.patch("terok_shield.compose_profiles", return_value=["github.com"])
+    @mock.patch("terok_shield.compose_profiles", return_value=[TEST_DOMAIN])
     def test_resolves_profiles(self, _compose, mock_resolve):
         """shield_resolve composes profiles and resolves."""
         config = ShieldConfig(mode=ShieldMode.HOOK)
@@ -146,7 +146,7 @@ class TestShieldResolve(unittest.TestCase):
         self.assertEqual(ips, [])
 
     @mock.patch("terok_shield.resolve_and_cache", return_value=[TEST_IP1])
-    @mock.patch("terok_shield.compose_profiles", return_value=["github.com"])
+    @mock.patch("terok_shield.compose_profiles", return_value=[TEST_DOMAIN])
     def test_force_sets_max_age_zero(self, _compose, mock_resolve):
         """shield_resolve passes max_age=0 when force=True."""
         config = ShieldConfig(mode=ShieldMode.HOOK)
