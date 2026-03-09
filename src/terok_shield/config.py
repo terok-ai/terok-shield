@@ -5,6 +5,7 @@
 
 import enum
 import os
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -202,6 +203,13 @@ def _auto_detect_mode() -> ShieldMode:
             capture_output=True,
         )
         if shutil.which("dnsmasq") and shutil.which("nft"):
+            warnings.warn(
+                "Bridge mode detected but support is incomplete — "
+                "manual network/dnsmasq setup is required. "
+                "See https://github.com/terok-ai/terok-shield/issues/43 "
+                "Set mode: hook in config.yml to silence this warning.",
+                stacklevel=2,
+            )
             return ShieldMode.BRIDGE
     except (subprocess.CalledProcessError, FileNotFoundError):
         pass

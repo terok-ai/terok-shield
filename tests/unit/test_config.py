@@ -325,11 +325,13 @@ class TestAutoDetectMode(unittest.TestCase):
     def test_bridge_when_bridge_and_dnsmasq(
         self, mock_run: unittest.mock.Mock, _which: unittest.mock.Mock
     ) -> None:
-        """Return BRIDGE when podman bridge network exists and dnsmasq available."""
+        """Return BRIDGE with warning when podman bridge network exists and dnsmasq available."""
         from terok_shield.config import _auto_detect_mode
 
         mock_run.return_value = unittest.mock.Mock(returncode=0)
-        self.assertEqual(_auto_detect_mode(), ShieldMode.BRIDGE)
+        with self.assertWarns(UserWarning) as ctx:
+            self.assertEqual(_auto_detect_mode(), ShieldMode.BRIDGE)
+        self.assertIn("incomplete", str(ctx.warning))
 
     @unittest.mock.patch(
         "shutil.which",
