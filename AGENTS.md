@@ -80,6 +80,7 @@ make spdx NAME="Real Human Name" FILES="src/terok_shield/new_file.py"  # Add SPD
     # SPDX-License-Identifier: Apache-2.0
     ```
   When modifying an existing file, always run `make spdx` with the contributor's name to add their copyright line. NAME must be a real person's name (ASCII-only), not a project name. Use a single year (year of first contribution), not a range. Ask the user for their name if unknown. Files covered by `REUSE.toml` glob patterns (`.md`, `.yml`, `.toml`, `.json`, etc.) do not need inline headers.
+- **Documentation filenames**: Markdown files under `docs/` use `lowercase.md` naming (e.g. `getting_started.md`, `cli.md`, `modes.md`) to match the MkDocs `index.md` convention. Root-level project files (e.g. `README.md`, `AGENTS.md`) stay UPPERCASE per standard convention.
 
 ## Security Boundary
 

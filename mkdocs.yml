@@ -81,18 +81,18 @@ nav:
   - Home: index.md
   - User Guide:
     - guide/index.md
-    - Getting Started: guide/getting-started.md
+    - Getting Started: guide/getting_started.md
     - Allowlist Profiles: guide/profiles.md
     - Firewall Modes: guide/modes.md
     - CLI Reference: guide/cli.md
     - Configuration: guide/configuration.md
     - Audit Logging: guide/logging.md
   - Developer Guide:
-    - Security & Design: SECURITY.md
-    - Architecture: DESIGN.md
-    - Contributing: DEVELOPER.md
-    - Code Quality: QUALITY_REPORT.md
-    - Integration Test Map: TEST_MAP.md
+    - Security & Design: security.md
+    - Architecture: design.md
+    - Contributing: developer.md
+    - Code Quality: quality_report.md
+    - Integration Test Map: test_map.md
   - API Reference: reference/
 
 extra:

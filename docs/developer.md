@@ -42,6 +42,7 @@ make docs             # serve documentation locally
 - **Docstrings** on all public functions (95% coverage enforced in CI)
 - **`nft.py` must not import non-stdlib modules** — auditable security boundary
 - **Module boundaries** enforced by tach (`tach.toml`) — run `make tach` after changing imports
+- **Documentation filenames** under `docs/` use `lowercase.md` (e.g. `getting_started.md`, `cli.md`) to match MkDocs convention; root-level files (`README.md`, `AGENTS.md`) stay UPPERCASE
 
 ## Testing
 
@@ -67,7 +68,7 @@ Environment requirements are expressed via pytest markers:
 
 Directories group tests by what they test: `setup/`, `launch/`, `blocking/`,
 `allow_deny/`, `dns/`, `observability/`, `safety/`, `cli/`. See the
-[Integration Test Map](TEST_MAP.md) for a full listing.
+[Integration Test Map](test_map.md) for a full listing.
 
 Skip guards (`podman_missing`, `nft_missing`, `dig_missing`) handle
 graceful degradation when binaries are absent.

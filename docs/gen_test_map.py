@@ -19,5 +19,5 @@ sys.path.insert(0, str(Path(__file__).parent))
 import test_map  # noqa: E402
 
 report = test_map.generate_test_map()
-with mkdocs_gen_files.open("TEST_MAP.md", "w") as f:
+with mkdocs_gen_files.open("test_map.md", "w") as f:
     f.write(report)

@@ -298,5 +298,5 @@ def generate_report() -> str:
 
 
 report = generate_report()
-with mkdocs_gen_files.open("QUALITY_REPORT.md", "w") as f:
+with mkdocs_gen_files.open("quality_report.md", "w") as f:
     f.write(report)

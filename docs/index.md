@@ -78,7 +78,7 @@ terok-shield logs --container my-container -n 10   # recent audit log
 
 ## Next steps
 
-- [Getting Started](guide/getting-started.md) — full setup walkthrough
+- [Getting Started](guide/getting_started.md) — full setup walkthrough
 - [Allowlist Profiles](guide/profiles.md) — bundled profiles and custom allowlists
 - [CLI Reference](guide/cli.md) — all commands and options
 - [Firewall Modes](guide/modes.md) — standard vs. hardened

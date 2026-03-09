@@ -8,4 +8,5 @@ __pycache__/
 coverage.xml
 /.idea
 .complexipy_cache/
-docs/TEST_MAP.md
+docs/test_map.md
+site/
