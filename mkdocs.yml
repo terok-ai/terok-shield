@@ -91,8 +91,8 @@ nav:
     - Security & Design: SECURITY.md
     - Architecture: DESIGN.md
     - Contributing: DEVELOPER.md
-    - Code Quality: quality-report.md
-    - Integration Test Map: test-map.md
+    - Code Quality: QUALITY_REPORT.md
+    - Integration Test Map: TEST_MAP.md
   - API Reference: reference/
 
 extra:

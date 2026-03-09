@@ -33,7 +33,7 @@ test-integration:
 
 # Generate integration test map (Markdown table grouped by directory)
 test-map:
-	poetry run python scripts/test-map.py
+	poetry run python docs/test_map.py
 
 # Check module boundary rules (tach.toml)
 tach:
