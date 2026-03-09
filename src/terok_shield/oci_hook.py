@@ -18,7 +18,7 @@ import re
 import sys
 
 from .audit import log_event
-from .config import shield_resolved_dir
+from .config import load_shield_config, shield_resolved_dir
 from .nft import add_elements, hook_ruleset, verify_ruleset
 from .run import ExecError, nft_via_nsenter
 
@@ -143,7 +143,7 @@ def _load_and_add_ips(container: str, pid: str) -> int:
     return len(ips)
 
 
-def apply_hook(container: str, pid: str) -> None:
+def apply_hook(container: str, pid: str, loopback_ports: tuple[int, ...] = ()) -> None:
     """Apply the hook-mode firewall to a container.
 
     This is the core hook logic, separated from stdin parsing
@@ -152,11 +152,12 @@ def apply_hook(container: str, pid: str) -> None:
     Args:
         container: Container ID or name.
         pid: Host PID of the container's init process.
+        loopback_ports: TCP ports to allow on the loopback interface.
 
     Raises:
         RuntimeError: If ruleset application or verification fails.
     """
-    _nft_exec(container, pid, stdin=hook_ruleset())
+    _nft_exec(container, pid, stdin=hook_ruleset(loopback_ports=loopback_ports))
     log_event(container, "setup", detail="ruleset applied")
 
     ip_count = _load_and_add_ips(container, pid)
@@ -202,7 +203,8 @@ def hook_main(stdin_data: str | None = None, stage: str = "createRuntime") -> in
         # createRuntime (default)
         if not pid:
             raise RuntimeError("Hook mode requires a valid PID in OCI state")
-        apply_hook(container_id, pid)
+        cfg = load_shield_config()
+        apply_hook(container_id, pid, loopback_ports=cfg.loopback_ports)
     except RuntimeError as e:
         print(f"terok-shield hook: {e}", file=sys.stderr)
         return 1

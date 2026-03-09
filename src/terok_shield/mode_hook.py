@@ -144,9 +144,11 @@ def pre_start(
                 "host.containers.internal:10.0.2.2",
             ]
         else:
+            tcp_flags = ",".join(f"-T,{p}" for p in config.loopback_ports)
+            pasta_arg = f"pasta:{tcp_flags}" if tcp_flags else "pasta:"
             args += [
                 "--network",
-                f"pasta:-T,{config.gate_port}",
+                pasta_arg,
                 "--add-host",
                 "host.containers.internal:127.0.0.1",
             ]

@@ -15,7 +15,7 @@ own network namespace.
 │  ┌────────────────────────────────────┐  │
 │  │ nftables (applied by OCI hook)    │  │
 │  │ policy: DROP                      │  │
-│  │ allow: DNS, gate, @allow_v4       │  │
+│  │ allow: DNS, loopback, @allow_v4   │  │
 │  │ reject: RFC1918                   │  │
 │  └────────────────────────────────────┘  │
 │                                          │
@@ -37,7 +37,7 @@ own network namespace.
 ### Chain evaluation order
 
 ```text
-IPv6 drop → loopback → established → DNS → gate port → allow_v4 → RFC1918 reject → deny all
+IPv6 drop → loopback → established → DNS → loopback ports → allow_v4 → RFC1918 reject → deny all
 ```
 
 ### When to use

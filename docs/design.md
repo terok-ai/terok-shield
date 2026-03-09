@@ -74,7 +74,7 @@ The package exports a lifecycle-oriented API for integration with
 
 All functions accept an optional `config: ShieldConfig` parameter (defaults to
 `load_shield_config()` if `None`). The config is a frozen dataclass with mode,
-default profiles, gate port, and audit settings.
+default profiles, loopback ports, and audit settings.
 
 terok imports terok-shield as a library dependency and calls the Python API
 directly — never the CLI.

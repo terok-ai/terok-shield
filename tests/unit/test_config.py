@@ -10,7 +10,6 @@ from terok_shield.config import (
     ShieldConfig,
     ShieldMode,
     ensure_shield_dirs,
-    get_shield_gate_port,
     load_shield_config,
     shield_config_root,
     shield_dns_dir,
@@ -31,7 +30,7 @@ class TestShieldConfig(unittest.TestCase):
         cfg = ShieldConfig()
         self.assertEqual(cfg.mode, ShieldMode.HOOK)
         self.assertEqual(cfg.default_profiles, ("dev-standard",))
-        self.assertEqual(cfg.gate_port, 9418)
+        self.assertEqual(cfg.loopback_ports, ())
         self.assertTrue(cfg.audit_enabled)
         self.assertTrue(cfg.audit_log_allowed)
 
@@ -173,7 +172,7 @@ class TestLoadShieldConfig(unittest.TestCase):
             config_file.write_text(
                 "mode: hook\n"
                 "default_profiles: [base, dev-python]\n"
-                "gate_port: 1234\n"
+                "loopback_ports: [1234, 5678]\n"
                 "audit:\n"
                 "  enabled: false\n"
             )
@@ -181,7 +180,7 @@ class TestLoadShieldConfig(unittest.TestCase):
                 cfg = load_shield_config()
                 self.assertEqual(cfg.mode, ShieldMode.HOOK)
                 self.assertEqual(cfg.default_profiles, ("base", "dev-python"))
-                self.assertEqual(cfg.gate_port, 1234)
+                self.assertEqual(cfg.loopback_ports, (1234, 5678))
                 self.assertFalse(cfg.audit_enabled)
 
     def test_auto_mode_calls_auto_detect(self) -> None:
@@ -278,18 +277,6 @@ class TestLoadShieldConfig(unittest.TestCase):
                 self.assertIs(cfg.audit_log_allowed, True)
 
 
-class TestGetShieldGatePort(unittest.TestCase):
-    """Tests for get_shield_gate_port."""
-
-    def test_returns_default(self) -> None:
-        """Return default gate port from config."""
-        with unittest.mock.patch.dict(
-            "os.environ", {"TEROK_SHIELD_CONFIG_DIR": "/nonexistent-path"}
-        ):
-            port = get_shield_gate_port()
-            self.assertEqual(port, 9418)
-
-
 class TestAutoDetectMode(unittest.TestCase):
     """Tests for _auto_detect_mode."""
 
@@ -315,41 +302,89 @@ class TestAutoDetectMode(unittest.TestCase):
         self.assertEqual(_auto_detect_mode(), ShieldMode.HOOK)
 
 
-class TestGatePortValidation(unittest.TestCase):
-    """Tests for gate_port validation in config loading."""
+class TestLoopbackPortsValidation(unittest.TestCase):
+    """Tests for loopback_ports validation in config loading."""
+
+    def test_valid_list(self) -> None:
+        """Valid port list is accepted."""
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config_file = Path(tmp) / "config.yml"
+            config_file.write_text("mode: hook\nloopback_ports: [8080, 9090]\n")
+            with unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": tmp}):
+                cfg = load_shield_config()
+                self.assertEqual(cfg.loopback_ports, (8080, 9090))
+
+    def test_single_int_accepted(self) -> None:
+        """A bare integer is accepted as a single-element tuple."""
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config_file = Path(tmp) / "config.yml"
+            config_file.write_text("mode: hook\nloopback_ports: 1234\n")
+            with unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": tmp}):
+                cfg = load_shield_config()
+                self.assertEqual(cfg.loopback_ports, (1234,))
+
+    def test_empty_list(self) -> None:
+        """Empty list produces empty tuple."""
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config_file = Path(tmp) / "config.yml"
+            config_file.write_text("mode: hook\nloopback_ports: []\n")
+            with unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": tmp}):
+                cfg = load_shield_config()
+                self.assertEqual(cfg.loopback_ports, ())
+
+    def test_missing_key_defaults_empty(self) -> None:
+        """Missing loopback_ports defaults to empty tuple."""
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config_file = Path(tmp) / "config.yml"
+            config_file.write_text("mode: hook\n")
+            with unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": tmp}):
+                cfg = load_shield_config()
+                self.assertEqual(cfg.loopback_ports, ())
 
     def test_bool_rejected(self) -> None:
-        """Boolean values for gate_port fall back to default."""
+        """Boolean values in list are silently dropped."""
         import tempfile
         from pathlib import Path
 
         with tempfile.TemporaryDirectory() as tmp:
             config_file = Path(tmp) / "config.yml"
-            config_file.write_text("mode: hook\ngate_port: true\n")
+            config_file.write_text("mode: hook\nloopback_ports: [true]\n")
             with unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": tmp}):
                 cfg = load_shield_config()
-                self.assertEqual(cfg.gate_port, 9418)
+                self.assertEqual(cfg.loopback_ports, ())
 
-    def test_out_of_range_rejected(self) -> None:
-        """Out-of-range port falls back to default."""
+    def test_out_of_range_dropped(self) -> None:
+        """Out-of-range ports are silently dropped."""
         import tempfile
         from pathlib import Path
 
         with tempfile.TemporaryDirectory() as tmp:
             config_file = Path(tmp) / "config.yml"
-            config_file.write_text("mode: hook\ngate_port: 99999\n")
+            config_file.write_text("mode: hook\nloopback_ports: [99999]\n")
             with unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": tmp}):
                 cfg = load_shield_config()
-                self.assertEqual(cfg.gate_port, 9418)
+                self.assertEqual(cfg.loopback_ports, ())
 
-    def test_zero_rejected(self) -> None:
-        """Port 0 falls back to default."""
+    def test_mixed_valid_invalid(self) -> None:
+        """Valid ports kept, invalid silently dropped."""
         import tempfile
         from pathlib import Path
 
         with tempfile.TemporaryDirectory() as tmp:
             config_file = Path(tmp) / "config.yml"
-            config_file.write_text("mode: hook\ngate_port: 0\n")
+            config_file.write_text("mode: hook\nloopback_ports: [8080, 0, true, 9090]\n")
             with unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": tmp}):
                 cfg = load_shield_config()
-                self.assertEqual(cfg.gate_port, 9418)
+                self.assertEqual(cfg.loopback_ports, (8080, 9090))

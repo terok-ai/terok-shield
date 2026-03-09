@@ -62,7 +62,7 @@ blocked.
 │  │  │  (applied by OCI hook)        │  │   │
 │  │  │                               │  │   │
 │  │  │  policy: DROP                 │  │   │
-│  │  │  allow: DNS, gate, @allow_v4  │  │   │
+│  │  │  allow: DNS, loopback, @allow  │  │   │
 │  │  │  reject: RFC1918              │  │   │
 │  │  └────────────────────────────────┘  │   │
 │  │                                      │   │
@@ -74,7 +74,7 @@ blocked.
 │  │  └────────────────────────────────┘  │   │
 │  └──────────────────────────────────────┘   │
 │                                             │
-│  Gate server (loopback only)                │
+│  Host services (loopback only)               │
 └─────────────────────────────────────────────┘
 ```
 
@@ -86,7 +86,7 @@ The workload cannot modify nftables rules because `CAP_NET_ADMIN` is dropped,
 **Hook mode** (per-container netns, output chain):
 
 ```text
-IPv6 drop → loopback → established → DNS → gate port → allow_v4 → RFC1918 reject → deny all
+IPv6 drop → loopback → established → DNS → loopback ports → allow_v4 → RFC1918 reject → deny all
 ```
 
 **Rule ordering rationale:** the allow set (`@allow_v4`) is evaluated *before*

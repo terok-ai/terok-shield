@@ -58,13 +58,13 @@ class TestAPISurface(unittest.TestCase):
         names = {f.name for f in dataclasses.fields(ShieldConfig)}
         self.assertEqual(
             names,
-            {"mode", "default_profiles", "gate_port", "audit_enabled", "audit_log_allowed"},
+            {"mode", "default_profiles", "loopback_ports", "audit_enabled", "audit_log_allowed"},
         )
 
         cfg = ShieldConfig()
         self.assertEqual(cfg.mode, ShieldMode.HOOK)
         self.assertEqual(cfg.default_profiles, ("dev-standard",))
-        self.assertEqual(cfg.gate_port, 9418)
+        self.assertEqual(cfg.loopback_ports, ())
         self.assertIs(cfg.audit_enabled, True)
         self.assertIs(cfg.audit_log_allowed, True)
 

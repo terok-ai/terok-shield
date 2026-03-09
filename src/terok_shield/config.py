@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .nft_constants import (
-    DEFAULT_GATE_PORT as DEFAULT_GATE_PORT,  # noqa: F401
     PASTA_DNS as PASTA_DNS,  # noqa: F401
 )
 
@@ -33,7 +32,7 @@ class ShieldConfig:
 
     mode: ShieldMode = ShieldMode.HOOK
     default_profiles: tuple[str, ...] = ("dev-standard",)
-    gate_port: int = DEFAULT_GATE_PORT
+    loopback_ports: tuple[int, ...] = ()
     audit_enabled: bool = True
     audit_log_allowed: bool = True
 
@@ -152,9 +151,7 @@ def load_shield_config() -> ShieldConfig:
         raw_profiles = ["dev-standard"]
     profiles = tuple(raw_profiles)
 
-    gate_port = section.get("gate_port", DEFAULT_GATE_PORT)
-    if isinstance(gate_port, bool) or not isinstance(gate_port, int) or not 1 <= gate_port <= 65535:
-        gate_port = DEFAULT_GATE_PORT
+    loopback_ports = _parse_loopback_ports(section.get("loopback_ports", []))
 
     audit = section.get("audit", {})
     if not isinstance(audit, dict):
@@ -170,15 +167,31 @@ def load_shield_config() -> ShieldConfig:
     return ShieldConfig(
         mode=mode,
         default_profiles=profiles,
-        gate_port=gate_port,
+        loopback_ports=loopback_ports,
         audit_enabled=audit_enabled,
         audit_log_allowed=audit_log_allowed,
     )
 
 
-def get_shield_gate_port() -> int:
-    """Return the gate server port for shield rules."""
-    return load_shield_config().gate_port
+def _parse_loopback_ports(raw: object) -> tuple[int, ...]:
+    """Parse and validate loopback_ports from config YAML.
+
+    Accepts a list of ints or a single int.  Invalid entries are silently
+    dropped.
+    """
+    if isinstance(raw, bool):
+        return ()
+    if isinstance(raw, int):
+        raw = [raw]
+    if not isinstance(raw, list):
+        return ()
+    ports: list[int] = []
+    for v in raw:
+        if isinstance(v, bool) or not isinstance(v, int):
+            continue
+        if 1 <= v <= 65535:
+            ports.append(v)
+    return tuple(ports)
 
 
 def _auto_detect_mode() -> ShieldMode:

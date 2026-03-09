@@ -11,7 +11,7 @@ Optional. Located at `~/.config/terok-shield/config.yml`
 mode: hook              # currently only "hook" is supported
 default_profiles:
   - dev-standard
-gate_port: 9418
+loopback_ports: []      # TCP ports forwarded to host loopback (e.g. [8080, 9090])
 audit:
   enabled: true
   log_allowed: true
@@ -21,7 +21,7 @@ audit:
 |-----|---------|-------------|
 | `mode` | `auto` | Firewall mode. `auto` selects the best available mode |
 | `default_profiles` | `["dev-standard"]` | Profiles used when resolving without explicit profile list |
-| `gate_port` | `9418` | Loopback port allowed for the gate server |
+| `loopback_ports` | `[]` | TCP ports forwarded to host loopback (via pasta `-T`) |
 | `audit.enabled` | `true` | Enable JSON-lines audit logging |
 | `audit.log_allowed` | `true` | Log allowed connections (not just denied) |
 

@@ -77,10 +77,24 @@ class TestHookRuleset(unittest.TestCase):
         rs = hook_ruleset(dns=LINK_LOCAL_DNS)
         self.assertIn(LINK_LOCAL_DNS, rs)
 
-    def test_contains_gate_port(self) -> None:
-        """Gate server port must appear in ruleset."""
-        rs = hook_ruleset(gate_port=9418)
-        self.assertIn("tcp dport 9418", rs)
+    def test_no_loopback_ports_by_default(self) -> None:
+        """Default ruleset has no port-specific loopback rules."""
+        rs = hook_ruleset()
+        # Only tcp dport lines should be for DNS (port 53)
+        tcp_lines = [ln.strip() for ln in rs.splitlines() if "tcp dport" in ln]
+        for line in tcp_lines:
+            self.assertIn("53", line, f"Unexpected non-DNS tcp dport rule: {line}")
+
+    def test_single_loopback_port(self) -> None:
+        """Single loopback port appears in ruleset."""
+        rs = hook_ruleset(loopback_ports=(9418,))
+        self.assertIn('tcp dport 9418 oifname "lo" accept', rs)
+
+    def test_multiple_loopback_ports(self) -> None:
+        """Multiple loopback ports each get a rule."""
+        rs = hook_ruleset(loopback_ports=(8080, 9090))
+        self.assertIn('tcp dport 8080 oifname "lo" accept', rs)
+        self.assertIn('tcp dport 9090 oifname "lo" accept', rs)
 
     def test_allow_before_rfc1918(self) -> None:
         """Allow set must appear before RFC1918 reject rules."""
@@ -120,22 +134,17 @@ class TestHookRuleset(unittest.TestCase):
         with self.assertRaises(ValueError):
             hook_ruleset(dns="not-an-ip")
 
-    def test_custom_gate_port(self) -> None:
-        """Custom gate port must appear in ruleset."""
-        rs = hook_ruleset(gate_port=12345)
-        self.assertIn("tcp dport 12345", rs)
-
-    def test_rejects_invalid_gate_port(self) -> None:
-        """Reject out-of-range port."""
+    def test_rejects_invalid_loopback_port(self) -> None:
+        """Reject out-of-range loopback port."""
         with self.assertRaises(ValueError):
-            hook_ruleset(gate_port=0)
+            hook_ruleset(loopback_ports=(0,))
         with self.assertRaises(ValueError):
-            hook_ruleset(gate_port=99999)
+            hook_ruleset(loopback_ports=(99999,))
 
-    def test_rejects_bool_gate_port(self) -> None:
+    def test_rejects_bool_loopback_port(self) -> None:
         """Reject boolean port (bool is subclass of int)."""
         with self.assertRaises(ValueError):
-            hook_ruleset(gate_port=True)
+            hook_ruleset(loopback_ports=(True,))
 
 
 class TestAddElements(unittest.TestCase):

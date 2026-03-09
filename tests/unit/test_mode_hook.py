@@ -211,8 +211,8 @@ class TestPreStart(unittest.TestCase):
         self._hooks_patch.stop()
         self._tmpdir_obj.cleanup()
 
-    def _config(self, gate_port=9418):
-        return ShieldConfig(mode=ShieldMode.HOOK, gate_port=gate_port)
+    def _config(self, loopback_ports=()):
+        return ShieldConfig(mode=ShieldMode.HOOK, loopback_ports=loopback_ports)
 
     @mock.patch("terok_shield.mode_hook.resolve_and_cache")
     @mock.patch("terok_shield.mode_hook.compose_profiles", return_value=[TEST_DOMAIN])
@@ -282,11 +282,22 @@ class TestPreStart(unittest.TestCase):
     @mock.patch("terok_shield.mode_hook.compose_profiles", return_value=[TEST_DOMAIN])
     @mock.patch("os.geteuid", return_value=1000)
     @mock.patch("terok_shield.mode_hook._detect_rootless_network_mode", return_value="pasta")
-    def test_custom_gate_port(self, _mode, _euid, _compose, _resolve):
-        """Gate port from config appears in pasta network args."""
-        args = pre_start(self._config(gate_port=1234), "test", ["dev-standard"])
+    def test_loopback_ports_in_pasta(self, _mode, _euid, _compose, _resolve):
+        """Loopback ports from config appear in pasta network args."""
+        args = pre_start(self._config(loopback_ports=(1234, 5678)), "test", ["dev-standard"])
         net_idx = args.index("--network") + 1
-        self.assertIn("1234", args[net_idx])
+        self.assertIn("-T,1234", args[net_idx])
+        self.assertIn("-T,5678", args[net_idx])
+
+    @mock.patch("terok_shield.mode_hook.resolve_and_cache")
+    @mock.patch("terok_shield.mode_hook.compose_profiles", return_value=[TEST_DOMAIN])
+    @mock.patch("os.geteuid", return_value=1000)
+    @mock.patch("terok_shield.mode_hook._detect_rootless_network_mode", return_value="pasta")
+    def test_empty_loopback_ports_pasta(self, _mode, _euid, _compose, _resolve):
+        """Empty loopback ports produce plain pasta: network arg."""
+        args = pre_start(self._config(), "test", ["dev-standard"])
+        net_idx = args.index("--network") + 1
+        self.assertEqual(args[net_idx], "pasta:")
 
     @mock.patch("terok_shield.mode_hook.resolve_and_cache")
     @mock.patch("terok_shield.mode_hook.compose_profiles", return_value=[TEST_DOMAIN])

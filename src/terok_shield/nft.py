@@ -17,7 +17,6 @@ import re
 import textwrap
 
 from .nft_constants import (
-    DEFAULT_GATE_PORT,
     NFT_TABLE,
     PASTA_DNS,
     RFC1918,
@@ -76,20 +75,28 @@ def _audit_allow_rule() -> str:
     return '        ip daddr @allow_v4 limit rate 10/second log prefix "TEROK_SHIELD_ALLOWED: " counter accept'
 
 
-def hook_ruleset(dns: str = PASTA_DNS, gate_port: int = DEFAULT_GATE_PORT) -> str:
+def _loopback_port_rules(ports: tuple[int, ...]) -> str:
+    """Generate nft accept rules for loopback ports."""
+    return "\n".join(f'            tcp dport {p} oifname "lo" accept' for p in ports)
+
+
+def hook_ruleset(dns: str = PASTA_DNS, loopback_ports: tuple[int, ...] = ()) -> str:
     """Generate a per-container nftables ruleset for hook mode.
 
     Applied by the OCI hook into the container's own netns.
 
     Chain order (output):
-        IPv6 drop -> loopback -> established -> DNS -> gate port -> allow set -> RFC1918 reject -> deny
+        IPv6 drop -> loopback -> established -> DNS -> loopback ports -> allow set -> RFC1918 reject -> deny
 
     Args:
         dns: DNS server address (pasta default forwarder).
-        gate_port: Gate server port to allow on loopback.
+        loopback_ports: TCP ports to allow on the loopback interface.
     """
     safe_ip(dns)
-    _safe_port(gate_port)
+    for p in loopback_ports:
+        _safe_port(p)
+    port_rules = _loopback_port_rules(loopback_ports)
+    port_block = f"\n{port_rules}\n" if port_rules else "\n"
     return textwrap.dedent(f"""\
         table {NFT_TABLE} {{
             set allow_v4 {{ type ipv4_addr; flags interval; }}
@@ -100,8 +107,7 @@ def hook_ruleset(dns: str = PASTA_DNS, gate_port: int = DEFAULT_GATE_PORT) -> st
                 oifname "lo" accept
                 ct state established,related accept
                 udp dport 53 ip daddr {dns} accept
-                tcp dport 53 ip daddr {dns} accept
-                tcp dport {gate_port} oifname "lo" accept
+                tcp dport 53 ip daddr {dns} accept{port_block}\
         {_audit_allow_rule()}
                 ip daddr @allow_v4 accept
         {_rfc1918_rules()}

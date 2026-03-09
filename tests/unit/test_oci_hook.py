@@ -393,12 +393,16 @@ class TestIpClassification(unittest.TestCase):
 class TestHookMain(unittest.TestCase):
     """Tests for hook_main entry point."""
 
+    @unittest.mock.patch("terok_shield.oci_hook.load_shield_config")
     @unittest.mock.patch("terok_shield.oci_hook.apply_hook")
-    def test_success(self, mock_apply: unittest.mock.Mock) -> None:
+    def test_success(self, mock_apply: unittest.mock.Mock, mock_cfg: unittest.mock.Mock) -> None:
         """Return 0 on success (hook mode createRuntime)."""
+        from terok_shield.config import ShieldConfig
+
+        mock_cfg.return_value = ShieldConfig()
         rc = hook_main(_oci_state("test-ctr", 42))
         self.assertEqual(rc, 0)
-        mock_apply.assert_called_once_with("test-ctr", "42")
+        mock_apply.assert_called_once_with("test-ctr", "42", loopback_ports=())
 
     @unittest.mock.patch("terok_shield.oci_hook.apply_hook")
     def test_invalid_json(self, mock_apply: unittest.mock.Mock) -> None:
@@ -407,9 +411,15 @@ class TestHookMain(unittest.TestCase):
         self.assertEqual(rc, 1)
         mock_apply.assert_not_called()
 
+    @unittest.mock.patch("terok_shield.oci_hook.load_shield_config")
     @unittest.mock.patch("terok_shield.oci_hook.apply_hook", side_effect=RuntimeError("boom"))
-    def test_runtime_error(self, mock_apply: unittest.mock.Mock) -> None:
+    def test_runtime_error(
+        self, mock_apply: unittest.mock.Mock, mock_cfg: unittest.mock.Mock
+    ) -> None:
         """Return 1 on RuntimeError from apply_hook."""
+        from terok_shield.config import ShieldConfig
+
+        mock_cfg.return_value = ShieldConfig()
         rc = hook_main(_oci_state())
         self.assertEqual(rc, 1)
 
