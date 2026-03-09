@@ -86,8 +86,8 @@ class TestShieldAllow(unittest.TestCase):
     def test_resolves_domain(self, mock_dig, mock_allow, _log):
         """shield_allow resolves domains via dig."""
         config = ShieldConfig(mode=ShieldMode.HOOK)
-        ips = shield_allow("test", "example.com", config=config)
-        mock_dig.assert_called_once_with("example.com")
+        ips = shield_allow("test", TEST_DOMAIN, config=config)
+        mock_dig.assert_called_once_with(TEST_DOMAIN)
         mock_allow.assert_called_once_with("test", TEST_IP1)
         self.assertEqual(ips, [TEST_IP1])
 

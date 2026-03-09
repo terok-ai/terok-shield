@@ -67,7 +67,7 @@ class TestAPILifecycle:
             # 5. Allow target IPs (Cloudflare anycast may respond from either)
             allowed: list[str] = []
             for ip in ALLOWED_TARGET_IPS:
-                allowed = shield_allow(name, ip, config=cfg)
+                allowed.extend(shield_allow(name, ip, config=cfg))
             assert all(ip in allowed for ip in ALLOWED_TARGET_IPS)
 
             # 6. Verify traffic flows
