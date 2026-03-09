@@ -10,6 +10,7 @@ immediately when terok starts depending on terok-shield.
 import dataclasses
 import inspect
 import unittest
+from collections.abc import Iterator
 from pathlib import Path
 
 import terok_shield
@@ -48,7 +49,7 @@ class TestAPISurface(unittest.TestCase):
     # ── ShieldMode ───────────────────────────────────────
 
     def test_shield_mode_members(self):
-        """ShieldMode has exactly STANDARD and HARDENED."""
+        """ShieldMode has exactly HOOK and BRIDGE."""
         members = {m.name: m.value for m in ShieldMode}
         self.assertEqual(members, {"HOOK": "hook", "BRIDGE": "bridge"})
 
@@ -215,7 +216,7 @@ class TestAPISurface(unittest.TestCase):
                     ("container", POS, empty),
                     ("n", POS, 50),
                 ],
-                inspect.signature(terok_shield.tail_log).return_annotation,
+                Iterator[dict],
             ),
         ]
 

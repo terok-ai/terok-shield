@@ -80,7 +80,7 @@ class TestAPILifecycle:
 
             # 9. Check status
             status = shield_status(config=cfg)
-            assert status["mode"] == "hook"
+            assert status["mode"] == cfg.mode.value
             assert status["audit_enabled"] is True
 
             # 10. Verify audit trail
