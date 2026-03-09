@@ -60,7 +60,9 @@ class TestCLISetup:
 
         hooks_dir = shield_env / "hooks"
         assert (hooks_dir / "terok-shield-hook.json").is_file()
-        assert (shield_env / "terok-shield-hook").is_file()
+        entrypoint = shield_env / "terok-shield-hook"
+        assert entrypoint.is_file()
+        assert entrypoint.stat().st_mode & 0o100, "Entrypoint must be executable"
 
     def test_cli_setup_idempotent(self, shield_env: Path) -> None:
         """Calling setup twice via CLI succeeds."""
