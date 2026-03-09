@@ -1,3 +1,5 @@
+# Pin third-party actions to full commit SHAs for supply-chain security.
+# GitHub-owned actions (actions/*) may use version tags.
 name: Integration Tests
 
 on:
