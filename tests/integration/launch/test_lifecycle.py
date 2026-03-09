@@ -39,7 +39,7 @@ class TestAPILifecycle:
     def test_full_lifecycle(self, shield_env, _pull_image) -> None:
         """Drive setup → pre_start → allow → deny → audit via public API."""
         cfg = ShieldConfig()
-        name = f"{CTR_PREFIX}-lifecycle-{os.getpid()}"
+        name = f"{CTR_PREFIX}-lifecycle-{os.getpid()}-{os.urandom(4).hex()}"
 
         try:
             # 1. Setup
@@ -51,7 +51,7 @@ class TestAPILifecycle:
             assert len(extra_args) > 0
 
             # 3. Start container with shield args
-            subprocess.run(["podman", "rm", "-f", name], capture_output=True)
+            subprocess.run(["podman", "rm", "-f", name], capture_output=True, timeout=30)
             subprocess.run(
                 ["podman", "run", "-d", "--name", name, *extra_args, IMAGE, "sleep", "120"],
                 check=True,
@@ -91,4 +91,4 @@ class TestAPILifecycle:
             assert "denied" in actions
 
         finally:
-            subprocess.run(["podman", "rm", "-f", name], capture_output=True)
+            subprocess.run(["podman", "rm", "-f", name], capture_output=True, timeout=30)

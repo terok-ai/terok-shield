@@ -89,21 +89,24 @@ class TestAPISurface(unittest.TestCase):
     # ── Function signatures ──────────────────────────────
 
     def _assert_sig(self, fn, expected_params, expected_return):
-        """Assert a function's parameter names/kinds/defaults and return annotation.
+        """Assert a function's parameter names/kinds/defaults/annotations and return annotation.
 
         Args:
             fn: The callable to inspect.
-            expected_params: List of (name, kind, default) tuples.
-                Use inspect.Parameter.empty for no default.
+            expected_params: List of (name, kind, default, annotation) tuples.
+                Use inspect.Parameter.empty for no default or annotation.
             expected_return: Expected return annotation.
         """
         sig = inspect.signature(fn)
         params = list(sig.parameters.values())
         self.assertEqual(len(params), len(expected_params), f"{fn.__name__}: param count mismatch")
-        for param, (exp_name, exp_kind, exp_default) in zip(params, expected_params, strict=True):
+        for param, (exp_name, exp_kind, exp_default, exp_ann) in zip(
+            params, expected_params, strict=True
+        ):
             self.assertEqual(param.name, exp_name, f"{fn.__name__}.{exp_name}: name")
             self.assertEqual(param.kind, exp_kind, f"{fn.__name__}.{exp_name}: kind")
             self.assertEqual(param.default, exp_default, f"{fn.__name__}.{exp_name}: default")
+            self.assertEqual(param.annotation, exp_ann, f"{fn.__name__}.{exp_name}: annotation")
         self.assertEqual(sig.return_annotation, expected_return, f"{fn.__name__}: return")
 
     def test_function_signatures(self):
@@ -112,76 +115,80 @@ class TestAPISurface(unittest.TestCase):
         KW = inspect.Parameter.KEYWORD_ONLY
         empty = inspect.Parameter.empty
 
+        cfg_or_none = ShieldConfig | None
+        str_list_or_none = list[str] | None
+        str_or_none = str | None
+
         cases = [
             (
                 terok_shield.shield_setup,
-                [("config", KW, None)],
+                [("config", KW, None, cfg_or_none)],
                 None,
             ),
             (
                 terok_shield.shield_status,
-                [("config", KW, None)],
+                [("config", KW, None, cfg_or_none)],
                 dict,
             ),
             (
                 terok_shield.shield_pre_start,
                 [
-                    ("container", POS, empty),
-                    ("profiles", POS, None),
-                    ("config", KW, None),
+                    ("container", POS, empty, str),
+                    ("profiles", POS, None, str_list_or_none),
+                    ("config", KW, None, cfg_or_none),
                 ],
                 list[str],
             ),
             (
                 terok_shield.shield_post_start,
                 [
-                    ("container", POS, empty),
-                    ("profiles", POS, None),
-                    ("config", KW, None),
+                    ("container", POS, empty, str),
+                    ("profiles", POS, None, str_list_or_none),
+                    ("config", KW, None, cfg_or_none),
                 ],
                 None,
             ),
             (
                 terok_shield.shield_pre_stop,
                 [
-                    ("container", POS, empty),
-                    ("config", KW, None),
+                    ("container", POS, empty, str),
+                    ("config", KW, None, cfg_or_none),
                 ],
                 None,
             ),
             (
                 terok_shield.shield_allow,
                 [
-                    ("container", POS, empty),
-                    ("target", POS, empty),
-                    ("config", KW, None),
+                    ("container", POS, empty, str),
+                    ("target", POS, empty, str),
+                    ("config", KW, None, cfg_or_none),
                 ],
                 list[str],
             ),
             (
                 terok_shield.shield_deny,
                 [
-                    ("container", POS, empty),
-                    ("target", POS, empty),
-                    ("config", KW, None),
+                    ("container", POS, empty, str),
+                    ("target", POS, empty, str),
+                    ("config", KW, None, cfg_or_none),
                 ],
                 list[str],
             ),
             (
                 terok_shield.shield_rules,
                 [
-                    ("container", POS, empty),
-                    ("config", KW, None),
+                    ("container", POS, empty, str),
+                    ("config", KW, None, cfg_or_none),
                 ],
                 str,
             ),
             (
                 terok_shield.shield_resolve,
                 [
-                    ("container", POS, empty),
-                    ("profiles", POS, None),
-                    ("config", KW, None),
-                    ("force", KW, False),
+                    ("container", POS, empty, str),
+                    ("profiles", POS, None, str_list_or_none),
+                    ("config", KW, None, cfg_or_none),
+                    ("force", KW, False, bool),
                 ],
                 list[str],
             ),
@@ -203,18 +210,18 @@ class TestAPISurface(unittest.TestCase):
             (
                 terok_shield.log_event,
                 [
-                    ("container", POS, empty),
-                    ("action", POS, empty),
-                    ("dest", KW, None),
-                    ("detail", KW, None),
+                    ("container", POS, empty, str),
+                    ("action", POS, empty, str),
+                    ("dest", KW, None, str_or_none),
+                    ("detail", KW, None, str_or_none),
                 ],
                 None,
             ),
             (
                 terok_shield.tail_log,
                 [
-                    ("container", POS, empty),
-                    ("n", POS, 50),
+                    ("container", POS, empty, str),
+                    ("n", POS, 50, int),
                 ],
                 Iterator[dict],
             ),
