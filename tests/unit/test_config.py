@@ -388,3 +388,27 @@ class TestLoopbackPortsValidation(unittest.TestCase):
             with unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": tmp}):
                 cfg = load_shield_config()
                 self.assertEqual(cfg.loopback_ports, (8080, 9090))
+
+    def test_bool_value_returns_empty(self) -> None:
+        """Bare boolean loopback_ports value returns empty tuple."""
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config_file = Path(tmp) / "config.yml"
+            config_file.write_text("mode: hook\nloopback_ports: true\n")
+            with unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": tmp}):
+                cfg = load_shield_config()
+                self.assertEqual(cfg.loopback_ports, ())
+
+    def test_string_value_returns_empty(self) -> None:
+        """String loopback_ports value returns empty tuple."""
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config_file = Path(tmp) / "config.yml"
+            config_file.write_text("mode: hook\nloopback_ports: not-a-list\n")
+            with unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": tmp}):
+                cfg = load_shield_config()
+                self.assertEqual(cfg.loopback_ports, ())

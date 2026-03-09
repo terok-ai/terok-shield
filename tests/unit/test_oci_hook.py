@@ -9,7 +9,7 @@ import unittest
 import unittest.mock
 from pathlib import Path
 
-from terok_shield.config import ANNOTATION_KEY, ANNOTATION_NAME_KEY
+from terok_shield.config import ANNOTATION_KEY, ANNOTATION_NAME_KEY, ShieldConfig
 from terok_shield.nft_constants import RFC1918
 from terok_shield.oci_hook import _parse_oci_state, _read_resolved_ips, apply_hook, hook_main
 from terok_shield.run import ExecError
@@ -397,8 +397,6 @@ class TestHookMain(unittest.TestCase):
     @unittest.mock.patch("terok_shield.oci_hook.apply_hook")
     def test_success(self, mock_apply: unittest.mock.Mock, mock_cfg: unittest.mock.Mock) -> None:
         """Return 0 on success (hook mode createRuntime)."""
-        from terok_shield.config import ShieldConfig
-
         mock_cfg.return_value = ShieldConfig()
         rc = hook_main(_oci_state("test-ctr", 42))
         self.assertEqual(rc, 0)
@@ -417,8 +415,6 @@ class TestHookMain(unittest.TestCase):
         self, mock_apply: unittest.mock.Mock, mock_cfg: unittest.mock.Mock
     ) -> None:
         """Return 1 on RuntimeError from apply_hook."""
-        from terok_shield.config import ShieldConfig
-
         mock_cfg.return_value = ShieldConfig()
         rc = hook_main(_oci_state())
         self.assertEqual(rc, 1)

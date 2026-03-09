@@ -62,7 +62,7 @@ blocked.
 │  │  │  (applied by OCI hook)        │  │   │
 │  │  │                               │  │   │
 │  │  │  policy: DROP                 │  │   │
-│  │  │  allow: DNS, loopback, @allow  │  │   │
+│  │  │  allow: DNS, loopback, @allow_v4│  │   │
 │  │  │  reject: RFC1918              │  │   │
 │  │  └────────────────────────────────┘  │   │
 │  │                                      │   │
