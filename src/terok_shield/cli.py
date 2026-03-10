@@ -13,10 +13,13 @@ from . import (
     list_log_files,
     shield_allow,
     shield_deny,
+    shield_down,
     shield_resolve,
     shield_rules,
     shield_setup,
+    shield_state,
     shield_status,
+    shield_up,
     tail_log,
 )
 
@@ -54,6 +57,19 @@ def _build_parser() -> argparse.ArgumentParser:
     p_deny = sub.add_parser("deny", help="Live-deny a domain or IP for a container")
     p_deny.add_argument("container", help="Container name or ID")
     p_deny.add_argument("target", help="Domain name or IP address to deny")
+
+    p_down = sub.add_parser("down", help="Switch container to bypass mode (accept-all + log)")
+    p_down.add_argument("container", help="Container name or ID")
+    p_down.add_argument(
+        "--all",
+        action="store_true",
+        default=False,
+        dest="allow_all",
+        help="Also allow RFC1918/link-local traffic",
+    )
+
+    p_up = sub.add_parser("up", help="Restore deny-all mode for a container")
+    p_up.add_argument("container", help="Container name or ID")
 
     p_rules = sub.add_parser("rules", help="Show current nft rules for a container")
     p_rules.add_argument("container", help="Container name or ID")
@@ -94,6 +110,10 @@ def _dispatch(args: argparse.Namespace) -> None:
         _cmd_allow(args.container, args.target)
     elif cmd == "deny":
         _cmd_deny(args.container, args.target)
+    elif cmd == "down":
+        _cmd_down(args.container, allow_all=args.allow_all)
+    elif cmd == "up":
+        _cmd_up(args.container)
     elif cmd == "rules":
         _cmd_rules(args.container)
     elif cmd == "logs":
@@ -145,8 +165,23 @@ def _cmd_deny(container: str, target: str) -> None:
         sys.exit(1)
 
 
+def _cmd_down(container: str, *, allow_all: bool) -> None:
+    """Switch container to bypass mode."""
+    shield_down(container, allow_all=allow_all)
+    label = " (all traffic)" if allow_all else ""
+    print(f"Shield down for {container}{label}")
+
+
+def _cmd_up(container: str) -> None:
+    """Restore deny-all mode."""
+    shield_up(container)
+    print(f"Shield up for {container}")
+
+
 def _cmd_rules(container: str) -> None:
     """Show nft rules for a container."""
+    state = shield_state(container)
+    print(f"State: {state.value}")
     rules = shield_rules(container)
     if rules.strip():
         print(rules)

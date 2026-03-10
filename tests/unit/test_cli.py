@@ -17,8 +17,11 @@ class TestBuildParser(unittest.TestCase):
         """Parser has all expected subcommands."""
         parser = _build_parser()
         # Parse known subcommands without error
-        for cmd in ["setup", "status", "rules", "logs"]:
-            ns = parser.parse_args([cmd] if cmd in ("setup", "status", "logs") else [cmd, "ctr"])
+        for cmd in ["setup", "status", "rules", "logs", "down", "up"]:
+            if cmd in ("setup", "status", "logs"):
+                ns = parser.parse_args([cmd])
+            else:
+                ns = parser.parse_args([cmd, "ctr"])
             self.assertEqual(ns.command, cmd)
 
     def test_resolve_requires_container(self):
@@ -54,6 +57,26 @@ class TestBuildParser(unittest.TestCase):
         self.assertEqual(ns.n, 50)
         ns = parser.parse_args(["logs", "-n", "10"])
         self.assertEqual(ns.n, 10)
+
+    def test_down_requires_container(self):
+        """Down subcommand requires container arg."""
+        parser = _build_parser()
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["down"])
+
+    def test_down_allow_all_flag(self):
+        """Down subcommand has --all flag defaulting to False."""
+        parser = _build_parser()
+        ns = parser.parse_args(["down", "ctr"])
+        self.assertFalse(ns.allow_all)
+        ns = parser.parse_args(["down", "ctr", "--all"])
+        self.assertTrue(ns.allow_all)
+
+    def test_up_requires_container(self):
+        """Up subcommand requires container arg."""
+        parser = _build_parser()
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["up"])
 
 
 class TestMainNoCommand(unittest.TestCase):
@@ -127,12 +150,35 @@ class TestMainDispatch(unittest.TestCase):
         main(["deny", "test", "192.0.2.1"])
         mock_deny.assert_called_once_with("test", "192.0.2.1")
 
+    @mock.patch("terok_shield.cli.shield_state")
     @mock.patch("terok_shield.cli.shield_rules")
-    def test_rules(self, mock_rules):
+    def test_rules(self, mock_rules, mock_state):
         """CLI rules calls shield_rules."""
+        from terok_shield import ShieldState
+
+        mock_state.return_value = ShieldState.UP
         mock_rules.return_value = "table inet terok_shield {}"
         main(["rules", "test"])
         mock_rules.assert_called_once_with("test")
+        mock_state.assert_called_once_with("test")
+
+    @mock.patch("terok_shield.cli.shield_down")
+    def test_down(self, mock_down):
+        """CLI down calls shield_down."""
+        main(["down", "test"])
+        mock_down.assert_called_once_with("test", allow_all=False)
+
+    @mock.patch("terok_shield.cli.shield_down")
+    def test_down_all(self, mock_down):
+        """CLI down --all calls shield_down with allow_all=True."""
+        main(["down", "test", "--all"])
+        mock_down.assert_called_once_with("test", allow_all=True)
+
+    @mock.patch("terok_shield.cli.shield_up")
+    def test_up(self, mock_up):
+        """CLI up calls shield_up."""
+        main(["up", "test"])
+        mock_up.assert_called_once_with("test")
 
 
 class TestMainErrorHandling(unittest.TestCase):

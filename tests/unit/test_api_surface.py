@@ -14,23 +14,27 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import terok_shield
-from terok_shield import ExecError, ShieldConfig, ShieldMode
+from terok_shield import ExecError, ShieldConfig, ShieldMode, ShieldState
 
 EXPECTED_ALL = [
     "ExecError",
     "ShieldConfig",
     "ShieldMode",
+    "ShieldState",
     "list_log_files",
     "list_profiles",
     "load_shield_config",
     "log_event",
     "shield_allow",
     "shield_deny",
+    "shield_down",
     "shield_pre_start",
     "shield_resolve",
     "shield_rules",
     "shield_setup",
+    "shield_state",
     "shield_status",
+    "shield_up",
     "tail_log",
 ]
 
@@ -50,6 +54,20 @@ class TestAPISurface(unittest.TestCase):
         """ShieldMode has exactly HOOK."""
         members = {m.name: m.value for m in ShieldMode}
         self.assertEqual(members, {"HOOK": "hook"})
+
+    def test_shield_state_members(self):
+        """ShieldState has UP, DOWN, DOWN_ALL, INACTIVE, ERROR."""
+        members = {m.name: m.value for m in ShieldState}
+        self.assertEqual(
+            members,
+            {
+                "UP": "up",
+                "DOWN": "down",
+                "DOWN_ALL": "down_all",
+                "INACTIVE": "inactive",
+                "ERROR": "error",
+            },
+        )
 
     # ── ShieldConfig ─────────────────────────────────────
 
@@ -172,6 +190,31 @@ class TestAPISurface(unittest.TestCase):
                     ("force", KW, False, bool),
                 ],
                 list[str],
+            ),
+            (
+                terok_shield.shield_down,
+                [
+                    ("container", POS, empty, str),
+                    ("allow_all", KW, False, bool),
+                    ("config", KW, None, cfg_or_none),
+                ],
+                None,
+            ),
+            (
+                terok_shield.shield_up,
+                [
+                    ("container", POS, empty, str),
+                    ("config", KW, None, cfg_or_none),
+                ],
+                None,
+            ),
+            (
+                terok_shield.shield_state,
+                [
+                    ("container", POS, empty, str),
+                    ("config", KW, None, cfg_or_none),
+                ],
+                ShieldState,
             ),
             (
                 terok_shield.list_log_files,

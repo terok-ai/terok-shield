@@ -23,3 +23,6 @@ RFC1918: tuple[str, ...] = (
     "192.168.0.0/16",
     "169.254.0.0/16",
 )
+
+# ── Log prefixes ───────────────────────────────────────
+BYPASS_LOG_PREFIX = "TEROK_SHIELD_BYPASS"

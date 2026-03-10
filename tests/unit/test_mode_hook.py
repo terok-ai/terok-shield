@@ -9,7 +9,13 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from terok_shield.config import ANNOTATION_KEY, ANNOTATION_NAME_KEY, ShieldConfig, ShieldMode
+from terok_shield.config import (
+    ANNOTATION_KEY,
+    ANNOTATION_NAME_KEY,
+    ShieldConfig,
+    ShieldMode,
+    ShieldState,
+)
 from terok_shield.mode_hook import (
     _detect_rootless_network_mode,
     _generate_entrypoint,
@@ -20,7 +26,11 @@ from terok_shield.mode_hook import (
     list_rules,
     pre_start,
     setup,
+    shield_down,
+    shield_state,
+    shield_up,
 )
+from terok_shield.nft import bypass_ruleset, hook_ruleset
 
 from ..testnet import TEST_DOMAIN, TEST_IP1
 
@@ -364,3 +374,139 @@ class TestListRules(unittest.TestCase):
         result = list_rules("test")
         self.assertIn("terok_shield", result)
         mock_nsenter.assert_called_once()
+
+
+class TestShieldDown(unittest.TestCase):
+    """Test shield_down bypass mode."""
+
+    def _config(self, loopback_ports=()):
+        return ShieldConfig(mode=ShieldMode.HOOK, loopback_ports=loopback_ports)
+
+    @mock.patch("terok_shield.mode_hook.nft_via_nsenter")
+    def test_applies_bypass_ruleset(self, mock_nsenter):
+        """shield_down applies bypass ruleset via nft_via_nsenter."""
+        mock_nsenter.side_effect = [
+            "",  # delete + apply
+            bypass_ruleset(),  # verify (list ruleset)
+        ]
+        shield_down(self._config(), "test")
+        self.assertEqual(mock_nsenter.call_count, 2)
+        # First call uses stdin
+        apply_kwargs = mock_nsenter.call_args_list[0][1]
+        self.assertIn("delete table", apply_kwargs["stdin"])
+        self.assertIn("policy accept", apply_kwargs["stdin"])
+
+    @mock.patch("terok_shield.mode_hook.nft_via_nsenter")
+    def test_allow_all_flag(self, mock_nsenter):
+        """shield_down with allow_all omits RFC1918 rules."""
+        mock_nsenter.side_effect = [
+            "",
+            bypass_ruleset(allow_all=True),
+        ]
+        shield_down(self._config(), "test", allow_all=True)
+        apply_kwargs = mock_nsenter.call_args_list[0][1]
+        self.assertNotIn("RFC1918", apply_kwargs["stdin"])
+
+    @mock.patch("terok_shield.mode_hook.nft_via_nsenter")
+    def test_verification_failure_raises(self, mock_nsenter):
+        """shield_down raises RuntimeError on verification failure."""
+        mock_nsenter.side_effect = [
+            "",
+            "some garbage",  # invalid verify output
+        ]
+        with self.assertRaises(RuntimeError) as ctx:
+            shield_down(self._config(), "test")
+        self.assertIn("verification failed", str(ctx.exception))
+
+
+class TestShieldUp(unittest.TestCase):
+    """Test shield_up restore mode."""
+
+    def _config(self):
+        return ShieldConfig(mode=ShieldMode.HOOK)
+
+    @mock.patch("terok_shield.mode_hook.nft_via_nsenter")
+    @mock.patch("terok_shield.mode_hook.shield_resolved_dir")
+    def test_applies_hook_ruleset(self, mock_dir, mock_nsenter):
+        """shield_up applies hook ruleset via nft_via_nsenter."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            mock_dir.return_value = Path(td)
+            mock_nsenter.side_effect = [
+                "",  # delete + apply
+                hook_ruleset(),  # verify
+            ]
+            shield_up(self._config(), "test")
+            self.assertEqual(mock_nsenter.call_count, 2)
+            apply_kwargs = mock_nsenter.call_args_list[0][1]
+            self.assertIn("delete table", apply_kwargs["stdin"])
+            self.assertIn("policy drop", apply_kwargs["stdin"])
+
+    @mock.patch("terok_shield.mode_hook.nft_via_nsenter")
+    @mock.patch("terok_shield.mode_hook.shield_resolved_dir")
+    def test_readds_cached_ips(self, mock_dir, mock_nsenter):
+        """shield_up re-adds IPs from resolved file."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            mock_dir.return_value = Path(td)
+            resolved = Path(td) / "test.resolved"
+            resolved.write_text(f"{TEST_IP1}\n")
+            mock_nsenter.side_effect = [
+                "",  # delete + apply
+                "",  # add elements
+                hook_ruleset(),  # verify
+            ]
+            shield_up(self._config(), "test")
+            self.assertEqual(mock_nsenter.call_count, 3)
+            add_kwargs = mock_nsenter.call_args_list[1][1]
+            self.assertIn(TEST_IP1, add_kwargs["stdin"])
+
+    @mock.patch("terok_shield.mode_hook.nft_via_nsenter")
+    @mock.patch("terok_shield.mode_hook.shield_resolved_dir")
+    def test_verification_failure_raises(self, mock_dir, mock_nsenter):
+        """shield_up raises RuntimeError on verification failure."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            mock_dir.return_value = Path(td)
+            mock_nsenter.side_effect = [
+                "",
+                "some garbage",
+            ]
+            with self.assertRaises(RuntimeError) as ctx:
+                shield_up(self._config(), "test")
+            self.assertIn("verification failed", str(ctx.exception))
+
+
+class TestShieldState(unittest.TestCase):
+    """Test shield_state detection."""
+
+    @mock.patch("terok_shield.mode_hook.nft_via_nsenter", return_value="")
+    def test_empty_output_is_inactive(self, _nsenter):
+        """Empty nft output means INACTIVE."""
+        self.assertEqual(shield_state("test"), ShieldState.INACTIVE)
+
+    @mock.patch("terok_shield.mode_hook.nft_via_nsenter")
+    def test_hook_ruleset_is_up(self, mock_nsenter):
+        """Standard hook ruleset detected as UP."""
+        mock_nsenter.return_value = hook_ruleset()
+        self.assertEqual(shield_state("test"), ShieldState.UP)
+
+    @mock.patch("terok_shield.mode_hook.nft_via_nsenter")
+    def test_bypass_ruleset_is_down(self, mock_nsenter):
+        """Bypass ruleset with RFC1918 detected as DOWN."""
+        mock_nsenter.return_value = bypass_ruleset()
+        self.assertEqual(shield_state("test"), ShieldState.DOWN)
+
+    @mock.patch("terok_shield.mode_hook.nft_via_nsenter")
+    def test_bypass_allow_all_is_down_all(self, mock_nsenter):
+        """Bypass ruleset without RFC1918 detected as DOWN_ALL."""
+        mock_nsenter.return_value = bypass_ruleset(allow_all=True)
+        self.assertEqual(shield_state("test"), ShieldState.DOWN_ALL)
+
+    @mock.patch("terok_shield.mode_hook.nft_via_nsenter", return_value="some random nft output")
+    def test_unrecognised_is_error(self, _nsenter):
+        """Unrecognised ruleset detected as ERROR."""
+        self.assertEqual(shield_state("test"), ShieldState.ERROR)

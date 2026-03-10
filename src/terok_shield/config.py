@@ -26,6 +26,23 @@ class ShieldMode(enum.Enum):
     HOOK = "hook"
 
 
+class ShieldState(enum.Enum):
+    """Per-container shield state, derived from the live nft ruleset.
+
+    UP: Normal enforcing mode (deny-all).
+    DOWN: Bypass mode with RFC1918 protection.
+    DOWN_ALL: Bypass mode without RFC1918 protection.
+    INACTIVE: No ruleset found (container stopped or unshielded).
+    ERROR: Ruleset present but unrecognised.
+    """
+
+    UP = "up"
+    DOWN = "down"
+    DOWN_ALL = "down_all"
+    INACTIVE = "inactive"
+    ERROR = "error"
+
+
 @dataclass(frozen=True)
 class ShieldConfig:
     """Resolved shield configuration."""

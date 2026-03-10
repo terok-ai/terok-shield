@@ -9,7 +9,7 @@ Public API for standalone use and integration with terok.
 __version__ = "0.1.1"
 
 from .audit import list_log_files, log_event, tail_log
-from .config import ShieldConfig, ShieldMode, load_shield_config
+from .config import ShieldConfig, ShieldMode, ShieldState, load_shield_config
 from .dns import resolve_and_cache
 from .profiles import compose_profiles, list_profiles
 from .run import ExecError, dig
@@ -183,6 +183,70 @@ def shield_rules(
     return _mode_module(cfg.mode).list_rules(container)
 
 
+def shield_down(
+    container: str,
+    *,
+    allow_all: bool = False,
+    config: ShieldConfig | None = None,
+) -> None:
+    """Switch a running container to bypass mode (accept-all + log).
+
+    Atomically replaces the nft ruleset.  RFC1918 reject rules are kept
+    unless *allow_all* is True.
+
+    Args:
+        container: Container name or ID.
+        allow_all: If True, also allow RFC1918/link-local traffic.
+        config: Shield configuration (loads default if None).
+    """
+    cfg = _load_config(config)
+    mod = _mode_module(cfg.mode)
+    mod.shield_down(cfg, container, allow_all=allow_all)
+
+    if cfg.audit_enabled:
+        detail = "allow_all=True" if allow_all else None
+        log_event(container, "shield_down", detail=detail)
+
+
+def shield_up(
+    container: str,
+    *,
+    config: ShieldConfig | None = None,
+) -> None:
+    """Restore normal deny-all mode for a running container.
+
+    Atomically replaces the nft ruleset and re-adds cached resolved IPs.
+
+    Args:
+        container: Container name or ID.
+        config: Shield configuration (loads default if None).
+    """
+    cfg = _load_config(config)
+    mod = _mode_module(cfg.mode)
+    mod.shield_up(cfg, container)
+
+    if cfg.audit_enabled:
+        log_event(container, "shield_up")
+
+
+def shield_state(
+    container: str,
+    *,
+    config: ShieldConfig | None = None,
+) -> ShieldState:
+    """Query the live nft ruleset to determine a container's shield state.
+
+    Args:
+        container: Container name or ID.
+        config: Shield configuration (loads default if None).
+
+    Returns:
+        The current ShieldState for the container.
+    """
+    cfg = _load_config(config)
+    return _mode_module(cfg.mode).shield_state(container)
+
+
 def shield_resolve(
     container: str,
     profiles: list[str] | None = None,
@@ -217,16 +281,20 @@ __all__ = [
     "ExecError",
     "ShieldConfig",
     "ShieldMode",
+    "ShieldState",
     "list_log_files",
     "list_profiles",
     "load_shield_config",
     "log_event",
     "shield_allow",
     "shield_deny",
+    "shield_down",
     "shield_pre_start",
     "shield_resolve",
     "shield_rules",
     "shield_setup",
+    "shield_state",
     "shield_status",
+    "shield_up",
     "tail_log",
 ]

@@ -8,10 +8,13 @@ import unittest
 from terok_shield.nft import (
     RFC1918,
     add_elements,
+    bypass_ruleset,
     hook_ruleset,
     safe_ip,
+    verify_bypass_ruleset,
     verify_ruleset,
 )
+from terok_shield.nft_constants import BYPASS_LOG_PREFIX
 
 from ..testnet import LINK_LOCAL_DNS, TEST_IP1, TEST_IP2, TEST_NET1
 
@@ -120,9 +123,10 @@ class TestHookRuleset(unittest.TestCase):
         self.assertIn("admin-prohibited", rs)
 
     def test_audit_allow_present(self) -> None:
-        """Allow audit log prefix must be present."""
+        """Allow audit log prefix must be present without rate limit."""
         rs = hook_ruleset()
         self.assertIn("TEROK_SHIELD_ALLOWED", rs)
+        self.assertNotIn("limit rate", rs)
 
     def test_input_chain_present(self) -> None:
         """Input chain must be present."""
@@ -234,3 +238,107 @@ class TestVerifyRuleset(unittest.TestCase):
         errors = verify_ruleset(rs)
         rfc_errors = [e for e in errors if "RFC1918" in e]
         self.assertEqual(rfc_errors, [], "RFC1918 blocks present — no ordering errors expected")
+
+
+class TestBypassRuleset(unittest.TestCase):
+    """Tests for bypass mode ruleset generation."""
+
+    def test_output_policy_accept(self) -> None:
+        """Output chain policy must be accept."""
+        rs = bypass_ruleset()
+        self.assertIn("policy accept", rs)
+
+    def test_input_policy_drop(self) -> None:
+        """Input chain policy must still be drop."""
+        rs = bypass_ruleset()
+        self.assertIn("policy drop", rs)
+
+    def test_ipv6_dropped(self) -> None:
+        """IPv6 traffic must be dropped before any accept rules."""
+        rs = bypass_ruleset()
+        ipv6_pos = rs.index("meta nfproto ipv6 drop")
+        first_accept_pos = rs.index('oifname "lo" accept')
+        self.assertLess(ipv6_pos, first_accept_pos)
+
+    def test_bypass_log_present(self) -> None:
+        """Bypass log prefix must be present."""
+        rs = bypass_ruleset()
+        self.assertIn(BYPASS_LOG_PREFIX, rs)
+
+    def test_bypass_logs_new_connections(self) -> None:
+        """Bypass log rule uses ct state new."""
+        rs = bypass_ruleset()
+        self.assertIn("ct state new log", rs)
+
+    def test_rfc1918_present_by_default(self) -> None:
+        """RFC1918 reject rules present by default."""
+        rs = bypass_ruleset()
+        for net in RFC1918:
+            self.assertIn(net, rs)
+
+    def test_rfc1918_absent_with_allow_all(self) -> None:
+        """RFC1918 reject rules absent when allow_all=True."""
+        rs = bypass_ruleset(allow_all=True)
+        for net in RFC1918:
+            self.assertNotIn(net, rs)
+
+    def test_allow_set_preserved(self) -> None:
+        """allow_v4 set declaration is preserved for transition back."""
+        rs = bypass_ruleset()
+        self.assertIn("set allow_v4", rs)
+
+    def test_no_deny_rule(self) -> None:
+        """Bypass ruleset has no deny log or reject-all rule."""
+        rs = bypass_ruleset()
+        self.assertNotIn("TEROK_SHIELD_DENIED", rs)
+
+    def test_loopback_ports(self) -> None:
+        """Loopback ports appear in bypass ruleset."""
+        rs = bypass_ruleset(loopback_ports=(9418,))
+        self.assertIn('tcp dport 9418 oifname "lo" accept', rs)
+
+    def test_rejects_invalid_dns(self) -> None:
+        """Reject invalid DNS address."""
+        with self.assertRaises(ValueError):
+            bypass_ruleset(dns="not-an-ip")
+
+    def test_rejects_invalid_loopback_port(self) -> None:
+        """Reject out-of-range loopback port."""
+        with self.assertRaises(ValueError):
+            bypass_ruleset(loopback_ports=(0,))
+
+
+class TestVerifyBypassRuleset(unittest.TestCase):
+    """Tests for verify_bypass_ruleset."""
+
+    def test_valid_bypass_ruleset(self) -> None:
+        """Bypass ruleset passes all checks."""
+        rs = bypass_ruleset()
+        errors = verify_bypass_ruleset(rs)
+        self.assertEqual(errors, [])
+
+    def test_valid_bypass_allow_all(self) -> None:
+        """Bypass ruleset with allow_all passes all checks."""
+        rs = bypass_ruleset(allow_all=True)
+        errors = verify_bypass_ruleset(rs)
+        self.assertEqual(errors, [])
+
+    def test_missing_accept_policy(self) -> None:
+        """Report missing accept policy."""
+        errors = verify_bypass_ruleset("policy drop TEROK_SHIELD_BYPASS")
+        self.assertTrue(any("accept" in e for e in errors))
+
+    def test_missing_drop_policy(self) -> None:
+        """Report missing input drop policy."""
+        errors = verify_bypass_ruleset("policy accept TEROK_SHIELD_BYPASS")
+        self.assertTrue(any("drop" in e for e in errors))
+
+    def test_missing_bypass_prefix(self) -> None:
+        """Report missing bypass log prefix."""
+        errors = verify_bypass_ruleset("policy accept policy drop")
+        self.assertTrue(any("bypass" in e for e in errors))
+
+    def test_empty_input(self) -> None:
+        """Report errors for empty input."""
+        errors = verify_bypass_ruleset("")
+        self.assertGreater(len(errors), 0)

@@ -19,12 +19,23 @@ from .config import (
     ANNOTATION_KEY,
     ANNOTATION_NAME_KEY,
     ShieldConfig,
+    ShieldState,
     ensure_shield_dirs,
     shield_hook_entrypoint,
     shield_hooks_dir,
+    shield_resolved_dir,
 )
 from .dns import resolve_and_cache
-from .nft import safe_ip
+from .nft import (
+    BYPASS_LOG_PREFIX,
+    NFT_TABLE,
+    add_elements,
+    bypass_ruleset,
+    hook_ruleset,
+    safe_ip,
+    verify_bypass_ruleset,
+    verify_ruleset,
+)
 from .profiles import compose_profiles
 from .run import nft_via_nsenter, run as run_cmd
 
@@ -225,3 +236,78 @@ def list_rules(container: str) -> str:
         "terok_shield",
         check=False,
     )
+
+
+def shield_down(config: ShieldConfig, container: str, *, allow_all: bool = False) -> None:
+    """Switch a running container to bypass mode (accept-all + log).
+
+    Atomically replaces the nft ruleset with an accept-all ruleset that
+    logs every new connection.  RFC1918 reject rules are kept unless
+    *allow_all* is True.
+
+    Args:
+        config: Shield configuration.
+        container: Container name or ID.
+        allow_all: If True, also allow RFC1918/link-local traffic.
+    """
+    ruleset = bypass_ruleset(
+        loopback_ports=config.loopback_ports,
+        allow_all=allow_all,
+    )
+    stdin = f"delete table {NFT_TABLE}\n{ruleset}"
+    nft_via_nsenter(container, stdin=stdin)
+    output = nft_via_nsenter(container, "list", "ruleset")
+    errors = verify_bypass_ruleset(output)
+    if errors:
+        raise RuntimeError(f"Bypass ruleset verification failed: {'; '.join(errors)}")
+
+
+def shield_up(config: ShieldConfig, container: str) -> None:
+    """Restore normal deny-all mode for a running container.
+
+    Atomically replaces the nft ruleset with the standard hook ruleset,
+    then re-adds any cached resolved IPs from the container's ``.resolved``
+    file.
+
+    Args:
+        config: Shield configuration.
+        container: Container name or ID.
+    """
+    ruleset = hook_ruleset(loopback_ports=config.loopback_ports)
+    stdin = f"delete table {NFT_TABLE}\n{ruleset}"
+    nft_via_nsenter(container, stdin=stdin)
+
+    resolved_file = shield_resolved_dir() / f"{container}.resolved"
+    if resolved_file.is_file():
+        ips = [line.strip() for line in resolved_file.read_text().splitlines() if line.strip()]
+        elements_cmd = add_elements("allow_v4", ips)
+        if elements_cmd:
+            nft_via_nsenter(container, stdin=elements_cmd)
+
+    output = nft_via_nsenter(container, "list", "ruleset")
+    errors = verify_ruleset(output)
+    if errors:
+        raise RuntimeError(f"Ruleset verification failed: {'; '.join(errors)}")
+
+
+def shield_state(container: str) -> ShieldState:
+    """Query the live nft ruleset to determine the container's shield state.
+
+    Args:
+        container: Container name or ID.
+
+    Returns:
+        The current ShieldState for the container.
+    """
+    output = nft_via_nsenter(container, "list", "ruleset", check=False)
+    if not output.strip():
+        return ShieldState.INACTIVE
+
+    if BYPASS_LOG_PREFIX in output:
+        has_rfc1918 = "TEROK_SHIELD_RFC1918" in output
+        return ShieldState.DOWN if has_rfc1918 else ShieldState.DOWN_ALL
+
+    if "policy drop" in output and "TEROK_SHIELD_DENIED" in output:
+        return ShieldState.UP
+
+    return ShieldState.ERROR

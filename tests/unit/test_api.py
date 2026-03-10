@@ -9,13 +9,17 @@ from unittest import mock
 from terok_shield import (
     ShieldConfig,
     ShieldMode,
+    ShieldState,
     shield_allow,
     shield_deny,
+    shield_down,
     shield_pre_start,
     shield_resolve,
     shield_rules,
     shield_setup,
+    shield_state,
     shield_status,
+    shield_up,
 )
 
 from ..testnet import TEST_DOMAIN, TEST_IP1
@@ -153,3 +157,71 @@ class TestShieldResolve(unittest.TestCase):
         shield_resolve("test", ["dev-standard"], config=config, force=True)
         call_kwargs = mock_resolve.call_args[1]
         self.assertEqual(call_kwargs["max_age"], 0)
+
+
+class TestShieldDown(unittest.TestCase):
+    """Test shield_down dispatch."""
+
+    @mock.patch("terok_shield.log_event")
+    @mock.patch("terok_shield.mode_hook.shield_down")
+    def test_dispatches_to_mode_hook(self, mock_down, _log):
+        """shield_down dispatches to mode_hook.shield_down."""
+        config = ShieldConfig(mode=ShieldMode.HOOK)
+        shield_down("test", config=config)
+        mock_down.assert_called_once_with(config, "test", allow_all=False)
+
+    @mock.patch("terok_shield.log_event")
+    @mock.patch("terok_shield.mode_hook.shield_down")
+    def test_allow_all_flag(self, mock_down, _log):
+        """shield_down passes allow_all to mode_hook."""
+        config = ShieldConfig(mode=ShieldMode.HOOK)
+        shield_down("test", allow_all=True, config=config)
+        mock_down.assert_called_once_with(config, "test", allow_all=True)
+
+    @mock.patch("terok_shield.log_event")
+    @mock.patch("terok_shield.mode_hook.shield_down")
+    def test_audit_log(self, _down, mock_log):
+        """shield_down logs event when audit is enabled."""
+        config = ShieldConfig(mode=ShieldMode.HOOK, audit_enabled=True)
+        shield_down("test", config=config)
+        mock_log.assert_called_once_with("test", "shield_down", detail=None)
+
+    @mock.patch("terok_shield.log_event")
+    @mock.patch("terok_shield.mode_hook.shield_down")
+    def test_audit_log_allow_all(self, _down, mock_log):
+        """shield_down logs allow_all detail."""
+        config = ShieldConfig(mode=ShieldMode.HOOK, audit_enabled=True)
+        shield_down("test", allow_all=True, config=config)
+        mock_log.assert_called_once_with("test", "shield_down", detail="allow_all=True")
+
+
+class TestShieldUp(unittest.TestCase):
+    """Test shield_up dispatch."""
+
+    @mock.patch("terok_shield.log_event")
+    @mock.patch("terok_shield.mode_hook.shield_up")
+    def test_dispatches_to_mode_hook(self, mock_up, _log):
+        """shield_up dispatches to mode_hook.shield_up."""
+        config = ShieldConfig(mode=ShieldMode.HOOK)
+        shield_up("test", config=config)
+        mock_up.assert_called_once_with(config, "test")
+
+    @mock.patch("terok_shield.log_event")
+    @mock.patch("terok_shield.mode_hook.shield_up")
+    def test_audit_log(self, _up, mock_log):
+        """shield_up logs event when audit is enabled."""
+        config = ShieldConfig(mode=ShieldMode.HOOK, audit_enabled=True)
+        shield_up("test", config=config)
+        mock_log.assert_called_once_with("test", "shield_up")
+
+
+class TestShieldStateAPI(unittest.TestCase):
+    """Test shield_state dispatch."""
+
+    @mock.patch("terok_shield.mode_hook.shield_state", return_value=ShieldState.UP)
+    def test_dispatches_to_mode_hook(self, mock_state):
+        """shield_state dispatches to mode_hook.shield_state."""
+        config = ShieldConfig(mode=ShieldMode.HOOK)
+        result = shield_state("test", config=config)
+        mock_state.assert_called_once_with("test")
+        self.assertEqual(result, ShieldState.UP)
