@@ -72,6 +72,53 @@ def _scc_totals(path: Path) -> dict[str, int]:
     return totals
 
 
+def _scc_file_totals(path: Path) -> dict[str, int]:
+    """Run scc on a single file and return its totals."""
+    result = _run("scc", "--format", "json", "--no-cocomo", str(path))
+    if result.returncode != 0 or not result.stdout.strip():
+        return dict(_EMPTY_TOTALS)
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return dict(_EMPTY_TOTALS)
+    for lang in data:
+        if lang.get("Name", "") in ("Total", "SUM"):
+            continue
+        return {
+            "lines": lang.get("Lines", 0),
+            "code": lang.get("Code", 0),
+            "comment": lang.get("Comment", 0),
+            "blank": lang.get("Blank", 0),
+            "files": 1,
+        }
+    return dict(_EMPTY_TOTALS)
+
+
+def _walk_source_tree(base: Path, lines: list[str], prefix: str = "") -> None:
+    """Recursively collect LoC table rows for files and subdirs under *base*."""
+    n = _nbsp_num
+    entries = sorted(base.iterdir(), key=lambda p: (p.is_file(), p.name))
+    for entry in entries:
+        if entry.name == "__pycache__":
+            continue
+        if entry.is_dir():
+            t = _scc_totals(entry)
+            if t["code"] == 0 and t["lines"] == 0:
+                continue
+            label = f"{prefix}{entry.name}/"
+            lines.append(
+                f"| `{label}` | {t['files']} | {n(t['code'])} | {n(t['comment'])} | {n(t['blank'])} |\n"
+            )
+            _walk_source_tree(entry, lines, label)
+        elif entry.suffix == ".py":
+            t = _scc_file_totals(entry)
+            if t["code"] == 0:
+                continue
+            lines.append(
+                f"| `{prefix}{entry.name}` | — | {n(t['code'])} | {n(t['comment'])} | {n(t['blank'])} |\n"
+            )
+
+
 def _section_loc() -> str:
     """Generate lines-of-code statistics using scc."""
     import shutil
@@ -88,15 +135,28 @@ def _section_loc() -> str:
     )
     test_ratio = f"{tests_totals['code'] / src_totals['code']:.1%}" if src_totals["code"] else "—"
 
-    return (
-        f"| | Files | Code | Comment | Blank | Total |\n"
-        f"|---|---:|---:|---:|---:|---:|\n"
-        f"| Source | {src_totals['files']} | {n(src_totals['code'])} | {n(src_totals['comment'])} | {n(src_totals['blank'])} | {n(src_totals['lines'])} |\n"
-        f"| Tests | {tests_totals['files']} | {n(tests_totals['code'])} | {n(tests_totals['comment'])} | {n(tests_totals['blank'])} | {n(tests_totals['lines'])} |\n"
-        f"\n"
-        f"- **Comment/code ratio:** {comment_ratio}\n"
-        f"- **Test/source ratio:** {test_ratio}\n"
-    )
+    lines = [
+        "| | Files | Code | Comment | Blank | Total |\n",
+        "|---|---:|---:|---:|---:|---:|\n",
+        f"| Source | {src_totals['files']} | {n(src_totals['code'])} | {n(src_totals['comment'])} | {n(src_totals['blank'])} | {n(src_totals['lines'])} |\n",
+        f"| Tests | {tests_totals['files']} | {n(tests_totals['code'])} | {n(tests_totals['comment'])} | {n(tests_totals['blank'])} | {n(tests_totals['lines'])} |\n",
+        "\n",
+        f"- **Comment/code ratio:** {comment_ratio}\n",
+        f"- **Test/source ratio:** {test_ratio}\n",
+        "\n",
+    ]
+
+    detail_lines: list[str] = []
+    _walk_source_tree(SRC, detail_lines)
+
+    lines.append('??? info "Source by module (click to expand)"\n\n')
+    lines.append("    | Module | Files | Code | Comment | Blank |\n")
+    lines.append("    |---|---:|---:|---:|---:|\n")
+    for dl in detail_lines:
+        lines.append(f"    {dl}")
+    lines.append("\n")
+
+    return "".join(lines)
 
 
 def _load_tach_toml() -> tuple[str, dict, list[dict]] | None:
@@ -168,14 +228,16 @@ def _section_dependency_report() -> str:
             descriptions.append(desc)
 
     lines = [
-        "| Module | Deps | Description |\n",
-        "|---|---:|---|\n",
+        f'??? info "{len(modules)} modules (click to expand)"\n\n',
+        "    | Module | Deps | Description |\n",
+        "    |---|---:|---|\n",
     ]
     for idx, mod in enumerate(modules):
         path = mod.get("path", "?")
         deps = len(mod.get("depends_on", []))
         desc = descriptions[idx] if idx < len(descriptions) else ""
-        lines.append(f"| `{path}` | {deps} | {desc} |\n")
+        lines.append(f"    | `{path}` | {deps} | {desc} |\n")
+    lines.append("\n")
     return "".join(lines)
 
 
@@ -207,13 +269,46 @@ def _section_complexity() -> str:
 
     functions.sort(key=lambda f: f["complexity"], reverse=True)
     total = len(functions)
+    scores = [int(f["complexity"]) for f in functions]
     over = [f for f in functions if f["complexity"] > COMPLEXITY_THRESHOLD]
+    max_c = scores[0] if scores else 0
+    avg_c = sum(scores) / total if total else 0
+    sorted_scores = sorted(scores)
+    if total % 2 == 1:
+        median_c = sorted_scores[total // 2]
+    else:
+        median_c = (sorted_scores[total // 2 - 1] + sorted_scores[total // 2]) / 2 if total else 0
     pct = (total - len(over)) / total * 100 if total else 0
 
     lines = [
         f"- **Functions analyzed:** {total}\n",
-        f"- **Within threshold ({COMPLEXITY_THRESHOLD}):** {pct:.0f}% ({total - len(over)}/{total})\n\n",
+        f"- **Median complexity:** {median_c} · **Average:** {avg_c:.1f} · **Max:** {max_c}\n",
+        f"- **Within threshold ({COMPLEXITY_THRESHOLD}):** {pct:.0f}%"
+        f" ({total - len(over)}/{total})\n",
+        "\n",
     ]
+
+    # Histogram with bins of 3, capped at 26+.
+    buckets = [(0, 3), (4, 6), (7, 9), (10, 12), (13, 15), (16, 18), (19, 21), (22, 25), (26, 999)]
+    bar_max = 30
+    bucket_counts = []
+    for lo, hi in buckets:
+        count = sum(1 for s in scores if lo <= s <= hi)
+        bucket_counts.append((lo, hi, count))
+
+    peak = max(c for _, _, c in bucket_counts) if bucket_counts else 1
+
+    lines.append("```\n")
+    for lo, hi, count in bucket_counts:
+        if count == 0 and lo > max(scores, default=0):
+            continue
+        label = f"{lo:>3d}–{hi:>3d}" if hi < 999 else f"{lo:>3d}+   "
+        bar_len = round(count / peak * bar_max) if peak else 0
+        bar = "█" * bar_len
+        pct_bin = count / total * 100 if total else 0
+        marker = " ◄ threshold" if lo <= COMPLEXITY_THRESHOLD <= hi else ""
+        lines.append(f"  {label} │ {bar:<{bar_max}} {count:>3d} ({pct_bin:4.1f}%){marker}\n")
+    lines.append("```\n\n")
 
     if over:
         lines.append(f"**{len(over)} functions exceeding threshold:**\n\n")
@@ -265,7 +360,6 @@ _TREEMAP_LOCAL = ROOT / "docs" / "assets" / "coverage_treemap.svg"
 def _section_test_coverage() -> str:
     """Generate test coverage section with Codecov badge and treemap."""
     base = f"https://codecov.io/gh/{_CODECOV_REPO}"
-    badge = f"{base}/graph/badge.svg?token={_CODECOV_TOKEN}"
 
     if _TREEMAP_LOCAL.is_file():
         svg = _TREEMAP_LOCAL.read_text(encoding="utf-8")
@@ -281,7 +375,6 @@ def _section_test_coverage() -> str:
     treemap = f'<object id="codecov-treemap-img" type="image/svg+xml" data="{src}"></object>\n\n'
 
     return (
-        f"[![codecov]({badge})]({base})\n\n"
         f"Coverage is collected from unit tests in CI and uploaded to "
         f"[Codecov]({base}).\n\n"
         "### Coverage Treemap\n\n"
