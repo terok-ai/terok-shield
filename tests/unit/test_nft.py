@@ -367,16 +367,14 @@ class TestVerifyBypassRuleset(unittest.TestCase):
     def test_missing_output_chain(self) -> None:
         """Report missing output chain in bypass verification."""
         errors = verify_bypass_ruleset(
-            "chain input { policy drop; meta nfproto ipv6 drop\n"
-            "TEROK_SHIELD_BYPASS }"
+            "chain input { policy drop; meta nfproto ipv6 drop\nTEROK_SHIELD_BYPASS }"
         )
         self.assertTrue(any("output chain missing" in e for e in errors))
 
     def test_missing_input_chain(self) -> None:
         """Report missing input chain in bypass verification."""
         errors = verify_bypass_ruleset(
-            "chain output { policy accept; meta nfproto ipv6 drop\n"
-            "TEROK_SHIELD_BYPASS }"
+            "chain output { policy accept; meta nfproto ipv6 drop\nTEROK_SHIELD_BYPASS }"
         )
         self.assertTrue(any("input chain missing" in e for e in errors))
 
