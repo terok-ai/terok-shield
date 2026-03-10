@@ -20,11 +20,13 @@ from terok_shield.mode_hook import (
     _detect_rootless_network_mode,
     _generate_entrypoint,
     _generate_hook_json,
+    _resolve_container_name,
     allow_ip,
     deny_ip,
     install_hooks,
     list_rules,
     pre_start,
+    preview,
     setup,
     shield_down,
     shield_state,
@@ -419,15 +421,40 @@ class TestShieldDown(unittest.TestCase):
         self.assertIn("verification failed", str(ctx.exception))
 
 
+class TestResolveContainerName(unittest.TestCase):
+    """Test _resolve_container_name helper."""
+
+    @mock.patch("terok_shield.mode_hook.podman_inspect", return_value="my-container")
+    def test_returns_annotation_name(self, _inspect) -> None:
+        """Returns canonical name from annotation."""
+        self.assertEqual(_resolve_container_name("abc123"), "my-container")
+
+    @mock.patch("terok_shield.mode_hook.podman_inspect", return_value="<no value>")
+    def test_falls_back_on_no_value(self, _inspect) -> None:
+        """Falls back to raw arg when annotation returns <no value>."""
+        self.assertEqual(_resolve_container_name("abc123"), "abc123")
+
+    @mock.patch("terok_shield.mode_hook.podman_inspect", return_value="")
+    def test_falls_back_on_empty(self, _inspect) -> None:
+        """Falls back to raw arg when annotation is empty."""
+        self.assertEqual(_resolve_container_name("abc123"), "abc123")
+
+    @mock.patch("terok_shield.mode_hook.podman_inspect", side_effect=RuntimeError("not running"))
+    def test_falls_back_on_error(self, _inspect) -> None:
+        """Falls back to raw arg when podman inspect fails."""
+        self.assertEqual(_resolve_container_name("abc123"), "abc123")
+
+
 class TestShieldUp(unittest.TestCase):
     """Test shield_up restore mode."""
 
     def _config(self):
         return ShieldConfig(mode=ShieldMode.HOOK)
 
+    @mock.patch("terok_shield.mode_hook._resolve_container_name", return_value="test")
     @mock.patch("terok_shield.mode_hook.nft_via_nsenter")
     @mock.patch("terok_shield.mode_hook.shield_resolved_dir")
-    def test_applies_hook_ruleset(self, mock_dir, mock_nsenter):
+    def test_applies_hook_ruleset(self, mock_dir, mock_nsenter, _name) -> None:
         """shield_up applies hook ruleset via nft_via_nsenter."""
         import tempfile
 
@@ -443,9 +470,10 @@ class TestShieldUp(unittest.TestCase):
             self.assertIn("delete table", apply_kwargs["stdin"])
             self.assertIn("policy drop", apply_kwargs["stdin"])
 
+    @mock.patch("terok_shield.mode_hook._resolve_container_name", return_value="test")
     @mock.patch("terok_shield.mode_hook.nft_via_nsenter")
     @mock.patch("terok_shield.mode_hook.shield_resolved_dir")
-    def test_readds_cached_ips(self, mock_dir, mock_nsenter):
+    def test_readds_cached_ips(self, mock_dir, mock_nsenter, _name) -> None:
         """shield_up re-adds IPs from resolved file."""
         import tempfile
 
@@ -463,9 +491,32 @@ class TestShieldUp(unittest.TestCase):
             add_kwargs = mock_nsenter.call_args_list[1][1]
             self.assertIn(TEST_IP1, add_kwargs["stdin"])
 
+    @mock.patch("terok_shield.mode_hook._resolve_container_name", return_value="canonical")
     @mock.patch("terok_shield.mode_hook.nft_via_nsenter")
     @mock.patch("terok_shield.mode_hook.shield_resolved_dir")
-    def test_verification_failure_raises(self, mock_dir, mock_nsenter):
+    def test_uses_canonical_name_for_resolved(self, mock_dir, mock_nsenter, _name) -> None:
+        """shield_up uses canonical name (from annotation) for .resolved file."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            mock_dir.return_value = Path(td)
+            # File keyed by canonical name, not raw container arg
+            resolved = Path(td) / "canonical.resolved"
+            resolved.write_text(f"{TEST_IP1}\n")
+            mock_nsenter.side_effect = [
+                "",  # delete + apply
+                "",  # add elements
+                hook_ruleset(),  # verify
+            ]
+            shield_up(self._config(), "abc123def")
+            self.assertEqual(mock_nsenter.call_count, 3)
+            add_kwargs = mock_nsenter.call_args_list[1][1]
+            self.assertIn(TEST_IP1, add_kwargs["stdin"])
+
+    @mock.patch("terok_shield.mode_hook._resolve_container_name", return_value="test")
+    @mock.patch("terok_shield.mode_hook.nft_via_nsenter")
+    @mock.patch("terok_shield.mode_hook.shield_resolved_dir")
+    def test_verification_failure_raises(self, mock_dir, mock_nsenter, _name) -> None:
         """shield_up raises RuntimeError on verification failure."""
         import tempfile
 
@@ -510,3 +561,34 @@ class TestShieldState(unittest.TestCase):
     def test_unrecognised_is_error(self, _nsenter):
         """Unrecognised ruleset detected as ERROR."""
         self.assertEqual(shield_state("test"), ShieldState.ERROR)
+
+
+class TestPreview(unittest.TestCase):
+    """Test preview ruleset generation."""
+
+    def _config(self, loopback_ports=()):
+        return ShieldConfig(mode=ShieldMode.HOOK, loopback_ports=loopback_ports)
+
+    def test_default_is_hook_ruleset(self) -> None:
+        """Default preview returns the enforce (hook) ruleset."""
+        result = preview(self._config())
+        self.assertIn("policy drop", result)
+        self.assertIn("TEROK_SHIELD_DENIED", result)
+        self.assertNotIn("TEROK_SHIELD_BYPASS", result)
+
+    def test_down_is_bypass_ruleset(self) -> None:
+        """Preview with down=True returns the bypass ruleset."""
+        result = preview(self._config(), down=True)
+        self.assertIn("policy accept", result)
+        self.assertIn("TEROK_SHIELD_BYPASS", result)
+        self.assertNotIn("TEROK_SHIELD_DENIED", result)
+
+    def test_down_allow_all(self) -> None:
+        """Preview with down=True, allow_all=True omits RFC1918."""
+        result = preview(self._config(), down=True, allow_all=True)
+        self.assertNotIn("RFC1918", result)
+
+    def test_loopback_ports(self) -> None:
+        """Preview includes loopback ports from config."""
+        result = preview(self._config(loopback_ports=(9418,)))
+        self.assertIn("tcp dport 9418", result)

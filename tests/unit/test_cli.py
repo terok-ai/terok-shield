@@ -13,12 +13,12 @@ from terok_shield.cli import _build_parser, main
 class TestBuildParser(unittest.TestCase):
     """Test argument parser construction."""
 
-    def test_has_subcommands(self):
+    def test_has_subcommands(self) -> None:
         """Parser has all expected subcommands."""
         parser = _build_parser()
         # Parse known subcommands without error
-        for cmd in ["setup", "status", "rules", "logs", "down", "up"]:
-            if cmd in ("setup", "status", "logs"):
+        for cmd in ["setup", "status", "rules", "logs", "down", "up", "preview"]:
+            if cmd in ("setup", "status", "logs", "preview"):
                 ns = parser.parse_args([cmd])
             else:
                 ns = parser.parse_args([cmd, "ctr"])
@@ -58,13 +58,13 @@ class TestBuildParser(unittest.TestCase):
         ns = parser.parse_args(["logs", "-n", "10"])
         self.assertEqual(ns.n, 10)
 
-    def test_down_requires_container(self):
+    def test_down_requires_container(self) -> None:
         """Down subcommand requires container arg."""
         parser = _build_parser()
         with self.assertRaises(SystemExit):
             parser.parse_args(["down"])
 
-    def test_down_allow_all_flag(self):
+    def test_down_allow_all_flag(self) -> None:
         """Down subcommand has --all flag defaulting to False."""
         parser = _build_parser()
         ns = parser.parse_args(["down", "ctr"])
@@ -72,11 +72,31 @@ class TestBuildParser(unittest.TestCase):
         ns = parser.parse_args(["down", "ctr", "--all"])
         self.assertTrue(ns.allow_all)
 
-    def test_up_requires_container(self):
+    def test_up_requires_container(self) -> None:
         """Up subcommand requires container arg."""
         parser = _build_parser()
         with self.assertRaises(SystemExit):
             parser.parse_args(["up"])
+
+    def test_preview_defaults(self) -> None:
+        """Preview subcommand has --down defaulting to False."""
+        parser = _build_parser()
+        ns = parser.parse_args(["preview"])
+        self.assertFalse(ns.down)
+        self.assertFalse(ns.allow_all)
+
+    def test_preview_down_flag(self) -> None:
+        """Preview subcommand has --down flag."""
+        parser = _build_parser()
+        ns = parser.parse_args(["preview", "--down"])
+        self.assertTrue(ns.down)
+
+    def test_preview_down_all_flags(self) -> None:
+        """Preview subcommand has --down --all flags."""
+        parser = _build_parser()
+        ns = parser.parse_args(["preview", "--down", "--all"])
+        self.assertTrue(ns.down)
+        self.assertTrue(ns.allow_all)
 
 
 class TestMainNoCommand(unittest.TestCase):
@@ -163,22 +183,40 @@ class TestMainDispatch(unittest.TestCase):
         mock_state.assert_called_once_with("test")
 
     @mock.patch("terok_shield.cli.shield_down")
-    def test_down(self, mock_down):
+    def test_down(self, mock_down) -> None:
         """CLI down calls shield_down."""
         main(["down", "test"])
         mock_down.assert_called_once_with("test", allow_all=False)
 
     @mock.patch("terok_shield.cli.shield_down")
-    def test_down_all(self, mock_down):
+    def test_down_all(self, mock_down) -> None:
         """CLI down --all calls shield_down with allow_all=True."""
         main(["down", "test", "--all"])
         mock_down.assert_called_once_with("test", allow_all=True)
 
     @mock.patch("terok_shield.cli.shield_up")
-    def test_up(self, mock_up):
+    def test_up(self, mock_up) -> None:
         """CLI up calls shield_up."""
         main(["up", "test"])
         mock_up.assert_called_once_with("test")
+
+    @mock.patch("terok_shield.cli.shield_preview", return_value="table inet terok_shield {}")
+    def test_preview(self, mock_preview) -> None:
+        """CLI preview calls shield_preview."""
+        main(["preview"])
+        mock_preview.assert_called_once_with(down=False, allow_all=False)
+
+    @mock.patch("terok_shield.cli.shield_preview", return_value="bypass")
+    def test_preview_down(self, mock_preview) -> None:
+        """CLI preview --down calls shield_preview with down=True."""
+        main(["preview", "--down"])
+        mock_preview.assert_called_once_with(down=True, allow_all=False)
+
+    @mock.patch("terok_shield.cli.shield_preview", return_value="bypass")
+    def test_preview_down_all(self, mock_preview) -> None:
+        """CLI preview --down --all calls shield_preview with both flags."""
+        main(["preview", "--down", "--all"])
+        mock_preview.assert_called_once_with(down=True, allow_all=True)
 
 
 class TestMainErrorHandling(unittest.TestCase):

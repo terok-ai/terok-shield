@@ -27,7 +27,6 @@ from .config import (
 )
 from .dns import resolve_and_cache
 from .nft import (
-    BYPASS_LOG_PREFIX,
     NFT_TABLE,
     add_elements,
     bypass_ruleset,
@@ -37,7 +36,25 @@ from .nft import (
     verify_ruleset,
 )
 from .profiles import compose_profiles
-from .run import nft_via_nsenter, run as run_cmd
+from .run import nft_via_nsenter, podman_inspect, run as run_cmd
+
+
+def _resolve_container_name(container: str) -> str:
+    """Resolve the canonical container name from the shield annotation.
+
+    Falls back to the raw *container* argument if the annotation is
+    missing or podman inspect fails (e.g. container not running).
+    """
+    try:
+        name = podman_inspect(
+            container,
+            '{{index .Config.Annotations "' + ANNOTATION_NAME_KEY + '"}}',
+        )
+        if name and name != "<no value>":
+            return name
+    except (OSError, RuntimeError):
+        pass
+    return container
 
 
 def _detect_rootless_network_mode() -> str:
@@ -267,7 +284,9 @@ def shield_up(config: ShieldConfig, container: str) -> None:
 
     Atomically replaces the nft ruleset with the standard hook ruleset,
     then re-adds any cached resolved IPs from the container's ``.resolved``
-    file.
+    file.  The canonical container name is resolved from the shield
+    annotation so that the correct cache file is used regardless of
+    whether *container* is a name or ID.
 
     Args:
         config: Shield configuration.
@@ -277,7 +296,8 @@ def shield_up(config: ShieldConfig, container: str) -> None:
     stdin = f"delete table {NFT_TABLE}\n{ruleset}"
     nft_via_nsenter(container, stdin=stdin)
 
-    resolved_file = shield_resolved_dir() / f"{container}.resolved"
+    name = _resolve_container_name(container)
+    resolved_file = shield_resolved_dir() / f"{name}.resolved"
     if resolved_file.is_file():
         ips = [line.strip() for line in resolved_file.read_text().splitlines() if line.strip()]
         elements_cmd = add_elements("allow_v4", ips)
@@ -293,21 +313,41 @@ def shield_up(config: ShieldConfig, container: str) -> None:
 def shield_state(container: str) -> ShieldState:
     """Query the live nft ruleset to determine the container's shield state.
 
+    Uses ``list_rules()`` (scoped to the terok_shield table) and the
+    ``verify_*`` functions to classify the state from ground truth
+    rather than substring probes on the full netns ruleset.
+
     Args:
         container: Container name or ID.
 
     Returns:
         The current ShieldState for the container.
     """
-    output = nft_via_nsenter(container, "list", "ruleset", check=False)
+    output = list_rules(container)
     if not output.strip():
         return ShieldState.INACTIVE
 
-    if BYPASS_LOG_PREFIX in output:
+    if not verify_bypass_ruleset(output):
         has_rfc1918 = "TEROK_SHIELD_RFC1918" in output
         return ShieldState.DOWN if has_rfc1918 else ShieldState.DOWN_ALL
 
-    if "policy drop" in output and "TEROK_SHIELD_DENIED" in output:
+    if not verify_ruleset(output):
         return ShieldState.UP
 
     return ShieldState.ERROR
+
+
+def preview(config: ShieldConfig, *, down: bool = False, allow_all: bool = False) -> str:
+    """Generate the ruleset that would be applied to a container.
+
+    Returns the nft ruleset text without applying it.  Useful for
+    inspecting what a container would get at startup.
+
+    Args:
+        config: Shield configuration.
+        down: If True, generate the bypass ruleset instead.
+        allow_all: If True (with *down*), omit RFC1918 reject rules.
+    """
+    if down:
+        return bypass_ruleset(loopback_ports=config.loopback_ports, allow_all=allow_all)
+    return hook_ruleset(loopback_ports=config.loopback_ports)

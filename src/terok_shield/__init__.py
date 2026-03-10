@@ -247,6 +247,29 @@ def shield_state(
     return _mode_module(cfg.mode).shield_state(container)
 
 
+def shield_preview(
+    *,
+    down: bool = False,
+    allow_all: bool = False,
+    config: ShieldConfig | None = None,
+) -> str:
+    """Generate the ruleset that would be applied to a container.
+
+    Returns the nft ruleset text without applying it — no running
+    container required.
+
+    Args:
+        down: If True, generate the bypass ruleset.
+        allow_all: If True (with *down*), omit RFC1918 reject rules.
+        config: Shield configuration (loads default if None).
+
+    Returns:
+        The nft ruleset text.
+    """
+    cfg = _load_config(config)
+    return _mode_module(cfg.mode).preview(cfg, down=down, allow_all=allow_all)
+
+
 def shield_resolve(
     container: str,
     profiles: list[str] | None = None,
@@ -290,6 +313,7 @@ __all__ = [
     "shield_deny",
     "shield_down",
     "shield_pre_start",
+    "shield_preview",
     "shield_resolve",
     "shield_rules",
     "shield_setup",

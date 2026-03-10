@@ -14,6 +14,7 @@ from . import (
     shield_allow,
     shield_deny,
     shield_down,
+    shield_preview,
     shield_resolve,
     shield_rules,
     shield_setup,
@@ -71,6 +72,21 @@ def _build_parser() -> argparse.ArgumentParser:
     p_up = sub.add_parser("up", help="Restore deny-all mode for a container")
     p_up.add_argument("container", help="Container name or ID")
 
+    p_preview = sub.add_parser("preview", help="Show ruleset that would be applied")
+    p_preview.add_argument(
+        "--down",
+        action="store_true",
+        default=False,
+        help="Show bypass ruleset instead of default deny-all",
+    )
+    p_preview.add_argument(
+        "--all",
+        action="store_true",
+        default=False,
+        dest="allow_all",
+        help="Omit RFC1918 reject rules (requires --down)",
+    )
+
     p_rules = sub.add_parser("rules", help="Show current nft rules for a container")
     p_rules.add_argument("container", help="Container name or ID")
 
@@ -114,6 +130,8 @@ def _dispatch(args: argparse.Namespace) -> None:
         _cmd_down(args.container, allow_all=args.allow_all)
     elif cmd == "up":
         _cmd_up(args.container)
+    elif cmd == "preview":
+        _cmd_preview(down=args.down, allow_all=args.allow_all)
     elif cmd == "rules":
         _cmd_rules(args.container)
     elif cmd == "logs":
@@ -176,6 +194,16 @@ def _cmd_up(container: str) -> None:
     """Restore deny-all mode."""
     shield_up(container)
     print(f"Shield up for {container}")
+
+
+def _cmd_preview(*, down: bool, allow_all: bool) -> None:
+    """Show ruleset that would be applied."""
+    ruleset = shield_preview(down=down, allow_all=allow_all)
+    label = "bypass" if down else "enforce"
+    if allow_all:
+        label += " (all traffic)"
+    print(f"# Ruleset preview ({label}):")
+    print(ruleset)
 
 
 def _cmd_rules(container: str) -> None:

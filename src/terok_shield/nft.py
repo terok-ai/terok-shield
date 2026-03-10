@@ -202,7 +202,7 @@ def add_elements(set_name: str, ips: list[str], table: str = NFT_TABLE) -> str:
 
 def _has_leading_ipv6_drop(nft_output: str, chain: str) -> bool:
     """Check that IPv6 drop is the first rule in a chain (before any accept)."""
-    pattern = rf"chain {chain} \{{.*?policy drop;\s*meta nfproto ipv6 drop"
+    pattern = rf"chain {chain} \{{.*?policy (?:drop|accept);\s*meta nfproto ipv6 drop"
     return re.search(pattern, nft_output, re.DOTALL) is not None
 
 

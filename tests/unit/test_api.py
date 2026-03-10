@@ -14,6 +14,7 @@ from terok_shield import (
     shield_deny,
     shield_down,
     shield_pre_start,
+    shield_preview,
     shield_resolve,
     shield_rules,
     shield_setup,
@@ -225,3 +226,22 @@ class TestShieldStateAPI(unittest.TestCase):
         result = shield_state("test", config=config)
         mock_state.assert_called_once_with("test")
         self.assertEqual(result, ShieldState.UP)
+
+
+class TestShieldPreview(unittest.TestCase):
+    """Test shield_preview dispatch."""
+
+    @mock.patch("terok_shield.mode_hook.preview", return_value="table inet terok_shield {}")
+    def test_dispatches_to_mode_hook(self, mock_preview):
+        """shield_preview dispatches to mode_hook.preview."""
+        config = ShieldConfig(mode=ShieldMode.HOOK)
+        result = shield_preview(config=config)
+        mock_preview.assert_called_once_with(config, down=False, allow_all=False)
+        self.assertIn("terok_shield", result)
+
+    @mock.patch("terok_shield.mode_hook.preview", return_value="bypass")
+    def test_passes_down_flag(self, mock_preview):
+        """shield_preview passes down and allow_all flags."""
+        config = ShieldConfig(mode=ShieldMode.HOOK)
+        shield_preview(down=True, allow_all=True, config=config)
+        mock_preview.assert_called_once_with(config, down=True, allow_all=True)

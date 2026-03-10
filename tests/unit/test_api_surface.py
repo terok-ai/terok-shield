@@ -29,6 +29,7 @@ EXPECTED_ALL = [
     "shield_deny",
     "shield_down",
     "shield_pre_start",
+    "shield_preview",
     "shield_resolve",
     "shield_rules",
     "shield_setup",
@@ -215,6 +216,15 @@ class TestAPISurface(unittest.TestCase):
                     ("config", KW, None, cfg_or_none),
                 ],
                 ShieldState,
+            ),
+            (
+                terok_shield.shield_preview,
+                [
+                    ("down", KW, False, bool),
+                    ("allow_all", KW, False, bool),
+                    ("config", KW, None, cfg_or_none),
+                ],
+                str,
             ),
             (
                 terok_shield.list_log_files,
