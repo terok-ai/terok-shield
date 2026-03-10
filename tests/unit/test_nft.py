@@ -229,6 +229,16 @@ class TestVerifyRuleset(unittest.TestCase):
         errors = verify_ruleset(bad)
         self.assertTrue(any("misplaced" in e for e in errors))
 
+    def test_rejects_bypass_ruleset(self) -> None:
+        """verify_ruleset must reject a bypass ruleset (output policy accept)."""
+        rs = bypass_ruleset()
+        errors = verify_ruleset(rs)
+        self.assertGreater(len(errors), 0, "bypass ruleset must not pass enforce verification")
+        self.assertTrue(
+            any("deny log prefix" in e for e in errors),
+            f"Expected deny log prefix error, got: {errors}",
+        )
+
     def test_rfc1918_present_regardless_of_position(self) -> None:
         """RFC1918 presence is checked regardless of position relative to allow set."""
         rfc_rules = "\n".join(
@@ -337,6 +347,16 @@ class TestVerifyBypassRuleset(unittest.TestCase):
         """Report missing bypass log prefix."""
         errors = verify_bypass_ruleset("policy accept policy drop")
         self.assertTrue(any("bypass" in e for e in errors))
+
+    def test_rejects_hook_ruleset(self) -> None:
+        """verify_bypass_ruleset must reject a hook (enforce) ruleset."""
+        rs = hook_ruleset()
+        errors = verify_bypass_ruleset(rs)
+        self.assertGreater(len(errors), 0, "hook ruleset must not pass bypass verification")
+        self.assertTrue(
+            any("accept" in e for e in errors),
+            f"Expected missing accept policy error, got: {errors}",
+        )
 
     def test_empty_input(self) -> None:
         """Report errors for empty input."""

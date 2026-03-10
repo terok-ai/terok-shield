@@ -198,6 +198,8 @@ def _cmd_up(container: str) -> None:
 
 def _cmd_preview(*, down: bool, allow_all: bool) -> None:
     """Show ruleset that would be applied."""
+    if allow_all and not down:
+        raise ValueError("--all requires --down")
     ruleset = shield_preview(down=down, allow_all=allow_all)
     label = "bypass" if down else "enforce"
     if allow_all:

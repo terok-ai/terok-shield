@@ -218,6 +218,12 @@ class TestMainDispatch(unittest.TestCase):
         main(["preview", "--down", "--all"])
         mock_preview.assert_called_once_with(down=True, allow_all=True)
 
+    def test_preview_all_without_down_exits_1(self) -> None:
+        """CLI preview --all without --down exits with code 1."""
+        with self.assertRaises(SystemExit) as ctx:
+            main(["preview", "--all"])
+        self.assertEqual(ctx.exception.code, 1)
+
 
 class TestMainErrorHandling(unittest.TestCase):
     """Test CLI error handling."""
