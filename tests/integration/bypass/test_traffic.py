@@ -5,21 +5,20 @@
 
 Verifies actual traffic flows correctly when the shield is down:
 all outbound traffic accepted (with logging), RFC1918 still rejected
-by default, and IPv6 unconditionally dropped.
+by default, and IPv6 private ranges still rejected.
 """
 
 import pytest
 
 from terok_shield import shield_down, shield_rules, shield_up
-from terok_shield.nft_constants import BYPASS_LOG_PREFIX, RFC1918
+from terok_shield.nft_constants import BYPASS_LOG_PREFIX, IPV6_PRIVATE, RFC1918
 from tests.testnet import (
     ALLOWED_TARGET_HTTP,
     BLOCKED_TARGET_HTTP,
-    IPV6_CLOUDFLARE,
 )
 
 from ..conftest import nft_missing, podman_missing
-from ..helpers import assert_blocked, assert_reachable, exec_in_container as _exec
+from ..helpers import assert_blocked, assert_reachable
 
 
 @pytest.mark.needs_podman
@@ -101,22 +100,22 @@ class TestBypassRFC1918:
 @podman_missing
 @nft_missing
 @pytest.mark.usefixtures("nft_in_netns")
-class TestBypassIPv6:
-    """Verify IPv6 is still dropped in bypass mode."""
+class TestBypassIPv6Private:
+    """Verify IPv6 private ranges are still rejected in bypass mode."""
 
-    def test_ipv6_dropped_in_bypass(self, shielded_container: str) -> None:
-        """IPv6 traffic is unconditionally dropped even in bypass mode."""
+    def test_ipv6_private_rules_present_in_default_bypass(self, shielded_container: str) -> None:
+        """Default bypass keeps IPv6 private reject rules."""
         shield_down(shielded_container)
-
-        # Structural check
         rules = shield_rules(shielded_container)
-        assert "nfproto ipv6 drop" in rules
+        for net in IPV6_PRIVATE:
+            assert net in rules, f"IPv6 private reject rule for {net} missing in bypass"
 
-        # Functional check (skip if IPv6 not available pre-firewall)
-        pre = _exec(shielded_container, "ping", "-6", "-c1", "-W2", IPV6_CLOUDFLARE, timeout=5)
-        if pre.returncode != 0:
-            pytest.skip("IPv6 not available — functional check would be false positive")
-        # Re-apply bypass after the pre-check (state may have changed)
-        shield_down(shielded_container)
-        post = _exec(shielded_container, "ping", "-6", "-c1", "-W2", IPV6_CLOUDFLARE, timeout=5)
-        assert post.returncode != 0, "IPv6 should be dropped in bypass mode"
+    def test_ipv6_private_rules_absent_in_allow_all_bypass(self, shielded_container: str) -> None:
+        """Bypass with allow_all=True removes IPv6 private reject rules."""
+        shield_down(shielded_container, allow_all=True)
+        rules = shield_rules(shielded_container)
+        for net in IPV6_PRIVATE:
+            assert (
+                f"ip6 daddr {net}" not in rules
+                or "reject" not in rules.split(net)[1].split("\n")[0]
+            ), f"IPv6 private reject rule for {net} should not be in allow_all bypass"

@@ -10,22 +10,23 @@ import unittest.mock
 from pathlib import Path
 
 from terok_shield.config import ANNOTATION_KEY, ANNOTATION_NAME_KEY, ShieldConfig
-from terok_shield.nft_constants import RFC1918
+from terok_shield.nft_constants import PRIVATE_RANGES
 from terok_shield.oci_hook import _parse_oci_state, _read_resolved_ips, apply_hook, hook_main
 from terok_shield.run import ExecError
 
-from ..testnet import BROAD_CIDR_8, RFC1918_HOST, TEST_IP1, TEST_IP2
+from ..testnet import BROAD_CIDR_8, IPV6_ULA, RFC1918_HOST, TEST_IP1, TEST_IP2
 
-# Mock output that passes verify_ruleset (must have chain structure
-# and RFC1918 reject rules in proper context for regex matching)
+# Mock output that passes verify_ruleset (must have chain structure,
+# private-range reject rules, and both allow sets)
 _VALID_LIST_OUTPUT = (
     "chain output { type filter hook output priority filter; policy drop;\n"
-    "meta nfproto ipv6 drop\n"
-    "TEROK_SHIELD_DENIED @allow_v4\n"
-    + "\n".join(f"ip daddr {net} reject with icmp type admin-prohibited" for net in RFC1918)
+    "TEROK_SHIELD_DENIED @allow_v4 @allow_v6\n"
+    + "\n".join(
+        f"{'ip' if '.' in net else 'ip6'} daddr {net} reject with icmpx admin-prohibited"
+        for net in PRIVATE_RANGES
+    )
     + "\n}\n"
     + "chain input { type filter hook input priority filter; policy drop;\n"
-    + "meta nfproto ipv6 drop\n"
     + "drop }"
 )
 
@@ -213,7 +214,7 @@ class TestApplyHook(unittest.TestCase):
             self.assertIn("ruleset applied", details)
             self.assertIn("read 2 cached IPs", details)
             self.assertTrue(any(f"[ips] cached: {TEST_IP1}" in d for d in details))
-            self.assertTrue(any(f"[ips] added to allow_v4: {TEST_IP1}" in d for d in details))
+            self.assertTrue(any(f"[ips] added to allow sets: {TEST_IP1}" in d for d in details))
             self.assertIn("verification passed", details)
             self.assertIn("applied with 2 allowed IPs", details)
 
@@ -323,7 +324,7 @@ class TestApplyHook(unittest.TestCase):
 
 
 class TestIpClassification(unittest.TestCase):
-    """Tests for RFC1918 and broad CIDR classification logging."""
+    """Tests for private-range and broad CIDR classification logging."""
 
     @unittest.mock.patch("terok_shield.oci_hook.log_event")
     @unittest.mock.patch("terok_shield.oci_hook.nft_via_nsenter")
@@ -343,7 +344,30 @@ class TestIpClassification(unittest.TestCase):
             note_calls = [c for c in mock_log.call_args_list if c[0][1] == "note"]
             self.assertTrue(
                 any(
-                    f"rfc1918 whitelisted: {RFC1918_HOST}" in c.kwargs.get("detail", "")
+                    f"private range whitelisted: {RFC1918_HOST}" in c.kwargs.get("detail", "")
+                    for c in note_calls
+                )
+            )
+
+    @unittest.mock.patch("terok_shield.oci_hook.log_event")
+    @unittest.mock.patch("terok_shield.oci_hook.nft_via_nsenter")
+    @unittest.mock.patch("terok_shield.oci_hook.shield_resolved_dir")
+    def test_ipv6_ula_logged_as_note(
+        self,
+        mock_dir: unittest.mock.Mock,
+        mock_nft: unittest.mock.Mock,
+        mock_log: unittest.mock.Mock,
+    ) -> None:
+        """IPv6 ULA addresses in resolved cache produce a 'note' log entry."""
+        with tempfile.TemporaryDirectory() as tmp:
+            mock_dir.return_value = Path(tmp)
+            (Path(tmp) / "test-ctr.resolved").write_text(f"{IPV6_ULA}\n")
+            mock_nft.side_effect = ["", "", _VALID_LIST_OUTPUT]
+            apply_hook("test-ctr", "42")
+            note_calls = [c for c in mock_log.call_args_list if c[0][1] == "note"]
+            self.assertTrue(
+                any(
+                    f"private range whitelisted: {IPV6_ULA}" in c.kwargs.get("detail", "")
                     for c in note_calls
                 )
             )

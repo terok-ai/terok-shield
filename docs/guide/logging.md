@@ -20,9 +20,9 @@ Each line is a JSON object:
 | Action | Meaning |
 |--------|---------|
 | `setup` | Firewall setup step (ruleset applied, IPs loaded, verification) |
-| `allow` | Domain/IP added to allow set at runtime |
-| `deny` | Domain/IP removed from allow set at runtime |
-| `note` | Advisory event (e.g. RFC1918 or link-local address allowlisted) |
+| `allowed` | Domain/IP added to allow set at runtime |
+| `denied` | Domain/IP removed from allow set at runtime |
+| `note` | Advisory event (e.g. RFC1918, IPv6 ULA, or link-local address allowlisted) |
 | `error` | Something failed |
 
 ### Viewing logs
@@ -42,7 +42,7 @@ by log readers that only need summaries:
 
 ```json
 {"action": "setup", "detail": "[ips] cached: 1.1.1.1, 1.0.0.1, 10.0.0.5"}
-{"action": "setup", "detail": "[ips] added to allow_v4: 1.1.1.1, 1.0.0.1"}
+{"action": "setup", "detail": "[ips] added to allow sets: 1.1.1.1, 1.0.0.1"}
 ```
 
 ## Kernel packet logs
@@ -54,7 +54,7 @@ prefixes:
 |--------|---------|
 | `TEROK_SHIELD_DENIED:` | Packet dropped by deny-all rule |
 | `TEROK_SHIELD_ALLOWED:` | Packet accepted by allow set (rate-limited: 10/sec) |
-| `TEROK_SHIELD_RFC1918:` | Packet rejected by RFC1918 rule |
+| `TEROK_SHIELD_PRIVATE:` | Packet rejected by private-range rule (RFC1918 / IPv6 ULA / link-local) |
 
 View with:
 

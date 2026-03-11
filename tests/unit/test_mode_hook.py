@@ -33,8 +33,9 @@ from terok_shield.mode_hook import (
     shield_up,
 )
 from terok_shield.nft import bypass_ruleset, hook_ruleset
+from terok_shield.run import ExecError
 
-from ..testnet import TEST_DOMAIN, TEST_IP1
+from ..testnet import EXPECTED_PRIVATE_RANGES, IPV6_CLOUDFLARE, TEST_DOMAIN, TEST_IP1
 
 
 class TestDetectRootlessNetworkMode(unittest.TestCase):
@@ -340,7 +341,7 @@ class TestAllowDenyIp(unittest.TestCase):
 
     @mock.patch("terok_shield.mode_hook.nft_via_nsenter")
     def test_allow_ip(self, mock_nsenter):
-        """allow_ip adds element to allow_v4 set."""
+        """allow_ip adds element to allow_v4 set for IPv4."""
         allow_ip("test", TEST_IP1)
         mock_nsenter.assert_called_once()
         call_args = mock_nsenter.call_args[0]
@@ -349,12 +350,32 @@ class TestAllowDenyIp(unittest.TestCase):
         self.assertIn("allow_v4", call_args)
 
     @mock.patch("terok_shield.mode_hook.nft_via_nsenter")
+    def test_allow_ipv6(self, mock_nsenter):
+        """allow_ip adds element to allow_v6 set for IPv6."""
+        allow_ip("test", IPV6_CLOUDFLARE)
+        mock_nsenter.assert_called_once()
+        call_args = mock_nsenter.call_args[0]
+        self.assertEqual(call_args[0], "test")
+        self.assertIn("add", call_args)
+        self.assertIn("allow_v6", call_args)
+
+    @mock.patch("terok_shield.mode_hook.nft_via_nsenter")
     def test_deny_ip(self, mock_nsenter):
-        """deny_ip removes element from allow_v4 set."""
+        """deny_ip removes element from allow_v4 set for IPv4."""
         deny_ip("test", TEST_IP1)
         mock_nsenter.assert_called_once()
         call_args = mock_nsenter.call_args[0]
         self.assertIn("delete", call_args)
+        self.assertIn("allow_v4", call_args)
+
+    @mock.patch("terok_shield.mode_hook.nft_via_nsenter")
+    def test_deny_ipv6(self, mock_nsenter):
+        """deny_ip removes element from allow_v6 set for IPv6."""
+        deny_ip("test", IPV6_CLOUDFLARE)
+        mock_nsenter.assert_called_once()
+        call_args = mock_nsenter.call_args[0]
+        self.assertIn("delete", call_args)
+        self.assertIn("allow_v6", call_args)
 
     def test_allow_invalid_ip_raises(self):
         """allow_ip raises ValueError for invalid IPs."""
@@ -376,6 +397,15 @@ class TestListRules(unittest.TestCase):
         result = list_rules("test")
         self.assertIn("terok_shield", result)
         mock_nsenter.assert_called_once()
+
+    @mock.patch(
+        "terok_shield.mode_hook.nft_via_nsenter",
+        side_effect=ExecError(["podman", "inspect"], 125, "no such container"),
+    )
+    def test_returns_empty_on_exec_error(self, _nsenter):
+        """list_rules returns empty string when container doesn't exist."""
+        result = list_rules("nonexistent")
+        self.assertEqual(result, "")
 
 
 class TestShieldDown(unittest.TestCase):
@@ -400,14 +430,15 @@ class TestShieldDown(unittest.TestCase):
 
     @mock.patch("terok_shield.mode_hook.nft_via_nsenter")
     def test_allow_all_flag(self, mock_nsenter):
-        """shield_down with allow_all omits RFC1918 rules."""
+        """shield_down with allow_all omits private-range rules."""
         mock_nsenter.side_effect = [
             "",
             bypass_ruleset(allow_all=True),
         ]
         shield_down(self._config(), "test", allow_all=True)
         apply_kwargs = mock_nsenter.call_args_list[0][1]
-        self.assertNotIn("RFC1918", apply_kwargs["stdin"])
+        for net in EXPECTED_PRIVATE_RANGES:
+            self.assertNotIn(net, apply_kwargs["stdin"])
 
     @mock.patch("terok_shield.mode_hook.nft_via_nsenter")
     def test_verification_failure_raises(self, mock_nsenter):
@@ -539,6 +570,14 @@ class TestShieldState(unittest.TestCase):
         """Empty nft output means INACTIVE."""
         self.assertEqual(shield_state("test"), ShieldState.INACTIVE)
 
+    @mock.patch(
+        "terok_shield.mode_hook.nft_via_nsenter",
+        side_effect=ExecError(["podman", "inspect"], 125, "no such container"),
+    )
+    def test_nonexistent_container_is_inactive(self, _nsenter):
+        """Nonexistent container returns INACTIVE (not an exception)."""
+        self.assertEqual(shield_state("nonexistent"), ShieldState.INACTIVE)
+
     @mock.patch("terok_shield.mode_hook.nft_via_nsenter")
     def test_hook_ruleset_is_up(self, mock_nsenter):
         """Standard hook ruleset detected as UP."""
@@ -584,9 +623,10 @@ class TestPreview(unittest.TestCase):
         self.assertNotIn("TEROK_SHIELD_DENIED", result)
 
     def test_down_allow_all(self) -> None:
-        """Preview with down=True, allow_all=True omits RFC1918."""
+        """Preview with down=True, allow_all=True omits private-range rules."""
         result = preview(self._config(), down=True, allow_all=True)
-        self.assertNotIn("RFC1918", result)
+        for net in EXPECTED_PRIVATE_RANGES:
+            self.assertNotIn(net, result)
 
     def test_loopback_ports(self) -> None:
         """Preview includes loopback ports from config."""

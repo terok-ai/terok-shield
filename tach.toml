@@ -89,6 +89,7 @@ depends_on = [
     "terok_shield.nft",
     "terok_shield.profiles",
     "terok_shield.run",
+    "terok_shield.util",
 ]
 
 # CLI — depends on package root (public API)

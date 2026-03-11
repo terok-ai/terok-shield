@@ -20,3 +20,24 @@ def is_ipv4(value: str) -> bool:
         return True
     except ValueError:
         return False
+
+
+def is_ipv6(value: str) -> bool:
+    """Return True if *value* is an IPv6 address or CIDR notation.
+
+    Uses ``ipaddress.IPv6Address`` for plain addresses and
+    ``ipaddress.IPv6Network(..., strict=False)`` for CIDRs.
+    """
+    try:
+        if "/" in value:
+            ipaddress.IPv6Network(value, strict=False)
+        else:
+            ipaddress.IPv6Address(value)
+        return True
+    except ValueError:
+        return False
+
+
+def is_ip(value: str) -> bool:
+    """Return True if *value* is an IPv4 or IPv6 address or CIDR."""
+    return is_ipv4(value) or is_ipv6(value)

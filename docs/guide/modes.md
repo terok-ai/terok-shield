@@ -15,8 +15,8 @@ own network namespace.
 │  ┌────────────────────────────────────┐  │
 │  │ nftables (applied by OCI hook)    │  │
 │  │ policy: DROP                      │  │
-│  │ allow: DNS, loopback, @allow_v4   │  │
-│  │ reject: RFC1918                   │  │
+│  │ allow: DNS, lo, @allow_v4/v6      │  │
+│  │ reject: RFC1918, v6-private       │  │
 │  └────────────────────────────────────┘  │
 │                                          │
 │  Workload (CAP_NET_ADMIN dropped)        │
@@ -37,7 +37,7 @@ own network namespace.
 ### Chain evaluation order
 
 ```text
-IPv6 drop → loopback → established → DNS → loopback ports → allow_v4 → RFC1918 reject → deny all
+loopback → established → DNS → loopback ports → allow_v4/v6 → RFC1918 reject → v6-private reject → deny all
 ```
 
 ### When to use

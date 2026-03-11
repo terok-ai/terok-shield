@@ -87,9 +87,9 @@ class TestShieldAllow(unittest.TestCase):
 
     @mock.patch("terok_shield.log_event")
     @mock.patch("terok_shield.mode_hook.allow_ip")
-    @mock.patch("terok_shield.dig", return_value=[TEST_IP1])
+    @mock.patch("terok_shield.dig_all", return_value=[TEST_IP1])
     def test_resolves_domain(self, mock_dig, mock_allow, _log):
-        """shield_allow resolves domains via dig."""
+        """shield_allow resolves domains via dig_all."""
         config = ShieldConfig(mode=ShieldMode.HOOK)
         ips = shield_allow("test", TEST_DOMAIN, config=config)
         mock_dig.assert_called_once_with(TEST_DOMAIN)

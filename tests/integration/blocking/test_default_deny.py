@@ -6,7 +6,7 @@
 import pytest
 
 from terok_shield.nft import hook_ruleset
-from terok_shield.nft_constants import RFC1918
+from terok_shield.nft_constants import IPV6_PRIVATE, RFC1918
 from tests.testnet import (
     ALLOWED_TARGET_HTTP,
     ALLOWED_TARGET_HTTPS,
@@ -45,7 +45,7 @@ class TestFirewallBlocking:
         assert post.returncode != 0, "HTTPS traffic should be blocked"
 
     def test_ipv6_blocked_after_ruleset(self, container: str, container_pid: str) -> None:
-        """IPv6 traffic is unconditionally dropped after applying the ruleset."""
+        """Non-allowed IPv6 traffic is rejected by default-deny policy."""
         # Pre-firewall IPv6 probe — if IPv6 doesn't work before the firewall,
         # functional checks would pass trivially (false positive)
         pre_ping = _exec(container, "ping", "-6", "-c1", "-W2", IPV6_CLOUDFLARE, timeout=5)
@@ -53,21 +53,20 @@ class TestFirewallBlocking:
 
         nsenter_nft(container_pid, stdin=hook_ruleset())
 
-        # Structural check: IPv6 drop is present and before first accept rule
+        # Structural: dual-stack sets and IPv6 private reject rules present
         listed = nsenter_nft(container_pid, "list", "ruleset")
         assert listed.returncode == 0, listed.stderr
         output = listed.stdout
-        assert "nfproto ipv6 drop" in output, "IPv6 drop rule must be in applied ruleset"
-        ipv6_pos = output.find("nfproto ipv6 drop")
-        ct_pos = output.find("ct state established,related accept")
-        assert ipv6_pos < ct_pos, "IPv6 drop must precede established accept"
+        assert "allow_v6" in output, "allow_v6 set must be in applied ruleset"
+        for net in IPV6_PRIVATE:
+            assert net in output, f"IPv6 private reject rule for {net} missing"
 
         if not ipv6_available:
             pytest.skip(
                 "IPv6 not available pre-firewall — functional checks would be false positives"
             )
 
-        # Functional: ICMP6 ping to Cloudflare DNS
+        # Functional: ICMP6 ping to Cloudflare DNS (not in allow set → rejected)
         ping_cf = _exec(container, "ping", "-6", "-c1", "-W2", IPV6_CLOUDFLARE, timeout=5)
         assert ping_cf.returncode != 0, "IPv6 ping to Cloudflare should be blocked"
 

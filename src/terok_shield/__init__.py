@@ -12,8 +12,8 @@ from .audit import configure_audit, list_log_files, log_event, tail_log
 from .config import ShieldConfig, ShieldMode, ShieldState, load_shield_config
 from .dns import resolve_and_cache
 from .profiles import compose_profiles, list_profiles
-from .run import ExecError, dig
-from .util import is_ipv4 as _is_ip
+from .run import ExecError, dig_all
+from .util import is_ip as _is_ip
 
 
 def _load_config(config: ShieldConfig | None) -> ShieldConfig:
@@ -113,14 +113,14 @@ def shield_allow(
 
     Args:
         container: Container name or ID.
-        target: Domain name or IPv4 address/CIDR.
+        target: Domain name or IP address/CIDR.
         config: Shield configuration (loads default if None).
 
     Returns:
         List of IPs that were allowed.
     """
     cfg = _load_config(config)
-    ips = [target] if _is_ip(target) else dig(target)
+    ips = [target] if _is_ip(target) else dig_all(target)
     mod = _mode_module(cfg.mode)
     allowed: list[str] = []
 
@@ -148,14 +148,14 @@ def shield_deny(
 
     Args:
         container: Container name or ID.
-        target: Domain name or IPv4 address/CIDR.
+        target: Domain name or IP address/CIDR.
         config: Shield configuration (loads default if None).
 
     Returns:
         List of IPs that were denied.
     """
     cfg = _load_config(config)
-    ips = [target] if _is_ip(target) else dig(target)
+    ips = [target] if _is_ip(target) else dig_all(target)
     mod = _mode_module(cfg.mode)
     denied: list[str] = []
 

@@ -6,17 +6,24 @@
 import unittest
 
 from terok_shield.nft import (
-    RFC1918,
     add_elements,
+    add_elements_dual,
     bypass_ruleset,
     hook_ruleset,
     safe_ip,
     verify_bypass_ruleset,
     verify_ruleset,
 )
-from terok_shield.nft_constants import BYPASS_LOG_PREFIX
+from terok_shield.nft_constants import BYPASS_LOG_PREFIX, IPV6_PRIVATE, PRIVATE_RANGES, RFC1918
 
-from ..testnet import LINK_LOCAL_DNS, TEST_IP1, TEST_IP2, TEST_NET1
+from ..testnet import (
+    IPV6_CLOUDFLARE,
+    IPV6_NET1,
+    LINK_LOCAL_DNS,
+    TEST_IP1,
+    TEST_IP2,
+    TEST_NET1,
+)
 
 
 class TestSafeIp(unittest.TestCase):
@@ -49,10 +56,13 @@ class TestSafeIp(unittest.TestCase):
         with self.assertRaises(ValueError):
             safe_ip("")
 
-    def test_rejects_ipv6(self) -> None:
-        """Reject IPv6 addresses."""
-        with self.assertRaises(ValueError):
-            safe_ip("::1")
+    def test_valid_ipv6(self) -> None:
+        """Accept valid IPv6 address."""
+        self.assertEqual(safe_ip(IPV6_CLOUDFLARE), IPV6_CLOUDFLARE)
+
+    def test_valid_ipv6_cidr(self) -> None:
+        """Accept valid IPv6 CIDR notation."""
+        self.assertEqual(safe_ip(IPV6_NET1), IPV6_NET1)
 
 
 class TestHookRuleset(unittest.TestCase):
@@ -63,12 +73,16 @@ class TestHookRuleset(unittest.TestCase):
         rs = hook_ruleset()
         self.assertIn("policy drop", rs)
 
-    def test_ipv6_dropped(self) -> None:
-        """IPv6 traffic must be dropped before any accept rules."""
+    def test_allow_v6_set_present(self) -> None:
+        """IPv6 allow set must be declared."""
         rs = hook_ruleset()
-        ipv6_pos = rs.index("meta nfproto ipv6 drop")
-        first_accept_pos = rs.index('oifname "lo" accept')
-        self.assertLess(ipv6_pos, first_accept_pos, "IPv6 drop must precede first accept rule")
+        self.assertIn("set allow_v6 { type ipv6_addr; flags interval; }", rs)
+
+    def test_ipv6_private_rules_present(self) -> None:
+        """IPv6 private-range reject rules must be present."""
+        rs = hook_ruleset()
+        for net in IPV6_PRIVATE:
+            self.assertIn(net, rs)
 
     def test_contains_loopback_accept(self) -> None:
         """Loopback traffic must be accepted."""
@@ -178,6 +192,50 @@ class TestAddElements(unittest.TestCase):
         self.assertEqual(result, "")
 
 
+class TestAddElementsDual(unittest.TestCase):
+    """Tests for add_elements_dual."""
+
+    def test_v4_only(self) -> None:
+        """IPv4-only list produces allow_v4 command only."""
+        result = add_elements_dual([TEST_IP1, TEST_IP2])
+        self.assertIn("allow_v4", result)
+        self.assertIn(TEST_IP1, result)
+        self.assertIn(TEST_IP2, result)
+        self.assertNotIn("allow_v6", result)
+
+    def test_v6_only(self) -> None:
+        """IPv6-only list produces allow_v6 command only."""
+        result = add_elements_dual([IPV6_CLOUDFLARE])
+        self.assertIn("allow_v6", result)
+        self.assertIn(IPV6_CLOUDFLARE, result)
+        self.assertNotIn("allow_v4", result)
+
+    def test_mixed(self) -> None:
+        """Mixed list produces commands for both sets."""
+        result = add_elements_dual([TEST_IP1, IPV6_CLOUDFLARE])
+        self.assertIn("allow_v4", result)
+        self.assertIn(TEST_IP1, result)
+        self.assertIn("allow_v6", result)
+        self.assertIn(IPV6_CLOUDFLARE, result)
+
+    def test_empty_list(self) -> None:
+        """Return empty string for empty list."""
+        result = add_elements_dual([])
+        self.assertEqual(result, "")
+
+    def test_all_invalid(self) -> None:
+        """Return empty string when all IPs are invalid."""
+        result = add_elements_dual(["bad", "worse"])
+        self.assertEqual(result, "")
+
+    def test_skips_invalid(self) -> None:
+        """Skip invalid IPs, keep valid ones from both families."""
+        result = add_elements_dual([TEST_IP1, "invalid", IPV6_CLOUDFLARE])
+        self.assertIn(TEST_IP1, result)
+        self.assertIn(IPV6_CLOUDFLARE, result)
+        self.assertNotIn("invalid", result)
+
+
 class TestVerifyRuleset(unittest.TestCase):
     """Tests for verify_ruleset."""
 
@@ -192,56 +250,56 @@ class TestVerifyRuleset(unittest.TestCase):
         errors = verify_ruleset("some random text")
         self.assertTrue(any("policy" in e for e in errors))
 
-    def test_missing_rfc1918(self) -> None:
-        """Report all missing RFC1918 blocks."""
+    def test_missing_private_ranges(self) -> None:
+        """Report all missing private-range blocks."""
         errors = verify_ruleset("policy drop admin-prohibited TEROK_SHIELD_DENIED")
-        rfc_errors = [e for e in errors if "RFC1918" in e]
-        self.assertEqual(len(rfc_errors), len(RFC1918))
+        range_errors = [e for e in errors if "Private-range" in e]
+        self.assertEqual(len(range_errors), len(PRIVATE_RANGES))
 
     def test_empty_input(self) -> None:
         """Report errors for empty input."""
         errors = verify_ruleset("")
         self.assertGreater(len(errors), 0)
 
-    def test_missing_ipv6_drop(self) -> None:
-        """Report missing IPv6 drop rule."""
-        rfc_rules = "\n".join(
-            f"ip daddr {net} reject with icmp type admin-prohibited" for net in RFC1918
+    def test_missing_allow_v6_set(self) -> None:
+        """Report missing allow_v6 set."""
+        private_rules = "\n".join(
+            f"{'ip' if '.' in net else 'ip6'} daddr {net} reject with icmpx admin-prohibited"
+            for net in PRIVATE_RANGES
         )
         bad = (
             "chain output { type filter hook output priority filter; policy drop;\n"
-            f"TEROK_SHIELD_DENIED\n{rfc_rules}\n@allow_v4 }}"
+            "chain input { policy drop;\n"
+            f"TEROK_SHIELD_DENIED admin-prohibited\n{private_rules}\n@allow_v4 }}"
         )
         errors = verify_ruleset(bad)
-        self.assertTrue(any("IPv6" in e for e in errors))
+        self.assertTrue(any("allow_v6" in e for e in errors))
 
-    def test_ipv6_drop_misplaced(self) -> None:
-        """Report IPv6 drop after accept rule."""
+    def test_missing_ipv6_private(self) -> None:
+        """Report missing IPv6 private-range reject rules."""
         rfc_rules = "\n".join(
-            f"ip daddr {net} reject with icmp type admin-prohibited" for net in RFC1918
+            f"ip daddr {net} reject with icmpx admin-prohibited" for net in RFC1918
         )
         bad = (
             "chain output { type filter hook output priority filter; policy drop;\n"
-            'oifname "lo" accept\n'
-            "meta nfproto ipv6 drop\n"
-            f"TEROK_SHIELD_DENIED\n{rfc_rules}\n@allow_v4 }}"
+            "chain input { policy drop;\n"
+            f"TEROK_SHIELD_DENIED admin-prohibited allow_v6\n{rfc_rules}\n@allow_v4 }}"
         )
         errors = verify_ruleset(bad)
-        self.assertTrue(any("misplaced" in e for e in errors))
+        v6_errors = [e for e in errors if "Private-range" in e and ":" in e]
+        self.assertEqual(len(v6_errors), len(IPV6_PRIVATE))
 
     def test_missing_output_chain(self) -> None:
         """Report missing output chain."""
         errors = verify_ruleset(
-            "chain input { policy drop; meta nfproto ipv6 drop\n"
-            "TEROK_SHIELD_DENIED admin-prohibited }"
+            "chain input { policy drop;\nTEROK_SHIELD_DENIED admin-prohibited allow_v6 }"
         )
         self.assertTrue(any("output chain missing" in e for e in errors))
 
     def test_missing_input_chain(self) -> None:
         """Report missing input chain."""
         errors = verify_ruleset(
-            "chain output { policy drop; meta nfproto ipv6 drop\n"
-            "TEROK_SHIELD_DENIED admin-prohibited }"
+            "chain output { policy drop;\nTEROK_SHIELD_DENIED admin-prohibited allow_v6 }"
         )
         self.assertTrue(any("input chain missing" in e for e in errors))
 
@@ -255,15 +313,19 @@ class TestVerifyRuleset(unittest.TestCase):
             f"Expected deny log prefix error, got: {errors}",
         )
 
-    def test_rfc1918_present_regardless_of_position(self) -> None:
-        """RFC1918 presence is checked regardless of position relative to allow set."""
-        rfc_rules = "\n".join(
-            f"ip daddr {net} reject with icmp type admin-prohibited" for net in RFC1918
+    def test_private_ranges_present_regardless_of_position(self) -> None:
+        """Private-range presence is checked regardless of position relative to allow set."""
+        private_rules = "\n".join(
+            f"{'ip' if '.' in net else 'ip6'} daddr {net} reject with icmpx admin-prohibited"
+            for net in PRIVATE_RANGES
         )
-        rs = f"policy drop admin-prohibited TEROK_SHIELD_DENIED @allow_v4 accept\n{rfc_rules}"
+        rs = (
+            f"policy drop admin-prohibited TEROK_SHIELD_DENIED"
+            f" @allow_v4 accept allow_v6\n{private_rules}"
+        )
         errors = verify_ruleset(rs)
-        rfc_errors = [e for e in errors if "RFC1918" in e]
-        self.assertEqual(rfc_errors, [], "RFC1918 blocks present — no ordering errors expected")
+        range_errors = [e for e in errors if "Private-range" in e]
+        self.assertEqual(range_errors, [], "Private-range blocks present — no errors expected")
 
 
 class TestBypassRuleset(unittest.TestCase):
@@ -279,12 +341,16 @@ class TestBypassRuleset(unittest.TestCase):
         rs = bypass_ruleset()
         self.assertIn("policy drop", rs)
 
-    def test_ipv6_dropped(self) -> None:
-        """IPv6 traffic must be dropped before any accept rules."""
+    def test_allow_v6_set_present(self) -> None:
+        """IPv6 allow set must be declared."""
         rs = bypass_ruleset()
-        ipv6_pos = rs.index("meta nfproto ipv6 drop")
-        first_accept_pos = rs.index('oifname "lo" accept')
-        self.assertLess(ipv6_pos, first_accept_pos)
+        self.assertIn("set allow_v6 { type ipv6_addr; flags interval; }", rs)
+
+    def test_ipv6_private_rules_present(self) -> None:
+        """IPv6 private-range reject rules must be present by default."""
+        rs = bypass_ruleset()
+        for net in IPV6_PRIVATE:
+            self.assertIn(net, rs)
 
     def test_bypass_log_present(self) -> None:
         """Bypass log prefix must be present."""
@@ -303,15 +369,18 @@ class TestBypassRuleset(unittest.TestCase):
             self.assertIn(net, rs)
 
     def test_rfc1918_absent_with_allow_all(self) -> None:
-        """RFC1918 reject rules absent when allow_all=True."""
+        """RFC1918 and IPv6 private reject rules absent when allow_all=True."""
         rs = bypass_ruleset(allow_all=True)
         for net in RFC1918:
             self.assertNotIn(net, rs)
+        for net in IPV6_PRIVATE:
+            self.assertNotIn(net, rs)
 
     def test_allow_set_preserved(self) -> None:
-        """allow_v4 set declaration is preserved for transition back."""
+        """allow_v4 and allow_v6 set declarations are preserved for transition back."""
         rs = bypass_ruleset()
         self.assertIn("set allow_v4", rs)
+        self.assertIn("set allow_v6", rs)
 
     def test_no_deny_rule(self) -> None:
         """Bypass ruleset has no deny log or reject-all rule."""
@@ -346,7 +415,7 @@ class TestVerifyBypassRuleset(unittest.TestCase):
     def test_valid_bypass_allow_all(self) -> None:
         """Bypass ruleset with allow_all passes all checks."""
         rs = bypass_ruleset(allow_all=True)
-        errors = verify_bypass_ruleset(rs)
+        errors = verify_bypass_ruleset(rs, allow_all=True)
         self.assertEqual(errors, [])
 
     def test_missing_accept_policy(self) -> None:
@@ -366,15 +435,13 @@ class TestVerifyBypassRuleset(unittest.TestCase):
 
     def test_missing_output_chain(self) -> None:
         """Report missing output chain in bypass verification."""
-        errors = verify_bypass_ruleset(
-            "chain input { policy drop; meta nfproto ipv6 drop\nTEROK_SHIELD_BYPASS }"
-        )
+        errors = verify_bypass_ruleset("chain input { policy drop;\nTEROK_SHIELD_BYPASS allow_v6 }")
         self.assertTrue(any("output chain missing" in e for e in errors))
 
     def test_missing_input_chain(self) -> None:
         """Report missing input chain in bypass verification."""
         errors = verify_bypass_ruleset(
-            "chain output { policy accept; meta nfproto ipv6 drop\nTEROK_SHIELD_BYPASS }"
+            "chain output { policy accept;\nTEROK_SHIELD_BYPASS allow_v6 }"
         )
         self.assertTrue(any("input chain missing" in e for e in errors))
 
