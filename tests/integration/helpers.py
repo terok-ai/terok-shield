@@ -88,6 +88,26 @@ def assert_connectable(container: str, ip: str, port: int = 53, timeout: int = 5
     )
 
 
+def assert_not_connectable(container: str, ip: str, port: int = 53, timeout: int = 5) -> None:
+    """Assert that a TCP connection to ip:port is blocked from inside a container.
+
+    Inverse of :func:`assert_connectable`.  Uses ``nc -z`` and expects failure.
+
+    Args:
+        container: Container name or ID.
+        ip: Target IP address.
+        port: Target TCP port (default: 53, DNS).
+        timeout: Connection timeout in seconds.
+    """
+    _assert_container_running(container)
+    r = exec_in_container(
+        container, "nc", "-z", "-w", str(timeout), ip, str(port), timeout=timeout + 5
+    )
+    assert r.returncode != 0, (
+        f"Expected {ip}:{port} to be blocked, but connection succeeded"
+    )
+
+
 def exec_in_container(container: str, *cmd: str, timeout: int = 10) -> subprocess.CompletedProcess:
     """Run a command inside a container via ``podman exec``.
 

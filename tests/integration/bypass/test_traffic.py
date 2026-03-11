@@ -18,14 +18,13 @@ from terok_shield.nft_constants import BYPASS_LOG_PREFIX, IPV6_PRIVATE, RFC1918
 from tests.testnet import (
     ALLOWED_TARGET_HTTP,
     BLOCKED_TARGET_DNS_PORT,
-    BLOCKED_TARGET_HTTP,
     BLOCKED_TARGET_IP,
     CONNCHECK_HTTP,
     CONNCHECK_HTTPS,
 )
 
 from ..conftest import nft_missing, podman_missing
-from ..helpers import assert_blocked, assert_connectable, assert_reachable
+from ..helpers import assert_blocked, assert_connectable, assert_not_connectable, assert_reachable
 
 
 @pytest.mark.needs_podman
@@ -47,7 +46,7 @@ class TestBypassTrafficDNS:
         assert_connectable(shielded_container, BLOCKED_TARGET_IP, BLOCKED_TARGET_DNS_PORT)
 
         shield_up(shielded_container)
-        assert_blocked(shielded_container, BLOCKED_TARGET_HTTP)
+        assert_not_connectable(shielded_container, BLOCKED_TARGET_IP, BLOCKED_TARGET_DNS_PORT)
 
 
 @pytest.mark.needs_podman
