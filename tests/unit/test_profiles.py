@@ -68,13 +68,13 @@ class TestLoadProfile(unittest.TestCase):
             load_profile("nonexistent-profile-xyz")
 
     def test_rejects_path_traversal(self) -> None:
-        """Raise FileNotFoundError for path traversal names."""
-        with self.assertRaises(FileNotFoundError):
+        """Raise ValueError for path traversal names."""
+        with self.assertRaises(ValueError):
             load_profile("../etc/passwd")
 
     def test_rejects_slash(self) -> None:
-        """Raise FileNotFoundError for names with slashes."""
-        with self.assertRaises(FileNotFoundError):
+        """Raise ValueError for names with slashes."""
+        with self.assertRaises(ValueError):
             load_profile("foo/bar")
 
     @unittest.mock.patch("terok_shield.profiles.shield_profiles_dir")

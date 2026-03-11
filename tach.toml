@@ -35,6 +35,11 @@ depends_on = [
 path = "terok_shield.util"
 depends_on = []
 
+# Shared validators — standalone, no internal deps
+[[modules]]
+path = "terok_shield.validation"
+depends_on = []
+
 # Subprocess helpers — standalone, no internal deps
 [[modules]]
 path = "terok_shield.run"
@@ -47,30 +52,33 @@ depends_on = [
     "terok_shield.nft_constants",
 ]
 
-# Audit logging — depends on config for path helpers
+# Audit logging — depends on config + validation
 [[modules]]
 path = "terok_shield.audit"
 depends_on = [
     "terok_shield.config",
+    "terok_shield.validation",
 ]
 
-# DNS resolution and caching — depends on config + run + util
+# DNS resolution and caching — depends on config + run + util + validation
 [[modules]]
 path = "terok_shield.dns"
 depends_on = [
     "terok_shield.config",
     "terok_shield.run",
     "terok_shield.util",
+    "terok_shield.validation",
 ]
 
-# Profile loading — depends on config
+# Profile loading — depends on config + validation
 [[modules]]
 path = "terok_shield.profiles"
 depends_on = [
     "terok_shield.config",
+    "terok_shield.validation",
 ]
 
-# OCI hook entry point — depends on audit, config, nft, run
+# OCI hook entry point — depends on audit, config, nft, run, validation
 [[modules]]
 path = "terok_shield.oci_hook"
 depends_on = [
@@ -78,6 +86,7 @@ depends_on = [
     "terok_shield.config",
     "terok_shield.nft",
     "terok_shield.run",
+    "terok_shield.validation",
 ]
 
 # Hook mode — OCI hooks, per-container netns
@@ -90,6 +99,7 @@ depends_on = [
     "terok_shield.profiles",
     "terok_shield.run",
     "terok_shield.util",
+    "terok_shield.validation",
 ]
 
 # CLI — depends on package root (public API)
@@ -107,6 +117,7 @@ depends_on = [
     "terok_shield.config",
     "terok_shield.dns",
     "terok_shield.mode_hook",
+    "terok_shield.nft",
     "terok_shield.profiles",
     "terok_shield.run",
     "terok_shield.util",

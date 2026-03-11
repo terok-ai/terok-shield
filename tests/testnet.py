@@ -63,6 +63,7 @@ QUAD9_DNS_IP = "9.9.9.9"  # Quad9 DNS
 CLOUDFLARE_DOMAIN = "one.one.one.one"  # Cloudflare DNS (always resolves)
 GOOGLE_DNS_DOMAIN = "dns.google"  # Google DNS (always resolves)
 NONEXISTENT_DOMAIN = "this-domain-does-not-exist.invalid"  # RFC 2606 reserved
+ALIAS_DOMAIN = "alias.example.com."  # CNAME-style answer for dig output filtering tests
 
 # ── IPv6 targets (used to verify IPv6 allowlisting and blocking) ──
 

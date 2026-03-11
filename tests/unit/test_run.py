@@ -8,6 +8,7 @@ import unittest.mock
 
 from terok_shield.run import (
     ExecError,
+    SubprocessRunner,
     dig_all,
     has,
     nft,
@@ -16,7 +17,14 @@ from terok_shield.run import (
     run,
 )
 
-from ..testnet import IPV6_CLOUDFLARE, NONEXISTENT_DOMAIN, TEST_DOMAIN, TEST_IP1, TEST_IP2
+from ..testnet import (
+    ALIAS_DOMAIN,
+    IPV6_CLOUDFLARE,
+    NONEXISTENT_DOMAIN,
+    TEST_DOMAIN,
+    TEST_IP1,
+    TEST_IP2,
+)
 
 
 class TestExecError(unittest.TestCase):
@@ -91,38 +99,47 @@ class TestHas(unittest.TestCase):
 class TestNft(unittest.TestCase):
     """Tests for nft wrapper."""
 
-    @unittest.mock.patch("terok_shield.run.run")
+    @unittest.mock.patch("subprocess.run")
     def test_nft_with_args(self, mock_run: unittest.mock.Mock) -> None:
         """Pass arguments directly to nft."""
-        mock_run.return_value = "output"
+        mock_run.return_value = unittest.mock.Mock(returncode=0, stdout="output", stderr="")
         result = nft("list", "ruleset")
-        mock_run.assert_called_once_with(["nft", "list", "ruleset"], check=True)
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        self.assertEqual(cmd, ["nft", "list", "ruleset"])
         self.assertEqual(result, "output")
 
-    @unittest.mock.patch("terok_shield.run.run")
+    @unittest.mock.patch("subprocess.run")
     def test_nft_with_stdin(self, mock_run: unittest.mock.Mock) -> None:
         """Pipe rules on stdin, preserving extra args."""
-        mock_run.return_value = ""
+        mock_run.return_value = unittest.mock.Mock(returncode=0, stdout="", stderr="")
         nft("-c", stdin="table ip test {}")
-        mock_run.assert_called_once_with(
-            ["nft", "-c", "-f", "-"], stdin="table ip test {}", check=True
-        )
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        self.assertEqual(cmd, ["nft", "-c", "-f", "-"])
+        self.assertEqual(mock_run.call_args[1]["input"], "table ip test {}")
 
-    @unittest.mock.patch("terok_shield.run.run")
+    @unittest.mock.patch("subprocess.run")
     def test_nft_stdin_no_args(self, mock_run: unittest.mock.Mock) -> None:
         """Pipe rules on stdin without extra args."""
-        mock_run.return_value = ""
+        mock_run.return_value = unittest.mock.Mock(returncode=0, stdout="", stderr="")
         nft(stdin="table ip test {}")
-        mock_run.assert_called_once_with(["nft", "-f", "-"], stdin="table ip test {}", check=True)
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        self.assertEqual(cmd, ["nft", "-f", "-"])
+        self.assertEqual(mock_run.call_args[1]["input"], "table ip test {}")
 
 
 class TestNftViaNsenter(unittest.TestCase):
     """Tests for nft_via_nsenter wrapper."""
 
-    @unittest.mock.patch("terok_shield.run.run")
+    @unittest.mock.patch("subprocess.run")
     def test_enters_container_netns(self, mock_run: unittest.mock.Mock) -> None:
         """Look up container PID and nsenter into its network namespace."""
-        mock_run.side_effect = ["12345\n", "output"]
+        mock_run.side_effect = [
+            unittest.mock.Mock(returncode=0, stdout="12345\n", stderr=""),
+            unittest.mock.Mock(returncode=0, stdout="output", stderr=""),
+        ]
         result = nft_via_nsenter("my-ctr", "list", "ruleset")
         self.assertEqual(mock_run.call_count, 2)
         # First call: podman inspect
@@ -133,61 +150,72 @@ class TestNftViaNsenter(unittest.TestCase):
         self.assertIn("12345", nsenter_cmd)
         self.assertEqual(result, "output")
 
-    @unittest.mock.patch("terok_shield.run.run")
+    @unittest.mock.patch("subprocess.run")
     def test_explicit_pid_skips_inspect(self, mock_run: unittest.mock.Mock) -> None:
         """Skip podman inspect when pid is provided directly."""
-        mock_run.return_value = "output"
+        mock_run.return_value = unittest.mock.Mock(returncode=0, stdout="output", stderr="")
         result = nft_via_nsenter("my-ctr", "list", "ruleset", pid="999")
         mock_run.assert_called_once()
         cmd = mock_run.call_args[0][0]
         self.assertIn("999", cmd)
         self.assertEqual(result, "output")
 
-    @unittest.mock.patch("terok_shield.run.run")
+    @unittest.mock.patch("subprocess.run")
     def test_stdin_support(self, mock_run: unittest.mock.Mock) -> None:
         """Pass stdin through to nft -f -."""
-        mock_run.side_effect = ["12345\n", ""]
+        mock_run.side_effect = [
+            unittest.mock.Mock(returncode=0, stdout="12345\n", stderr=""),
+            unittest.mock.Mock(returncode=0, stdout="", stderr=""),
+        ]
         nft_via_nsenter("my-ctr", stdin="flush ruleset")
         nsenter_call = mock_run.call_args_list[1]
         self.assertIn("-f", nsenter_call[0][0])
-        self.assertEqual(nsenter_call[1]["stdin"], "flush ruleset")
+        self.assertEqual(nsenter_call[1]["input"], "flush ruleset")
 
 
 class TestPodmanInspect(unittest.TestCase):
     """Tests for podman_inspect wrapper."""
 
-    @unittest.mock.patch("terok_shield.run.run")
+    @unittest.mock.patch("subprocess.run")
     def test_returns_stripped_output(self, mock_run: unittest.mock.Mock) -> None:
         """Return stripped inspect output."""
-        mock_run.return_value = "  12345  \n"
+        mock_run.return_value = unittest.mock.Mock(returncode=0, stdout="  12345  \n", stderr="")
         result = podman_inspect("my-ctr", "{{.State.Pid}}")
-        mock_run.assert_called_once_with(
-            ["podman", "inspect", "--format", "{{.State.Pid}}", "my-ctr"]
-        )
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        self.assertEqual(cmd, ["podman", "inspect", "--format", "{{.State.Pid}}", "my-ctr"])
         self.assertEqual(result, "12345")
 
 
 class TestDigAll(unittest.TestCase):
-    """Tests for dig_all() — single-query dual-stack DNS resolution."""
+    """Tests for dig_all() -- single-query dual-stack DNS resolution."""
 
-    @unittest.mock.patch("terok_shield.run.run")
+    @unittest.mock.patch("subprocess.run")
     def test_returns_v4_and_v6(self, mock_run: unittest.mock.Mock) -> None:
         """Extract both IPv4 and IPv6 addresses from combined dig output."""
-        mock_run.return_value = f"{TEST_IP1}\n{TEST_IP2}\n{IPV6_CLOUDFLARE}\n"
+        mock_run.return_value = unittest.mock.Mock(
+            returncode=0,
+            stdout=f"{TEST_IP1}\n{TEST_IP2}\n{IPV6_CLOUDFLARE}\n",
+            stderr="",
+        )
         result = dig_all(TEST_DOMAIN)
         self.assertEqual(result, [TEST_IP1, TEST_IP2, IPV6_CLOUDFLARE])
 
-    @unittest.mock.patch("terok_shield.run.run")
+    @unittest.mock.patch("subprocess.run")
     def test_filters_non_ip(self, mock_run: unittest.mock.Mock) -> None:
         """Filter out CNAME and other non-IP lines."""
-        mock_run.return_value = f"alias.example.com.\n{TEST_IP1}\n{IPV6_CLOUDFLARE}\n"
+        mock_run.return_value = unittest.mock.Mock(
+            returncode=0,
+            stdout=f"{ALIAS_DOMAIN}\n{TEST_IP1}\n{IPV6_CLOUDFLARE}\n",
+            stderr="",
+        )
         result = dig_all(TEST_DOMAIN)
         self.assertEqual(result, [TEST_IP1, IPV6_CLOUDFLARE])
 
-    @unittest.mock.patch("terok_shield.run.run")
+    @unittest.mock.patch("subprocess.run")
     def test_empty_on_failure(self, mock_run: unittest.mock.Mock) -> None:
         """Return empty list when dig returns empty (check=False)."""
-        mock_run.return_value = ""
+        mock_run.return_value = unittest.mock.Mock(returncode=1, stdout="", stderr="")
         result = dig_all(NONEXISTENT_DOMAIN)
         self.assertEqual(result, [])
 
@@ -197,12 +225,35 @@ class TestDigAll(unittest.TestCase):
         result = dig_all(TEST_DOMAIN)
         self.assertEqual(result, [])
 
-    @unittest.mock.patch("terok_shield.run.run")
+    @unittest.mock.patch("subprocess.run")
     def test_single_query_call(self, mock_run: unittest.mock.Mock) -> None:
         """Uses a single dig subprocess with both A and AAAA queries."""
-        mock_run.return_value = f"{TEST_IP1}\n"
+        mock_run.return_value = unittest.mock.Mock(
+            returncode=0,
+            stdout=f"{TEST_IP1}\n",
+            stderr="",
+        )
         dig_all(TEST_DOMAIN)
         mock_run.assert_called_once()
         cmd = mock_run.call_args[0][0]
         self.assertIn("A", cmd)
         self.assertIn("AAAA", cmd)
+
+
+class TestSubprocessRunner(unittest.TestCase):
+    """Tests for the SubprocessRunner class."""
+
+    def test_implements_command_runner(self) -> None:
+        """SubprocessRunner satisfies the CommandRunner protocol."""
+        from terok_shield.run import CommandRunner
+
+        runner = SubprocessRunner()
+        self.assertIsInstance(runner, CommandRunner)
+
+    @unittest.mock.patch("subprocess.run")
+    def test_run_method(self, mock_run: unittest.mock.Mock) -> None:
+        """SubprocessRunner.run() returns stdout on success."""
+        mock_run.return_value = unittest.mock.Mock(returncode=0, stdout="hello\n", stderr="")
+        runner = SubprocessRunner()
+        result = runner.run(["echo", "hello"])
+        self.assertEqual(result, "hello\n")

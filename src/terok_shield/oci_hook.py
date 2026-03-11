@@ -10,19 +10,29 @@ applies the hook-mode firewall.
 The hook is fail-closed: if any step fails during ``createRuntime``,
 it exits non-zero and the container must not start with unrestricted
 network access.
+
+Provides ``HookExecutor`` (Command pattern) for the actual firewall
+application, and ``hook_main()`` as a thin entry point.
 """
+
+from __future__ import annotations
 
 import ipaddress
 import json
-import re
 import sys
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .audit import configure_audit, log_event
 from .config import load_shield_config, shield_resolved_dir
 from .nft import add_elements_dual, hook_ruleset, verify_ruleset
 from .run import ExecError, nft_via_nsenter
+from .validation import SAFE_NAME
 
-_SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+if TYPE_CHECKING:
+    from .audit import AuditLogger
+    from .nft import RulesetBuilder
+    from .run import CommandRunner
 
 _PRIVATE_NETWORKS = (
     ipaddress.IPv4Network("10.0.0.0/8"),
@@ -35,6 +45,9 @@ _PRIVATE_NETWORKS = (
 
 _BROAD_PREFIX_V4 = 16
 _BROAD_PREFIX_V6 = 48
+
+
+# ── Classification helpers ───────────────────────────────
 
 
 def _classify_cidr(net: ipaddress.IPv4Network | ipaddress.IPv6Network) -> tuple[bool, bool]:
@@ -63,7 +76,7 @@ def _classify_ips(ips: list[str]) -> tuple[list[str], list[str]]:
 
     Returns:
         Tuple of (private_ips, broad_cidrs). Does not affect which IPs
-        are added to the allow set — classification is logging-only.
+        are added to the allow set -- classification is logging-only.
     """
     private: list[str] = []
     broad: list[str] = []
@@ -81,6 +94,142 @@ def _classify_ips(ips: list[str]) -> tuple[list[str], list[str]]:
         except ValueError:
             continue
     return private, broad
+
+
+# ── HookExecutor (Command) ──────────────────────────────
+
+
+class HookExecutor:
+    """Command: apply the shield firewall inside a container's network namespace.
+
+    Runtime counterpart of ``HookMode``: while ``HookMode`` prepares
+    containers (DNS resolution, hook installation, podman args),
+    ``HookExecutor`` actually applies the firewall when podman triggers
+    the OCI hook.
+    """
+
+    def __init__(
+        self,
+        *,
+        runner: CommandRunner,
+        audit: AuditLogger,
+        ruleset: RulesetBuilder,
+        resolved_dir: Path,
+    ) -> None:
+        """Create a hook executor.
+
+        Args:
+            runner: Command runner for nft subprocess calls.
+            audit: Audit logger for event logging.
+            ruleset: Ruleset builder for generation and verification.
+            resolved_dir: Directory containing per-container ``.resolved`` files.
+        """
+        self._runner = runner
+        self._audit = audit
+        self._ruleset = ruleset
+        self._resolved_dir = resolved_dir
+
+    def apply(self, container: str, pid: str) -> None:
+        """Apply ruleset, load cached IPs, verify.  Fail-closed."""
+        self._apply_ruleset(container, pid)
+        ip_count = self._load_and_add_ips(container, pid)
+        self._verify(container, pid)
+        self._audit.log_event(container, "setup", detail=f"applied with {ip_count} allowed IPs")
+
+    def _apply_ruleset(self, container: str, pid: str) -> None:
+        """Apply the hook ruleset to the container."""
+        self._nft_exec(
+            container,
+            pid,
+            stdin=self._ruleset.build_hook(),
+        )
+        self._audit.log_event(container, "setup", detail="ruleset applied")
+
+    def _load_and_add_ips(self, container: str, pid: str) -> int:
+        """Read cached IPs, classify, log, and add to the allow set."""
+        try:
+            ips = self._read_resolved_ips(container)
+        except (OSError, UnicodeError) as e:
+            self._audit.log_event(container, "error", detail=f"resolved cache read failed: {e}")
+            raise RuntimeError(f"Failed to read resolved cache: {e}") from e
+
+        self._audit.log_event(container, "setup", detail=f"read {len(ips)} cached IPs")
+        if not ips:
+            return 0
+
+        self._audit.log_event(container, "setup", detail=f"[ips] cached: {', '.join(ips)}")
+
+        private_ips, broad_cidrs = _classify_ips(ips)
+        if private_ips:
+            self._audit.log_event(
+                container,
+                "note",
+                detail=f"private range whitelisted: {', '.join(private_ips)}",
+            )
+        for cidr in broad_cidrs:
+            self._audit.log_event(container, "note", detail=f"broad range whitelisted: {cidr}")
+
+        elements_cmd = self._ruleset.add_elements_dual(ips)
+        if elements_cmd:
+            self._nft_exec(container, pid, stdin=elements_cmd, action="add-elements")
+            self._audit.log_event(
+                container,
+                "setup",
+                detail=f"[ips] added to allow sets: {', '.join(ips)}",
+            )
+
+        return len(ips)
+
+    def _verify(self, container: str, pid: str) -> None:
+        """Verify the applied ruleset."""
+        output = self._nft_exec(container, pid, "list", "ruleset")
+        errors = self._ruleset.verify_hook(output)
+        if errors:
+            detail = "; ".join(errors)
+            self._audit.log_event(container, "error", detail=f"verification failed: {detail}")
+            raise RuntimeError(f"Ruleset verification failed: {detail}")
+        self._audit.log_event(container, "setup", detail="verification passed")
+
+    def _read_resolved_ips(self, container: str) -> list[str]:
+        """Read pre-resolved IPs for a container."""
+        if not SAFE_NAME.fullmatch(container):
+            return []
+        path = self._resolved_dir / f"{container}.resolved"
+        if not path.is_file():
+            return []
+        return [line.strip() for line in path.read_text().splitlines() if line.strip()]
+
+    def _nft_exec(
+        self,
+        container: str,
+        pid: str,
+        *args: str,
+        stdin: str | None = None,
+        action: str = "",
+    ) -> str:
+        """Run nft in the container netns, logging and raising on failure."""
+        try:
+            return self._runner.nft_via_nsenter(container, *args, pid=pid, stdin=stdin)
+        except ExecError as e:
+            label = action or (args[0] if args else "apply")
+            self._audit.log_event(container, "error", detail=f"{label} failed: {e}")
+            raise RuntimeError(f"nft {label} failed: {e}") from e
+
+    @staticmethod
+    def parse_oci_state(stdin_data: str) -> tuple[str, str, dict[str, str]]:
+        """Parse OCI state JSON from stdin.
+
+        Returns:
+            Tuple of (container_id, pid, annotations).  ``pid`` is an empty
+            string when absent or zero (expected for ``poststop`` hooks).
+
+        Raises:
+            ValueError: If the state is missing ``id`` or is not valid JSON.
+        """
+        return _parse_oci_state(stdin_data)
+
+
+# ── Module-level free functions (backwards compat) ───────
 
 
 def _parse_oci_state(stdin_data: str) -> tuple[str, str, dict[str, str]]:
@@ -114,7 +263,7 @@ def _read_resolved_ips(container: str) -> list[str]:
 
     Returns an empty list if no cache file exists or the name is invalid.
     """
-    if not _SAFE_NAME.fullmatch(container):
+    if not SAFE_NAME.fullmatch(container):
         return []
     path = shield_resolved_dir() / f"{container}.resolved"
     if not path.is_file():
@@ -213,7 +362,7 @@ def hook_main(stdin_data: str | None = None, stage: str = "createRuntime") -> in
         stdin_data = sys.stdin.read()
 
     try:
-        # _annotations intentionally captured — preserves mode-dispatch infrastructure
+        # _annotations intentionally captured -- preserves mode-dispatch infrastructure
         container_id, pid, _annotations = _parse_oci_state(stdin_data)
     except ValueError as e:
         print(f"terok-shield hook: {e}", file=sys.stderr)

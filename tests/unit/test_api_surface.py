@@ -14,13 +14,21 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import terok_shield
-from terok_shield import ExecError, ShieldConfig, ShieldMode, ShieldState
+from terok_shield import ExecError, ShieldConfig, ShieldMode, ShieldPaths, ShieldState
 
 EXPECTED_ALL = [
+    "AuditLogger",
+    "CommandRunner",
+    "DnsResolver",
     "ExecError",
+    "ProfileLoader",
+    "RulesetBuilder",
+    "Shield",
     "ShieldConfig",
     "ShieldMode",
+    "ShieldPaths",
     "ShieldState",
+    "SubprocessRunner",
     "configure_audit",
     "list_log_files",
     "list_profiles",
@@ -75,10 +83,10 @@ class TestAPISurface(unittest.TestCase):
 
     def test_shield_config_fields(self):
         """ShieldConfig has the expected fields with correct defaults."""
-        names = {f.name for f in dataclasses.fields(ShieldConfig)}
+        names = [f.name for f in dataclasses.fields(ShieldConfig)]
         self.assertEqual(
             names,
-            {"mode", "default_profiles", "loopback_ports", "audit_enabled", "audit_log_allowed"},
+            ["mode", "default_profiles", "loopback_ports", "audit_enabled", "paths"],
         )
 
         cfg = ShieldConfig()
@@ -86,7 +94,7 @@ class TestAPISurface(unittest.TestCase):
         self.assertEqual(cfg.default_profiles, ("dev-standard",))
         self.assertEqual(cfg.loopback_ports, ())
         self.assertIs(cfg.audit_enabled, True)
-        self.assertIs(cfg.audit_log_allowed, True)
+        self.assertIsInstance(cfg.paths, ShieldPaths)
 
     def test_shield_config_frozen(self):
         """ShieldConfig is frozen — assignment raises FrozenInstanceError."""

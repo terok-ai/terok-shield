@@ -32,7 +32,7 @@ class TestShieldConfig(unittest.TestCase):
         self.assertEqual(cfg.default_profiles, ("dev-standard",))
         self.assertEqual(cfg.loopback_ports, ())
         self.assertTrue(cfg.audit_enabled)
-        self.assertTrue(cfg.audit_log_allowed)
+        self.assertIsNotNone(cfg.paths)
 
     def test_default_profiles_immutable(self) -> None:
         """Default profiles tuple cannot be mutated."""
@@ -270,11 +270,10 @@ class TestLoadShieldConfig(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             config_file = Path(tmp) / "config.yml"
-            config_file.write_text('mode: hook\naudit:\n  enabled: "yes"\n  log_allowed: 42\n')
+            config_file.write_text('mode: hook\naudit:\n  enabled: "yes"\n')
             with unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": tmp}):
                 cfg = load_shield_config()
                 self.assertIs(cfg.audit_enabled, True)
-                self.assertIs(cfg.audit_log_allowed, True)
 
 
 class TestAutoDetectMode(unittest.TestCase):
