@@ -45,7 +45,7 @@ from .nft import (
 from .profiles import compose_profiles
 from .run import ExecError, nft_via_nsenter, podman_inspect, run as run_cmd
 from .util import is_ipv4
-from .validation import SAFE_NAME
+from .validation import validate_container_name
 
 if TYPE_CHECKING:
     from .audit import AuditLogger
@@ -134,10 +134,12 @@ def install_hooks(
     ensure_shield_dirs()
 
     ep = hook_entrypoint or shield_hook_entrypoint()
+    ep.parent.mkdir(parents=True, exist_ok=True)
     ep.write_text(_generate_entrypoint())
     ep.chmod(ep.stat().st_mode | stat.S_IEXEC)
 
     hd = hooks_dir or shield_hooks_dir()
+    hd.mkdir(parents=True, exist_ok=True)
     for stage in ("createRuntime", "poststop"):
         hook_json = _generate_hook_json(str(ep), stage)
         (hd / f"terok-shield-{stage}.json").write_text(hook_json)
@@ -319,11 +321,12 @@ class HookMode:
         stdin = f"delete table {NFT_TABLE}\n{rs}"
         self._runner.nft_via_nsenter(container, stdin=stdin)
 
-        name = self._resolve_container_name(container)
-        if SAFE_NAME.fullmatch(name):
-            resolved_file = self._config.paths.resolved_dir / f"{name}.resolved"
-        else:
+        try:
+            name = validate_container_name(self._resolve_container_name(container))
+        except ValueError:
             resolved_file = None
+        else:
+            resolved_file = self._config.paths.resolved_dir / f"{name}.resolved"
         if resolved_file and resolved_file.is_file():
             ips = [line.strip() for line in resolved_file.read_text().splitlines() if line.strip()]
             elements_cmd = self._ruleset.add_elements_dual(ips)
@@ -562,11 +565,12 @@ def shield_up(config: ShieldConfig, container: str) -> None:
     stdin = f"delete table {NFT_TABLE}\n{ruleset}"
     nft_via_nsenter(container, stdin=stdin)
 
-    name = _resolve_container_name(container)
-    if SAFE_NAME.fullmatch(name):
-        resolved_file = shield_resolved_dir() / f"{name}.resolved"
-    else:
+    try:
+        name = validate_container_name(_resolve_container_name(container))
+    except ValueError:
         resolved_file = None
+    else:
+        resolved_file = shield_resolved_dir() / f"{name}.resolved"
     if resolved_file and resolved_file.is_file():
         ips = [line.strip() for line in resolved_file.read_text().splitlines() if line.strip()]
         elements_cmd = add_elements_dual(ips)

@@ -303,8 +303,11 @@ def add_elements_dual(ips: list[str], table: str = NFT_TABLE) -> str:
     v4: list[str] = []
     v6: list[str] = []
     for ip in ips:
-        if _try_validate(ip):
-            (v4 if _is_v4(ip) else v6).append(ip)
+        try:
+            sanitized = safe_ip(ip)
+        except ValueError:
+            continue
+        (v4 if _is_v4(sanitized) else v6).append(sanitized)
     parts: list[str] = []
     cmd = add_elements("allow_v4", v4, table)
     if cmd:

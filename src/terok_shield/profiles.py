@@ -84,6 +84,7 @@ class ProfileLoader:
         User profiles take precedence over bundled profiles.
 
         Raises:
+            ValueError: If the name contains path separators or traversal.
             FileNotFoundError: If the profile does not exist.
         """
         path = self._find_profile(name)
@@ -97,6 +98,7 @@ class ProfileLoader:
         Preserves insertion order (first occurrence wins).
 
         Raises:
+            ValueError: If any name contains path separators or traversal.
             FileNotFoundError: If any named profile does not exist.
         """
         seen: set[str] = set()
@@ -132,6 +134,7 @@ def load_profile(name: str) -> list[str]:
     bundled profiles in ``resources/dns/``.
 
     Raises:
+        ValueError: If the name contains path separators or traversal.
         FileNotFoundError: If the profile does not exist.
     """
     return _default_loader().load_profile(name)
@@ -143,6 +146,7 @@ def compose_profiles(names: list[str]) -> list[str]:
     Preserves insertion order (first occurrence wins).
 
     Raises:
+        ValueError: If any name contains path separators or traversal.
         FileNotFoundError: If any named profile does not exist.
     """
     return _default_loader().compose_profiles(names)

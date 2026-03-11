@@ -14,7 +14,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import terok_shield
-from terok_shield import ExecError, ShieldConfig, ShieldMode, ShieldState
+from terok_shield import ExecError, ShieldConfig, ShieldMode, ShieldPaths, ShieldState
 
 EXPECTED_ALL = [
     "AuditLogger",
@@ -94,7 +94,7 @@ class TestAPISurface(unittest.TestCase):
         self.assertEqual(cfg.default_profiles, ("dev-standard",))
         self.assertEqual(cfg.loopback_ports, ())
         self.assertIs(cfg.audit_enabled, True)
-        self.assertIsNotNone(cfg.paths)
+        self.assertIsInstance(cfg.paths, ShieldPaths)
 
     def test_shield_config_frozen(self):
         """ShieldConfig is frozen — assignment raises FrozenInstanceError."""

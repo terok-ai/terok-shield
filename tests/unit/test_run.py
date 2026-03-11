@@ -243,8 +243,17 @@ class TestDigAll(unittest.TestCase):
 class TestSubprocessRunner(unittest.TestCase):
     """Tests for the SubprocessRunner class."""
 
-    def test_is_default_runner_type(self) -> None:
-        """The module-level free functions delegate to SubprocessRunner."""
-        from terok_shield.run import _default_runner
+    def test_implements_command_runner(self) -> None:
+        """SubprocessRunner satisfies the CommandRunner protocol."""
+        from terok_shield.run import CommandRunner
 
-        self.assertIsInstance(_default_runner, SubprocessRunner)
+        runner = SubprocessRunner()
+        self.assertIsInstance(runner, CommandRunner)
+
+    @unittest.mock.patch("subprocess.run")
+    def test_run_method(self, mock_run: unittest.mock.Mock) -> None:
+        """SubprocessRunner.run() returns stdout on success."""
+        mock_run.return_value = unittest.mock.Mock(returncode=0, stdout="hello\n", stderr="")
+        runner = SubprocessRunner()
+        result = runner.run(["echo", "hello"])
+        self.assertEqual(result, "hello\n")
