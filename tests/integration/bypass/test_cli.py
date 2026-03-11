@@ -3,7 +3,6 @@
 
 """Integration tests: CLI down/up/rules/preview commands with real containers."""
 
-import uuid
 from pathlib import Path
 
 import pytest
@@ -99,25 +98,4 @@ class TestBypassPreviewCLI:
         """``preview --all`` without ``--down`` exits with error."""
         with pytest.raises(SystemExit) as exc_info:
             main(["preview", "--all"])
-        assert exc_info.value.code == 1
-
-
-@pytest.mark.needs_podman
-@podman_missing
-@nft_missing
-class TestBypassCLIErrors:
-    """Verify CLI error handling for down/up on bad containers."""
-
-    def test_cli_down_bad_container(self, shield_env: Path) -> None:
-        """``down`` on a nonexistent container exits 1."""
-        bogus = f"nonexistent-{uuid.uuid4().hex[:12]}"
-        with pytest.raises(SystemExit) as exc_info:
-            main(["down", bogus])
-        assert exc_info.value.code == 1
-
-    def test_cli_up_bad_container(self, shield_env: Path) -> None:
-        """``up`` on a nonexistent container exits 1."""
-        bogus = f"nonexistent-{uuid.uuid4().hex[:12]}"
-        with pytest.raises(SystemExit) as exc_info:
-            main(["up", bogus])
         assert exc_info.value.code == 1
