@@ -3,8 +3,6 @@
 
 """Integration tests: CLI down/up/rules/preview commands with real containers."""
 
-from pathlib import Path
-
 import pytest
 
 from terok_shield import ShieldState, shield_state
@@ -75,26 +73,25 @@ class TestBypassCLI:
 
 
 @pytest.mark.needs_host_features
+@pytest.mark.usefixtures("shield_env")
 class TestBypassPreviewCLI:
     """Verify ``terok-shield preview --down`` without a running container."""
 
-    def test_preview_down(self, capsys: pytest.CaptureFixture, shield_env: Path) -> None:
+    def test_preview_down(self, capsys: pytest.CaptureFixture) -> None:
         """``preview --down`` shows bypass ruleset with accept policy."""
         main(["preview", "--down"])
         captured = capsys.readouterr()
         assert "policy accept" in captured.out
         assert BYPASS_LOG_PREFIX in captured.out
 
-    def test_preview_down_all(self, capsys: pytest.CaptureFixture, shield_env: Path) -> None:
+    def test_preview_down_all(self, capsys: pytest.CaptureFixture) -> None:
         """``preview --down --all`` omits RFC1918 rules."""
         main(["preview", "--down", "--all"])
         captured = capsys.readouterr()
         assert "policy accept" in captured.out
         assert "TEROK_SHIELD_RFC1918" not in captured.out
 
-    def test_preview_all_without_down_fails(
-        self, capsys: pytest.CaptureFixture, shield_env: Path
-    ) -> None:
+    def test_preview_all_without_down_fails(self, capsys: pytest.CaptureFixture) -> None:
         """``preview --all`` without ``--down`` exits with error."""
         with pytest.raises(SystemExit) as exc_info:
             main(["preview", "--all"])
