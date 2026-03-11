@@ -64,6 +64,7 @@ make spdx NAME="Real Human Name" FILES="src/terok_shield/new_file.py"  # Add SPD
 - **Pythonic style**: Prefer modern Pythonic constructs (comprehensions, ternary expressions, walrus operator, unpacking) where they improve readability
 - **Testing**: Add tests for new functionality; maintain coverage
 - **No literal IPs/URLs in tests**: Never hardcode IP addresses, URLs, or domain names directly in test files. Instead, define named constants in `tests/testnet.py` and import them. This centralizes SonarCloud suppressions and makes network dependencies auditable
+- **No literal filesystem paths in tests**: Never hardcode filesystem paths (`/tmp/...`, `/nonexistent/...`, `/etc/passwd`, `/usr/bin/nft`, etc.) directly in test files. Instead, define named constants in `tests/testfs.py` and import them. This centralizes SonarCloud suppressions for path-related security hotspots. Derive subpaths from base constants (e.g. `NONEXISTENT_DIR / "logs"`) rather than defining a new constant for every variant
 - **SPDX headers**: Every source file (`.py`, `.sh`, etc.) must have an SPDX header. Use `make spdx` to add or update it — it handles both new files and existing files correctly:
   ```bash
   make spdx NAME="Real Human Name" FILES="path/to/file.py"

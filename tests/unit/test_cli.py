@@ -3,11 +3,16 @@
 
 """Tests for the CLI entry point."""
 
+import io
+import json
+import sys
 import unittest
 from unittest import mock
 
-from terok_shield import ExecError
+from terok_shield import ExecError, ShieldState
 from terok_shield.cli import _build_parser, main
+
+from ..testnet import TEST_DOMAIN, TEST_IP1
 
 
 class TestBuildParser(unittest.TestCase):
@@ -145,7 +150,7 @@ class TestMainDispatch(unittest.TestCase):
     @mock.patch("terok_shield.cli.shield_resolve")
     def test_resolve(self, mock_resolve):
         """CLI resolve calls shield_resolve."""
-        mock_resolve.return_value = ["192.0.2.1"]
+        mock_resolve.return_value = [TEST_IP1]
         main(["resolve", "test"])
         mock_resolve.assert_called_once_with("test", force=False)
 
@@ -159,23 +164,21 @@ class TestMainDispatch(unittest.TestCase):
     @mock.patch("terok_shield.cli.shield_allow")
     def test_allow(self, mock_allow):
         """CLI allow calls shield_allow."""
-        mock_allow.return_value = ["192.0.2.1"]
-        main(["allow", "test", "192.0.2.1"])
-        mock_allow.assert_called_once_with("test", "192.0.2.1")
+        mock_allow.return_value = [TEST_IP1]
+        main(["allow", "test", TEST_IP1])
+        mock_allow.assert_called_once_with("test", TEST_IP1)
 
     @mock.patch("terok_shield.cli.shield_deny")
     def test_deny(self, mock_deny):
         """CLI deny calls shield_deny."""
-        mock_deny.return_value = ["192.0.2.1"]
-        main(["deny", "test", "192.0.2.1"])
-        mock_deny.assert_called_once_with("test", "192.0.2.1")
+        mock_deny.return_value = [TEST_IP1]
+        main(["deny", "test", TEST_IP1])
+        mock_deny.assert_called_once_with("test", TEST_IP1)
 
     @mock.patch("terok_shield.cli.shield_state")
     @mock.patch("terok_shield.cli.shield_rules")
     def test_rules(self, mock_rules, mock_state):
         """CLI rules calls shield_rules."""
-        from terok_shield import ShieldState
-
         mock_state.return_value = ShieldState.UP
         mock_rules.return_value = "table inet terok_shield {}"
         main(["rules", "test"])
@@ -223,6 +226,107 @@ class TestMainDispatch(unittest.TestCase):
         with self.assertRaises(SystemExit) as ctx:
             main(["preview", "--all"])
         self.assertEqual(ctx.exception.code, 1)
+
+
+class TestMainOutputFormatting(unittest.TestCase):
+    """Test CLI output formatting for various subcommands."""
+
+    @mock.patch("terok_shield.cli.shield_status")
+    def test_status_output_format(self, mock_status) -> None:
+        """CLI status prints formatted output."""
+        mock_status.return_value = {
+            "mode": "hook",
+            "audit_enabled": True,
+            "profiles": ["dev-standard"],
+            "log_files": ["ctr1"],
+        }
+        captured = io.StringIO()
+        sys.stdout = captured
+        try:
+            main(["status"])
+        finally:
+            sys.stdout = sys.__stdout__
+        output = captured.getvalue()
+        self.assertIn("Mode:", output)
+        self.assertIn("hook", output)
+        self.assertIn("Audit:", output)
+        self.assertIn("enabled", output)
+        self.assertIn("Logs:", output)
+
+    @mock.patch("terok_shield.cli.shield_status")
+    def test_status_no_logs(self, mock_status) -> None:
+        """CLI status omits Logs line when no log files."""
+        mock_status.return_value = {
+            "mode": "hook",
+            "audit_enabled": False,
+            "profiles": [],
+            "log_files": [],
+        }
+        captured = io.StringIO()
+        sys.stdout = captured
+        try:
+            main(["status"])
+        finally:
+            sys.stdout = sys.__stdout__
+        output = captured.getvalue()
+        self.assertNotIn("Logs:", output)
+        self.assertIn("disabled", output)
+        self.assertIn("(none)", output)
+
+    @mock.patch("terok_shield.cli.shield_allow", return_value=[])
+    def test_allow_no_ips_exits_1(self, _allow) -> None:
+        """CLI allow exits 1 when no IPs are allowed."""
+        with self.assertRaises(SystemExit) as ctx:
+            main(["allow", "test", TEST_DOMAIN])
+        self.assertEqual(ctx.exception.code, 1)
+
+    @mock.patch("terok_shield.cli.shield_deny", return_value=[])
+    def test_deny_no_ips_exits_1(self, _deny) -> None:
+        """CLI deny exits 1 when no IPs are denied."""
+        with self.assertRaises(SystemExit) as ctx:
+            main(["deny", "test", TEST_DOMAIN])
+        self.assertEqual(ctx.exception.code, 1)
+
+    @mock.patch("terok_shield.cli.shield_state")
+    @mock.patch("terok_shield.cli.shield_rules", return_value="")
+    def test_rules_no_rules(self, _rules, mock_state) -> None:
+        """CLI rules prints 'No rules found' for empty output."""
+        mock_state.return_value = ShieldState.INACTIVE
+        captured = io.StringIO()
+        sys.stdout = captured
+        try:
+            main(["rules", "test"])
+        finally:
+            sys.stdout = sys.__stdout__
+        output = captured.getvalue()
+        self.assertIn("No rules found", output)
+
+    @mock.patch("terok_shield.cli.tail_log", return_value=iter([]))
+    @mock.patch("terok_shield.cli.list_log_files", return_value=[])
+    def test_logs_no_files(self, _files, _tail) -> None:
+        """CLI logs prints 'No audit logs found' when no files."""
+        captured = io.StringIO()
+        sys.stdout = captured
+        try:
+            main(["logs"])
+        finally:
+            sys.stdout = sys.__stdout__
+        output = captured.getvalue()
+        self.assertIn("No audit logs found", output)
+
+    @mock.patch("terok_shield.cli.tail_log")
+    def test_logs_with_container(self, mock_tail) -> None:
+        """CLI logs with --container prints entries as JSON."""
+        mock_tail.return_value = iter([{"action": "setup"}])
+        captured = io.StringIO()
+        sys.stdout = captured
+        try:
+            main(["logs", "--container", "test"])
+        finally:
+            sys.stdout = sys.__stdout__
+        output = captured.getvalue().strip()
+        entry = json.loads(output)
+        self.assertEqual(entry["action"], "setup")
 
 
 class TestMainErrorHandling(unittest.TestCase):

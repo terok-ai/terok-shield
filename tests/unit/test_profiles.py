@@ -15,7 +15,8 @@ from terok_shield.profiles import (
     load_profile,
 )
 
-from ..testnet import TEST_IP1
+from ..testfs import FORBIDDEN_TRAVERSAL
+from ..testnet import CUSTOM_DOMAIN, TEST_DOMAIN, TEST_DOMAIN2, TEST_IP1
 
 
 class TestParseEntries(unittest.TestCase):
@@ -23,23 +24,23 @@ class TestParseEntries(unittest.TestCase):
 
     def test_basic(self) -> None:
         """Parse domains and IPs from text."""
-        text = f"example.com\n{TEST_IP1}\ntest.org\n"
-        self.assertEqual(_parse_entries(text), ["example.com", TEST_IP1, "test.org"])
+        text = f"{TEST_DOMAIN}\n{TEST_IP1}\n{TEST_DOMAIN2}\n"
+        self.assertEqual(_parse_entries(text), [TEST_DOMAIN, TEST_IP1, TEST_DOMAIN2])
 
     def test_comments_stripped(self) -> None:
         """Skip comment lines."""
-        text = "# comment\nexample.com\n# another\ntest.org\n"
-        self.assertEqual(_parse_entries(text), ["example.com", "test.org"])
+        text = f"# comment\n{TEST_DOMAIN}\n# another\n{TEST_DOMAIN2}\n"
+        self.assertEqual(_parse_entries(text), [TEST_DOMAIN, TEST_DOMAIN2])
 
     def test_blank_lines_stripped(self) -> None:
         """Skip blank lines."""
-        text = "\nexample.com\n\n\ntest.org\n\n"
-        self.assertEqual(_parse_entries(text), ["example.com", "test.org"])
+        text = f"\n{TEST_DOMAIN}\n\n\n{TEST_DOMAIN2}\n\n"
+        self.assertEqual(_parse_entries(text), [TEST_DOMAIN, TEST_DOMAIN2])
 
     def test_whitespace_stripped(self) -> None:
         """Strip leading/trailing whitespace from entries."""
-        text = "  example.com  \n  test.org  \n"
-        self.assertEqual(_parse_entries(text), ["example.com", "test.org"])
+        text = f"  {TEST_DOMAIN}  \n  {TEST_DOMAIN2}  \n"
+        self.assertEqual(_parse_entries(text), [TEST_DOMAIN, TEST_DOMAIN2])
 
     def test_empty(self) -> None:
         """Empty text returns empty list."""
@@ -70,7 +71,7 @@ class TestLoadProfile(unittest.TestCase):
     def test_rejects_path_traversal(self) -> None:
         """Raise ValueError for path traversal names."""
         with self.assertRaises(ValueError):
-            load_profile("../etc/passwd")
+            load_profile(FORBIDDEN_TRAVERSAL)
 
     def test_rejects_slash(self) -> None:
         """Raise ValueError for names with slashes."""
@@ -83,9 +84,9 @@ class TestLoadProfile(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             mock_dir.return_value = Path(tmp)
             user_file = Path(tmp) / "base.txt"
-            user_file.write_text(f"custom.example.com\n{TEST_IP1}\n")
+            user_file.write_text(f"{CUSTOM_DOMAIN}\n{TEST_IP1}\n")
             entries = load_profile("base")
-            self.assertEqual(entries, ["custom.example.com", TEST_IP1])
+            self.assertEqual(entries, [CUSTOM_DOMAIN, TEST_IP1])
 
 
 class TestComposeProfiles(unittest.TestCase):
@@ -139,7 +140,7 @@ class TestListProfiles(unittest.TestCase):
         """List includes user profiles alongside bundled."""
         with tempfile.TemporaryDirectory() as tmp:
             mock_dir.return_value = Path(tmp)
-            (Path(tmp) / "custom.txt").write_text("custom.example.com\n")
+            (Path(tmp) / "custom.txt").write_text(f"{CUSTOM_DOMAIN}\n")
             profiles = list_profiles()
             self.assertIn("custom", profiles)
             self.assertIn("base", profiles)

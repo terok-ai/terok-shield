@@ -11,6 +11,7 @@ from pathlib import Path
 
 from terok_shield.audit import configure_audit, list_log_files, log_event, tail_log
 
+from ..testfs import FORBIDDEN_ABSOLUTE, NONEXISTENT_DIR
 from ..testnet import TEST_IP1
 
 
@@ -97,7 +98,7 @@ class TestLogPathTraversal(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             mock_dir.return_value = Path(tmp)
             with self.assertRaises(ValueError):
-                log_event("/etc/passwd", "setup")
+                log_event(FORBIDDEN_ABSOLUTE, "setup")
 
 
 class TestLogEventErrorHandling(unittest.TestCase):
@@ -106,7 +107,7 @@ class TestLogEventErrorHandling(unittest.TestCase):
     @unittest.mock.patch("terok_shield.audit.shield_logs_dir")
     def test_silently_ignores_write_error(self, mock_dir: unittest.mock.Mock) -> None:
         """OSError during write is silently ignored (best-effort logging)."""
-        mock_dir.return_value = Path("/nonexistent/readonly/path")
+        mock_dir.return_value = NONEXISTENT_DIR / "readonly" / "path"
         # Should not raise
         log_event("test-ctr", "setup")
 
@@ -182,6 +183,6 @@ class TestListLogFiles(unittest.TestCase):
     @unittest.mock.patch("terok_shield.audit.shield_logs_dir")
     def test_empty_when_dir_missing(self, mock_dir: unittest.mock.Mock) -> None:
         """Return empty list when logs directory does not exist."""
-        mock_dir.return_value = Path("/nonexistent/logs")
+        mock_dir.return_value = NONEXISTENT_DIR / "logs"
         result = list_log_files()
         self.assertEqual(result, [])

@@ -16,6 +16,7 @@ from terok_shield.dns import (
     resolve_domains,
 )
 
+from ..testfs import NONEXISTENT_DIR
 from ..testnet import (
     CLOUDFLARE_DOMAIN,
     GOOGLE_DNS_DOMAIN,
@@ -41,7 +42,7 @@ class TestIsIp(unittest.TestCase):
 
     def test_domain(self) -> None:
         """Reject domain names."""
-        self.assertFalse(_is_ip("example.com"))
+        self.assertFalse(_is_ip(TEST_DOMAIN))
 
     def test_ipv6_address(self) -> None:
         """Detect plain IPv6 address."""
@@ -147,9 +148,8 @@ class TestCacheFreshness(unittest.TestCase):
 
     def test_missing_cache(self) -> None:
         """Missing cache file is not fresh."""
-        from pathlib import Path
 
-        self.assertFalse(_cache_fresh(Path("/nonexistent/test.resolved"), max_age=3600))
+        self.assertFalse(_cache_fresh(NONEXISTENT_DIR / "test.resolved", max_age=3600))
 
 
 class TestCachePath(unittest.TestCase):

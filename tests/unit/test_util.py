@@ -7,7 +7,14 @@ import unittest
 
 from terok_shield.util import is_ip, is_ipv4, is_ipv6
 
-from ..testnet import IPV6_CLOUDFLARE, TEST_IP1, TEST_NET1
+from ..testnet import (
+    IPV6_CLOUDFLARE,
+    IPV6_LOOPBACK,
+    IPV6_ULA_CIDR,
+    TEST_DOMAIN,
+    TEST_IP1,
+    TEST_NET1,
+)
 
 
 class TestIsIpv4(unittest.TestCase):
@@ -23,7 +30,7 @@ class TestIsIpv4(unittest.TestCase):
 
     def test_domain(self) -> None:
         """Reject domain names."""
-        self.assertFalse(is_ipv4("example.com"))
+        self.assertFalse(is_ipv4(TEST_DOMAIN))
 
     def test_empty(self) -> None:
         """Reject empty string."""
@@ -31,7 +38,7 @@ class TestIsIpv4(unittest.TestCase):
 
     def test_ipv6_rejected(self) -> None:
         """Reject IPv6 addresses."""
-        self.assertFalse(is_ipv4("::1"))
+        self.assertFalse(is_ipv4(IPV6_LOOPBACK))
 
 
 class TestIsIpv6(unittest.TestCase):
@@ -43,11 +50,11 @@ class TestIsIpv6(unittest.TestCase):
 
     def test_cidr(self) -> None:
         """Detect CIDR notation."""
-        self.assertTrue(is_ipv6("fc00::/7"))
+        self.assertTrue(is_ipv6(IPV6_ULA_CIDR))
 
     def test_domain(self) -> None:
         """Reject domain names."""
-        self.assertFalse(is_ipv6("example.com"))
+        self.assertFalse(is_ipv6(TEST_DOMAIN))
 
     def test_empty(self) -> None:
         """Reject empty string."""
@@ -67,8 +74,8 @@ class TestIsIp(unittest.TestCase):
 
     def test_ipv6(self) -> None:
         """Accept IPv6 address."""
-        self.assertTrue(is_ip("::1"))
+        self.assertTrue(is_ip(IPV6_LOOPBACK))
 
     def test_domain(self) -> None:
         """Reject domain names."""
-        self.assertFalse(is_ip("example.com"))
+        self.assertFalse(is_ip(TEST_DOMAIN))

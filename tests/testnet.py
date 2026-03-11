@@ -12,9 +12,11 @@ verify real network connectivity.  Centralizing them here means SonarCloud only
 flags the constant definition, not every usage.
 """
 
-# ── Test domain (used as mock compose_profiles return value) ──
+# ── Test domains (used as mock compose_profiles return value) ──
 
 TEST_DOMAIN = "github.com"
+TEST_DOMAIN2 = "example.org"  # Secondary test domain for multi-domain tests
+CUSTOM_DOMAIN = "custom.example.com"  # Fixture domain for user-override profile tests
 
 # ── RFC 5737 TEST-NET addresses (non-routable, safe for unit tests) ──
 
@@ -67,6 +69,7 @@ ALIAS_DOMAIN = "alias.example.com."  # CNAME-style answer for dig output filteri
 
 # ── IPv6 targets (used to verify IPv6 allowlisting and blocking) ──
 
+IPV6_LOOPBACK = "::1"  # IPv6 loopback address
 IPV6_CLOUDFLARE = "2606:4700:4700::1111"  # Cloudflare DNS over IPv6
 IPV6_NET1 = "2001:db8::/32"  # RFC 3849 documentation prefix (CIDR form)
 IPV6_GOOGLE = "2001:4860:4860::8888"  # Google Public DNS over IPv6
@@ -75,6 +78,7 @@ IPV6_HTTP_URL = f"http://[{IPV6_CLOUDFLARE}]/"  # HTTP via IPv6 literal
 # ── IPv6 private ranges (used for private-range classification tests) ──
 
 IPV6_ULA = "fd00::1"  # Unique Local Address (RFC 4193, fc00::/7)
+IPV6_ULA_CIDR = "fc00::/7"  # Unique Local Address CIDR (RFC 4193)
 IPV6_LINK_LOCAL = "fe80::1"  # Link-local address (RFC 4291, fe80::/10)
 
 # ── Expected private ranges (test-owned, independent from implementation) ──

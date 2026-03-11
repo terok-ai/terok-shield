@@ -35,6 +35,7 @@ from terok_shield.mode_hook import (
 from terok_shield.nft import bypass_ruleset, hook_ruleset
 from terok_shield.run import ExecError
 
+from ..testfs import NONEXISTENT_DIR
 from ..testnet import EXPECTED_PRIVATE_RANGES, IPV6_CLOUDFLARE, TEST_DOMAIN, TEST_IP1
 
 
@@ -279,11 +280,11 @@ class TestPreStart(unittest.TestCase):
         with (
             mock.patch(
                 "terok_shield.mode_hook.shield_hooks_dir",
-                return_value=Path("/nonexistent"),
+                return_value=NONEXISTENT_DIR,
             ),
             mock.patch(
                 "terok_shield.mode_hook.shield_hook_entrypoint",
-                return_value=Path("/nonexistent/ep"),
+                return_value=NONEXISTENT_DIR / "ep",
             ),
             self.assertRaises(RuntimeError),
         ):

@@ -3,6 +3,7 @@
 
 """Tests for subprocess helpers."""
 
+import subprocess
 import unittest
 import unittest.mock
 
@@ -17,6 +18,7 @@ from terok_shield.run import (
     run,
 )
 
+from ..testfs import NFT_BINARY
 from ..testnet import (
     ALIAS_DOMAIN,
     IPV6_CLOUDFLARE,
@@ -85,7 +87,7 @@ class TestRun(unittest.TestCase):
 class TestHas(unittest.TestCase):
     """Tests for has()."""
 
-    @unittest.mock.patch("shutil.which", return_value="/usr/bin/nft")
+    @unittest.mock.patch("shutil.which", return_value=NFT_BINARY)
     def test_found(self, _: unittest.mock.Mock) -> None:
         """Return True when executable is found."""
         self.assertTrue(has("nft"))
@@ -238,6 +240,45 @@ class TestDigAll(unittest.TestCase):
         cmd = mock_run.call_args[0][0]
         self.assertIn("A", cmd)
         self.assertIn("AAAA", cmd)
+
+
+class TestTimeoutHandling(unittest.TestCase):
+    """Tests for timeout exception handling."""
+
+    @unittest.mock.patch(
+        "subprocess.run",
+        side_effect=subprocess.TimeoutExpired(["slow-cmd"], 5),
+    )
+    def test_timeout_raises_exec_error(self, _mock_run: unittest.mock.Mock) -> None:
+        """TimeoutExpired raises ExecError with rc=-1 when check=True."""
+        with self.assertRaises(ExecError) as ctx:
+            run(["slow-cmd"], timeout=5)
+        self.assertEqual(ctx.exception.rc, -1)
+        self.assertIn("timed out", ctx.exception.stderr)
+
+    @unittest.mock.patch(
+        "subprocess.run",
+        side_effect=subprocess.TimeoutExpired(["slow-cmd"], 5),
+    )
+    def test_timeout_returns_empty_no_check(self, _mock_run: unittest.mock.Mock) -> None:
+        """TimeoutExpired returns empty string when check=False."""
+        result = run(["slow-cmd"], check=False, timeout=5)
+        self.assertEqual(result, "")
+
+
+class TestDigAllEdgeCases(unittest.TestCase):
+    """Additional edge case tests for dig_all."""
+
+    @unittest.mock.patch("subprocess.run")
+    def test_skips_blank_lines(self, mock_run: unittest.mock.Mock) -> None:
+        """Skip blank lines in dig output."""
+        mock_run.return_value = unittest.mock.Mock(
+            returncode=0,
+            stdout=f"\n{TEST_IP1}\n\n{TEST_IP2}\n\n",
+            stderr="",
+        )
+        result = dig_all(TEST_DOMAIN)
+        self.assertEqual(result, [TEST_IP1, TEST_IP2])
 
 
 class TestSubprocessRunner(unittest.TestCase):
