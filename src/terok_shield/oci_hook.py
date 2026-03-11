@@ -37,6 +37,25 @@ _BROAD_PREFIX_V4 = 16
 _BROAD_PREFIX_V6 = 48
 
 
+def _classify_cidr(net: ipaddress.IPv4Network | ipaddress.IPv6Network) -> tuple[bool, bool]:
+    """Classify a CIDR as private and/or broad.
+
+    Returns:
+        Tuple of (is_private, is_broad).
+    """
+    threshold = _BROAD_PREFIX_V4 if net.version == 4 else _BROAD_PREFIX_V6
+    is_broad = net.prefixlen <= threshold
+    is_private = any(
+        net.subnet_of(priv) for priv in _PRIVATE_NETWORKS if net.version == priv.version
+    )
+    return is_private, is_broad
+
+
+def _is_private_addr(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Return True if a single address falls within a private range."""
+    return any(addr in priv for priv in _PRIVATE_NETWORKS if addr.version == priv.version)
+
+
 def _classify_ips(ips: list[str]) -> tuple[list[str], list[str]]:
     """Classify IPs into private-range and broad-range lists for logging.
 
@@ -51,17 +70,13 @@ def _classify_ips(ips: list[str]) -> tuple[list[str], list[str]]:
     for ip_str in ips:
         try:
             if "/" in ip_str:
-                net = ipaddress.ip_network(ip_str, strict=False)
-                threshold = _BROAD_PREFIX_V4 if net.version == 4 else _BROAD_PREFIX_V6
-                if net.prefixlen <= threshold:
+                is_priv, is_broad = _classify_cidr(ipaddress.ip_network(ip_str, strict=False))
+                if is_broad:
                     broad.append(ip_str)
-                if any(
-                    net.subnet_of(priv) for priv in _PRIVATE_NETWORKS if net.version == priv.version
-                ):
+                if is_priv:
                     private.append(ip_str)
             else:
-                addr = ipaddress.ip_address(ip_str)
-                if any(addr in priv for priv in _PRIVATE_NETWORKS if addr.version == priv.version):
+                if _is_private_addr(ipaddress.ip_address(ip_str)):
                     private.append(ip_str)
         except ValueError:
             continue
