@@ -113,7 +113,7 @@ def shield_allow(
 
     Args:
         container: Container name or ID.
-        target: Domain name or IPv4 address/CIDR.
+        target: Domain name or IP address/CIDR.
         config: Shield configuration (loads default if None).
 
     Returns:

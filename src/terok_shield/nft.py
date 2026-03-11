@@ -125,6 +125,7 @@ def hook_ruleset(dns: str = PASTA_DNS, loopback_ports: tuple[int, ...] = ()) -> 
         _safe_port(p)
     port_rules = _loopback_port_rules(loopback_ports)
     port_block = f"\n{port_rules}\n" if port_rules else "\n"
+    dns_af = "ip" if _is_v4(dns) else "ip6"
     return textwrap.dedent(f"""\
         table {NFT_TABLE} {{
             set allow_v4 {{ type ipv4_addr; flags interval; }}
@@ -134,8 +135,8 @@ def hook_ruleset(dns: str = PASTA_DNS, loopback_ports: tuple[int, ...] = ()) -> 
                 type filter hook output priority filter; policy drop;
                 oifname "lo" accept
                 ct state established,related accept
-                udp dport 53 ip daddr {dns} accept
-                tcp dport 53 ip daddr {dns} accept{port_block}\
+                udp dport 53 {dns_af} daddr {dns} accept
+                tcp dport 53 {dns_af} daddr {dns} accept{port_block}\
         {_audit_allow_rules()}
                 ip daddr @allow_v4 accept
                 ip6 daddr @allow_v6 accept
@@ -178,6 +179,7 @@ def bypass_ruleset(
         _safe_port(p)
     port_rules = _loopback_port_rules(loopback_ports)
     port_block = f"\n{port_rules}\n" if port_rules else "\n"
+    dns_af = "ip" if _is_v4(dns) else "ip6"
     private_block = "" if allow_all else f"\n{_private_range_rules()}"
     bypass_log = f'        ct state new log prefix "{BYPASS_LOG_PREFIX}: " counter'
     return textwrap.dedent(f"""\
@@ -189,8 +191,8 @@ def bypass_ruleset(
                 type filter hook output priority filter; policy accept;
                 oifname "lo" accept
                 ct state established,related accept
-                udp dport 53 ip daddr {dns} accept
-                tcp dport 53 ip daddr {dns} accept{port_block}\
+                udp dport 53 {dns_af} daddr {dns} accept
+                tcp dport 53 {dns_af} daddr {dns} accept{port_block}\
         {bypass_log}{private_block}
             }}
 
@@ -278,13 +280,15 @@ def verify_ruleset(nft_output: str) -> list[str]:
         errors.append("reject type missing")
     if "TEROK_SHIELD_DENIED" not in nft_output:
         errors.append("deny log prefix missing")
+    if "allow_v4" not in nft_output:
+        errors.append("allow_v4 set missing")
     if "allow_v6" not in nft_output:
         errors.append("allow_v6 set missing")
     errors.extend(_verify_private_blocks(nft_output))
     return errors
 
 
-def verify_bypass_ruleset(nft_output: str) -> list[str]:
+def verify_bypass_ruleset(nft_output: str, *, allow_all: bool = False) -> list[str]:
     """Check applied bypass ruleset invariants.  Returns errors (empty = OK).
 
     Verifies:
@@ -292,6 +296,7 @@ def verify_bypass_ruleset(nft_output: str) -> list[str]:
     - Input chain has policy drop
     - Bypass log prefix is present
     - Dual-stack allow sets are declared
+    - Private-range reject rules present (unless *allow_all*)
     """
     errors: list[str] = []
     if "policy accept" not in nft_output:
@@ -303,13 +308,17 @@ def verify_bypass_ruleset(nft_output: str) -> list[str]:
             errors.append(f"{chain} chain missing")
     if BYPASS_LOG_PREFIX not in nft_output:
         errors.append("bypass log prefix missing")
+    if "allow_v4" not in nft_output:
+        errors.append("allow_v4 set missing")
     if "allow_v6" not in nft_output:
         errors.append("allow_v6 set missing")
+    if not allow_all:
+        errors.extend(_verify_private_blocks(nft_output))
     return errors
 
 
 def _try_validate(ip: str) -> bool:
-    """Return True if ip is a valid IPv4 address/CIDR, False otherwise."""
+    """Return True if ip is a valid IP address/CIDR, False otherwise."""
     try:
         safe_ip(ip)
         return True

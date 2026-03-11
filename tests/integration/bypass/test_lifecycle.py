@@ -124,7 +124,7 @@ class TestBypassModeSwitch:
         shield_down(shielded_container, allow_all=True)
         assert shield_state(shielded_container) == ShieldState.DOWN_ALL
 
-        # RFC1918 rules should be gone
+        # Private-range rules should be gone
         rules = shield_rules(shielded_container)
         assert "TEROK_SHIELD_PRIVATE" not in rules
 
@@ -136,7 +136,7 @@ class TestBypassModeSwitch:
         shield_down(shielded_container)
         assert shield_state(shielded_container) == ShieldState.DOWN
 
-        # RFC1918 rules should be restored
+        # Private-range rules should be restored
         rules = shield_rules(shielded_container)
         assert "TEROK_SHIELD_PRIVATE" in rules
 

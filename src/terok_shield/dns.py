@@ -100,7 +100,7 @@ def resolve_and_cache(
         max_age: Cache freshness threshold in seconds (default: 1 hour).
 
     Returns:
-        List of resolved IPv4 addresses + raw IPs/CIDRs.
+        List of resolved IPv4/IPv6 addresses + raw IPs/CIDRs.
     """
     path = _cache_path(container)
     if _cache_fresh(path, max_age):

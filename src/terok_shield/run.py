@@ -19,13 +19,23 @@ class ExecError(Exception):
         super().__init__(f"{cmd!r} failed (rc={rc}): {stderr.strip()}")
 
 
-def run(cmd: list[str], *, check: bool = True, stdin: str | None = None) -> str:
+def run(
+    cmd: list[str],
+    *,
+    check: bool = True,
+    stdin: str | None = None,
+    timeout: int | None = None,
+) -> str:
     """Run a command, return stdout.  Raise ExecError on failure when check=True."""
     try:
-        r = subprocess.run(cmd, input=stdin, capture_output=True, text=True)
+        r = subprocess.run(cmd, input=stdin, capture_output=True, text=True, timeout=timeout)
     except FileNotFoundError as e:
         if check:
             raise ExecError(cmd, 127, str(e)) from e
+        return ""
+    except subprocess.TimeoutExpired as e:
+        if check:
+            raise ExecError(cmd, -1, f"timed out after {timeout}s") from e
         return ""
     if check and r.returncode != 0:
         raise ExecError(cmd, r.returncode, r.stderr or "")

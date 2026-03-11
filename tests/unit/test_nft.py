@@ -415,7 +415,7 @@ class TestVerifyBypassRuleset(unittest.TestCase):
     def test_valid_bypass_allow_all(self) -> None:
         """Bypass ruleset with allow_all passes all checks."""
         rs = bypass_ruleset(allow_all=True)
-        errors = verify_bypass_ruleset(rs)
+        errors = verify_bypass_ruleset(rs, allow_all=True)
         self.assertEqual(errors, [])
 
     def test_missing_accept_policy(self) -> None:

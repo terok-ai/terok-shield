@@ -211,7 +211,7 @@ def allow_ip(container: str, ip: str) -> None:
         container: Container name or ID.
         ip: IPv4/IPv6 address or CIDR to allow.
     """
-    safe_ip(ip)
+    ip = safe_ip(ip)
     nft_via_nsenter(
         container,
         "add",
@@ -230,7 +230,7 @@ def deny_ip(container: str, ip: str) -> None:
         container: Container name or ID.
         ip: IPv4/IPv6 address or CIDR to deny.
     """
-    safe_ip(ip)
+    ip = safe_ip(ip)
     nft_via_nsenter(
         container,
         "delete",
@@ -280,7 +280,7 @@ def shield_down(config: ShieldConfig, container: str, *, allow_all: bool = False
     stdin = f"delete table {NFT_TABLE}\n{ruleset}"
     nft_via_nsenter(container, stdin=stdin)
     output = nft_via_nsenter(container, "list", "ruleset")
-    errors = verify_bypass_ruleset(output)
+    errors = verify_bypass_ruleset(output, allow_all=allow_all)
     if errors:
         raise RuntimeError(f"Bypass ruleset verification failed: {'; '.join(errors)}")
 
@@ -333,9 +333,9 @@ def shield_state(container: str) -> ShieldState:
     if not output.strip():
         return ShieldState.INACTIVE
 
-    if not verify_bypass_ruleset(output):
-        has_rfc1918 = "TEROK_SHIELD_PRIVATE" in output
-        return ShieldState.DOWN if has_rfc1918 else ShieldState.DOWN_ALL
+    if not verify_bypass_ruleset(output, allow_all=True):
+        has_private = "TEROK_SHIELD_PRIVATE" in output
+        return ShieldState.DOWN if has_private else ShieldState.DOWN_ALL
 
     if not verify_ruleset(output):
         return ShieldState.UP

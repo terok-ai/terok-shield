@@ -16,7 +16,16 @@ from terok_shield.dns import (
     resolve_domains,
 )
 
-from ..testnet import IPV6_CLOUDFLARE, TEST_IP1, TEST_IP2, TEST_NET1
+from ..testnet import (
+    CLOUDFLARE_DOMAIN,
+    GOOGLE_DNS_DOMAIN,
+    IPV6_CLOUDFLARE,
+    NONEXISTENT_DOMAIN,
+    TEST_DOMAIN,
+    TEST_IP1,
+    TEST_IP2,
+    TEST_NET1,
+)
 
 
 class TestIsIp(unittest.TestCase):
@@ -49,15 +58,15 @@ class TestSplitEntries(unittest.TestCase):
     def test_mixed(self) -> None:
         """Split mixed entries into domains and IPs."""
         domains, ips = _split_entries(
-            ["example.com", TEST_IP1, "test.org", TEST_NET1, IPV6_CLOUDFLARE]
+            [TEST_DOMAIN, TEST_IP1, GOOGLE_DNS_DOMAIN, TEST_NET1, IPV6_CLOUDFLARE]
         )
-        self.assertEqual(domains, ["example.com", "test.org"])
+        self.assertEqual(domains, [TEST_DOMAIN, GOOGLE_DNS_DOMAIN])
         self.assertEqual(ips, [TEST_IP1, TEST_NET1, IPV6_CLOUDFLARE])
 
     def test_all_domains(self) -> None:
         """All domains, no IPs."""
-        domains, ips = _split_entries(["a.com", "b.org"])
-        self.assertEqual(domains, ["a.com", "b.org"])
+        domains, ips = _split_entries([CLOUDFLARE_DOMAIN, GOOGLE_DNS_DOMAIN])
+        self.assertEqual(domains, [CLOUDFLARE_DOMAIN, GOOGLE_DNS_DOMAIN])
         self.assertEqual(ips, [])
 
     def test_all_ips(self) -> None:
@@ -74,14 +83,14 @@ class TestResolveDomains(unittest.TestCase):
     def test_resolves_multiple(self, mock_dig_all: unittest.mock.Mock) -> None:
         """Resolve multiple domains and deduplicate."""
         mock_dig_all.side_effect = [[TEST_IP1, IPV6_CLOUDFLARE], [TEST_IP2]]
-        result = resolve_domains(["a.com", "b.com"])
+        result = resolve_domains([CLOUDFLARE_DOMAIN, GOOGLE_DNS_DOMAIN])
         self.assertEqual(result, [TEST_IP1, IPV6_CLOUDFLARE, TEST_IP2])
 
     @unittest.mock.patch("terok_shield.dns.dig_all")
     def test_skips_failed(self, mock_dig_all: unittest.mock.Mock) -> None:
         """Skip domains that fail to resolve."""
         mock_dig_all.side_effect = [[TEST_IP1], []]
-        result = resolve_domains(["good.com", "bad.com"])
+        result = resolve_domains([CLOUDFLARE_DOMAIN, NONEXISTENT_DOMAIN])
         self.assertEqual(result, [TEST_IP1])
 
     @unittest.mock.patch("terok_shield.dns.dig_all")
@@ -89,16 +98,16 @@ class TestResolveDomains(unittest.TestCase):
         """Log warning when a domain resolves to no IPs."""
         mock_dig_all.side_effect = [[TEST_IP1], []]
         with self.assertLogs("terok_shield.dns", level="WARNING") as cm:
-            resolve_domains(["good.com", "bad.com"])
+            resolve_domains([CLOUDFLARE_DOMAIN, NONEXISTENT_DOMAIN])
         self.assertEqual(len(cm.output), 1)
-        self.assertIn("bad.com", cm.output[0])
+        self.assertIn(NONEXISTENT_DOMAIN, cm.output[0])
 
     @unittest.mock.patch("terok_shield.dns.dig_all")
     def test_no_warning_when_all_resolve(self, mock_dig_all: unittest.mock.Mock) -> None:
         """No warning when all domains resolve successfully."""
         mock_dig_all.side_effect = [[TEST_IP1], [TEST_IP2]]
         with self.assertNoLogs("terok_shield.dns", level="WARNING"):
-            resolve_domains(["good.com", "also-good.com"])
+            resolve_domains([CLOUDFLARE_DOMAIN, GOOGLE_DNS_DOMAIN])
 
     @unittest.mock.patch("terok_shield.dns.dig_all")
     def test_empty_input(self, mock_dig_all: unittest.mock.Mock) -> None:
@@ -190,7 +199,7 @@ class TestResolveAndCache(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             mock_dir.return_value = Path(tmp)
             mock_dig_all.return_value = [TEST_IP1]
-            result = resolve_and_cache(["example.com"], "test-ctr")
+            result = resolve_and_cache([TEST_DOMAIN], "test-ctr")
             self.assertEqual(result, [TEST_IP1])
             cache = Path(tmp) / "test-ctr.resolved"
             self.assertTrue(cache.is_file())
@@ -211,7 +220,7 @@ class TestResolveAndCache(unittest.TestCase):
             mock_dir.return_value = Path(tmp)
             cache = Path(tmp) / "test-ctr.resolved"
             cache.write_text(f"{TEST_IP1}\n{TEST_IP2}\n")
-            result = resolve_and_cache(["example.com"], "test-ctr", max_age=3600)
+            result = resolve_and_cache([TEST_DOMAIN], "test-ctr", max_age=3600)
             self.assertEqual(result, [TEST_IP1, TEST_IP2])
             mock_dig_all.assert_not_called()
 
@@ -233,7 +242,7 @@ class TestResolveAndCache(unittest.TestCase):
             cache.write_text(f"{TEST_IP1}\n")
             os.utime(cache, (0, 0))  # epoch = very stale
             mock_dig_all.return_value = [TEST_IP2]
-            result = resolve_and_cache(["example.com"], "test-ctr", max_age=3600)
+            result = resolve_and_cache([TEST_DOMAIN], "test-ctr", max_age=3600)
             self.assertEqual(result, [TEST_IP2])
             mock_dig_all.assert_called_once()
 
@@ -251,7 +260,7 @@ class TestResolveAndCache(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             mock_dir.return_value = Path(tmp)
             mock_dig_all.return_value = [TEST_IP2]
-            result = resolve_and_cache([TEST_IP1, "example.com"], "test-ctr")
+            result = resolve_and_cache([TEST_IP1, TEST_DOMAIN], "test-ctr")
             self.assertIn(TEST_IP1, result)
             self.assertIn(TEST_IP2, result)
 
@@ -270,9 +279,9 @@ class TestResolveAndCache(unittest.TestCase):
             mock_dir.return_value = Path(tmp)
             # First call: resolve and cache
             mock_dig_all.return_value = [TEST_IP1]
-            resolve_and_cache(["example.com"], "test-ctr")
+            resolve_and_cache([TEST_DOMAIN], "test-ctr")
             # Second call with different entries — cache is still fresh
-            result = resolve_and_cache(["other.example.com"], "test-ctr", max_age=3600)
+            result = resolve_and_cache([GOOGLE_DNS_DOMAIN], "test-ctr", max_age=3600)
             self.assertEqual(result, [TEST_IP1])
             # dig_all was only called once (for the first resolve)
             mock_dig_all.assert_called_once()

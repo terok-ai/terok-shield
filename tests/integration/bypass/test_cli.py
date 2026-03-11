@@ -85,7 +85,7 @@ class TestBypassPreviewCLI:
         assert BYPASS_LOG_PREFIX in captured.out
 
     def test_preview_down_all(self, capsys: pytest.CaptureFixture) -> None:
-        """``preview --down --all`` omits RFC1918 rules."""
+        """``preview --down --all`` omits private-range rules."""
         main(["preview", "--down", "--all"])
         captured = capsys.readouterr()
         assert "policy accept" in captured.out

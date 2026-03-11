@@ -24,40 +24,48 @@ from .run import ExecError, nft_via_nsenter
 
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
-_RFC1918_NETWORKS = (
+_PRIVATE_NETWORKS = (
     ipaddress.IPv4Network("10.0.0.0/8"),
     ipaddress.IPv4Network("172.16.0.0/12"),
     ipaddress.IPv4Network("192.168.0.0/16"),
     ipaddress.IPv4Network("169.254.0.0/16"),
+    ipaddress.IPv6Network("fc00::/7"),
+    ipaddress.IPv6Network("fe80::/10"),
 )
 
-_BROAD_PREFIX_THRESHOLD = 16
+_BROAD_PREFIX_V4 = 16
+_BROAD_PREFIX_V6 = 48
 
 
 def _classify_ips(ips: list[str]) -> tuple[list[str], list[str]]:
-    """Classify IPs into RFC1918 and broad-range lists for logging.
+    """Classify IPs into private-range and broad-range lists for logging.
+
+    Handles both IPv4 (RFC1918/link-local) and IPv6 (ULA/link-local).
 
     Returns:
-        Tuple of (rfc1918_ips, broad_cidrs). Does not affect which IPs
+        Tuple of (private_ips, broad_cidrs). Does not affect which IPs
         are added to the allow set — classification is logging-only.
     """
-    rfc1918: list[str] = []
+    private: list[str] = []
     broad: list[str] = []
     for ip_str in ips:
         try:
             if "/" in ip_str:
-                net = ipaddress.IPv4Network(ip_str, strict=False)
-                if net.prefixlen <= _BROAD_PREFIX_THRESHOLD:
+                net = ipaddress.ip_network(ip_str, strict=False)
+                threshold = _BROAD_PREFIX_V4 if net.version == 4 else _BROAD_PREFIX_V6
+                if net.prefixlen <= threshold:
                     broad.append(ip_str)
-                if any(net.subnet_of(rfc) for rfc in _RFC1918_NETWORKS):
-                    rfc1918.append(ip_str)
+                if any(
+                    net.subnet_of(priv) for priv in _PRIVATE_NETWORKS if net.version == priv.version
+                ):
+                    private.append(ip_str)
             else:
-                addr = ipaddress.IPv4Address(ip_str)
-                if any(addr in rfc for rfc in _RFC1918_NETWORKS):
-                    rfc1918.append(ip_str)
-        except (ipaddress.AddressValueError, ipaddress.NetmaskValueError):
+                addr = ipaddress.ip_address(ip_str)
+                if any(addr in priv for priv in _PRIVATE_NETWORKS if addr.version == priv.version):
+                    private.append(ip_str)
+        except ValueError:
             continue
-    return rfc1918, broad
+    return private, broad
 
 
 def _parse_oci_state(stdin_data: str) -> tuple[str, str, dict[str, str]]:
@@ -129,9 +137,9 @@ def _load_and_add_ips(container: str, pid: str) -> int:
     log_event(container, "setup", detail=f"[ips] cached: {', '.join(ips)}")
 
     # Classify for logging (IPs are routed to correct set by add_elements_dual)
-    rfc1918_ips, broad_cidrs = _classify_ips(ips)
-    if rfc1918_ips:
-        log_event(container, "note", detail=f"rfc1918 whitelisted: {', '.join(rfc1918_ips)}")
+    private_ips, broad_cidrs = _classify_ips(ips)
+    if private_ips:
+        log_event(container, "note", detail=f"private range whitelisted: {', '.join(private_ips)}")
     for cidr in broad_cidrs:
         log_event(container, "note", detail=f"broad range whitelisted: {cidr}")
 

@@ -33,6 +33,7 @@ from terok_shield.mode_hook import (
     shield_up,
 )
 from terok_shield.nft import bypass_ruleset, hook_ruleset
+from terok_shield.nft_constants import PRIVATE_RANGES
 
 from ..testnet import IPV6_CLOUDFLARE, TEST_DOMAIN, TEST_IP1
 
@@ -420,14 +421,15 @@ class TestShieldDown(unittest.TestCase):
 
     @mock.patch("terok_shield.mode_hook.nft_via_nsenter")
     def test_allow_all_flag(self, mock_nsenter):
-        """shield_down with allow_all omits RFC1918 rules."""
+        """shield_down with allow_all omits private-range rules."""
         mock_nsenter.side_effect = [
             "",
             bypass_ruleset(allow_all=True),
         ]
         shield_down(self._config(), "test", allow_all=True)
         apply_kwargs = mock_nsenter.call_args_list[0][1]
-        self.assertNotIn("10.0.0.0/8", apply_kwargs["stdin"])
+        for net in PRIVATE_RANGES:
+            self.assertNotIn(net, apply_kwargs["stdin"])
 
     @mock.patch("terok_shield.mode_hook.nft_via_nsenter")
     def test_verification_failure_raises(self, mock_nsenter):
@@ -606,7 +608,8 @@ class TestPreview(unittest.TestCase):
     def test_down_allow_all(self) -> None:
         """Preview with down=True, allow_all=True omits private-range rules."""
         result = preview(self._config(), down=True, allow_all=True)
-        self.assertNotIn("10.0.0.0/8", result)
+        for net in PRIVATE_RANGES:
+            self.assertNotIn(net, result)
 
     def test_loopback_ports(self) -> None:
         """Preview includes loopback ports from config."""
