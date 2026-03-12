@@ -330,6 +330,27 @@ class TestMainOutputFormatting(unittest.TestCase):
         entry = json.loads(output)
         self.assertEqual(entry["action"], "setup")
 
+    @mock.patch("terok_shield.cli.Shield")
+    def test_logs_all_containers(self, mock_cls) -> None:
+        """CLI logs without --container iterates all log files."""
+        mock_cls.return_value.log_files.return_value = ["ctr1", "ctr2"]
+        mock_cls.return_value.tail_log.side_effect = [
+            iter([{"action": "setup"}]),
+            iter([{"action": "allowed"}]),
+        ]
+        captured = io.StringIO()
+        sys.stdout = captured
+        try:
+            main(["logs"])
+        finally:
+            sys.stdout = sys.__stdout__
+        lines = captured.getvalue().strip().split("\n")
+        self.assertEqual(len(lines), 2)
+        self.assertEqual(json.loads(lines[0])["action"], "setup")
+        self.assertEqual(json.loads(lines[1])["action"], "allowed")
+        mock_cls.return_value.tail_log.assert_any_call("ctr1", 50)
+        mock_cls.return_value.tail_log.assert_any_call("ctr2", 50)
+
 
 class TestMainErrorHandling(unittest.TestCase):
     """Test CLI error handling."""
