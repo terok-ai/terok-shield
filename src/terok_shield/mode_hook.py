@@ -150,7 +150,7 @@ class HookMode:
 
         # Resolve DNS and write profile allowlist
         entries = self._profiles.compose_profiles(profiles)
-        cache_path = state.profile_allowed_path(sd)
+        cache_path = state.profile_allowed_path(sd).resolve()
         self._dns.resolve_and_cache(entries, cache_path)
 
         # Build podman args
@@ -217,6 +217,10 @@ class HookMode:
         """Return the nft set name for an IP address."""
         return "allow_v4" if is_ipv4(ip) else "allow_v6"
 
+    def _live_path(self) -> Path:
+        """Return the resolved path to live.allowed (prevents path traversal)."""
+        return state.live_allowed_path(self._config.state_dir).resolve()
+
     def allow_ip(self, container: str, ip: str) -> None:
         """Live-allow an IP for a running container via nsenter."""
         ip = self._ruleset.safe_ip(ip)
@@ -230,7 +234,7 @@ class HookMode:
             f"{{ {ip} }}",
         )
         # Persist to live.allowed (skip if already present)
-        live_path = state.live_allowed_path(self._config.state_dir)
+        live_path = self._live_path()
         live_path.parent.mkdir(parents=True, exist_ok=True)
         existing = set(live_path.read_text().splitlines()) if live_path.is_file() else set()
         if ip not in existing:
@@ -250,7 +254,7 @@ class HookMode:
             f"{{ {ip} }}",
         )
         # Remove from live.allowed
-        live_path = state.live_allowed_path(self._config.state_dir)
+        live_path = self._live_path()
         if live_path.is_file():
             lines = live_path.read_text().splitlines()
             lines = [line for line in lines if line.strip() != ip]
@@ -286,10 +290,13 @@ class HookMode:
         stdin = f"delete table {NFT_TABLE}\n{rs}"
         self._runner.nft_via_nsenter(container, stdin=stdin)
 
-        # Re-add IPs from both allowlist files
+        # Re-add IPs from both allowlist files (resolve to prevent traversal)
         sd = self._config.state_dir
         ips: list[str] = []
-        for allowlist_path in (state.profile_allowed_path(sd), state.live_allowed_path(sd)):
+        for allowlist_path in (
+            state.profile_allowed_path(sd).resolve(),
+            state.live_allowed_path(sd).resolve(),
+        ):
             if allowlist_path.is_file():
                 ips.extend(
                     line.strip() for line in allowlist_path.read_text().splitlines() if line.strip()
