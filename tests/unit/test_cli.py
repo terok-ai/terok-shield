@@ -748,3 +748,10 @@ class TestCmdLogsGlobal(unittest.TestCase):
             finally:
                 sys.stdout = sys.__stdout__
             self.assertIn("No audit logs found", captured.getvalue())
+
+    def test_logs_container_traversal_rejected(self) -> None:
+        """Container name with path traversal is rejected in logs command."""
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(SystemExit) as ctx:
+                main(["--state-dir", tmp, "logs", "--container", FORBIDDEN_TRAVERSAL])
+            self.assertEqual(ctx.exception.code, 1)

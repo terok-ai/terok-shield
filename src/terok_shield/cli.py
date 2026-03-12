@@ -389,8 +389,9 @@ def _cmd_logs(
     """
     from .audit import AuditLogger
 
-    state_root = state_dir_override or _resolve_state_root()
+    state_root = (state_dir_override or _resolve_state_root()).resolve()
     if container:
+        validate_container_name(container)
         audit_file = state_root / "containers" / container / "audit.jsonl"
         for entry in AuditLogger(audit_path=audit_file).tail_log(n):
             print(json.dumps(entry))
