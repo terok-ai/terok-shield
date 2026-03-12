@@ -6,6 +6,7 @@
 import argparse
 import json
 import os
+import shlex
 import sys
 from pathlib import Path
 
@@ -178,6 +179,40 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("status", help="Show shield status")
 
+    p_prepare = sub.add_parser(
+        "prepare",
+        help="Prepare shield and print podman flags",
+        description=(
+            "Resolve DNS, install hooks, and print the podman flags needed to "
+            "launch a shielded container.  Use with shell substitution:\n\n"
+            "  podman run $(terok-shield prepare my-ctr) "
+            "--name my-ctr alpine:latest sh"
+        ),
+    )
+    p_prepare.add_argument("container", help="Container name")
+    p_prepare.add_argument(
+        "--profiles",
+        nargs="+",
+        default=None,
+        help="Override default profiles",
+    )
+
+    p_run = sub.add_parser(
+        "run",
+        help="Launch a shielded container via podman",
+        description=(
+            "Prepare shield and exec into podman run with the correct flags.  "
+            "Everything after '--' is passed to podman run as-is:\n\n"
+            "  terok-shield run my-container -- alpine:latest sh"
+        ),
+    )
+    p_run.add_argument("container", help="Container name")
+    p_run.add_argument(
+        "--profiles",
+        nargs="+",
+        default=None,
+        help="Override default profiles",
+    )
     p_resolve = sub.add_parser("resolve", help="Resolve DNS profiles and cache IPs")
     p_resolve.add_argument("container", help="Container name (cache key)")
     p_resolve.add_argument(
@@ -235,12 +270,26 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> None:
     """Run the terok-shield CLI."""
+    if argv is None:
+        argv = sys.argv[1:]
+
+    # The 'run' subcommand uses '--' to separate shield args from podman args.
+    # Split before argparse to avoid REMAINDER quirks with optional flags.
+    run_trailing: list[str] = []
+    if "--" in argv:
+        sep = argv.index("--")
+        run_trailing = argv[sep + 1 :]
+        argv = argv[:sep]
+
     parser = _build_parser()
     args = parser.parse_args(argv)
 
     if args.command is None:
         parser.print_help()
         sys.exit(0)
+
+    if args.command == "run":
+        args.podman_args = run_trailing
 
     try:
         _dispatch(args)
@@ -270,6 +319,10 @@ def _dispatch(args: argparse.Namespace) -> None:
 
     if cmd == "status":
         _cmd_status(shield)
+    elif cmd == "prepare":
+        _cmd_prepare(shield, args.container, profiles=args.profiles)
+    elif cmd == "run":
+        _cmd_run(shield, args.container, profiles=args.profiles, podman_args=args.podman_args)
     elif cmd == "resolve":
         _cmd_resolve(shield, args.container, force=args.force)
     elif cmd == "allow":
@@ -292,6 +345,37 @@ def _cmd_status(shield: Shield) -> None:
     print(f"Mode:     {status['mode']}")
     print(f"Audit:    {'enabled' if status['audit_enabled'] else 'disabled'}")
     print(f"Profiles: {', '.join(status['profiles']) or '(none)'}")
+
+
+def _cmd_prepare(shield: Shield, container: str, *, profiles: list[str] | None) -> None:
+    """Print podman flags for a shielded container launch."""
+    podman_args = shield.pre_start(container, profiles)
+    podman_args += ["--name", container]
+    print(" ".join(shlex.quote(a) for a in podman_args))
+
+
+def _cmd_run(
+    shield: Shield,
+    container: str,
+    *,
+    profiles: list[str] | None,
+    podman_args: list[str],
+) -> None:
+    """Launch a shielded container by exec-ing into podman run."""
+    shield_args = shield.pre_start(container, profiles)
+
+    # Strip the leading '--' separator if present
+    user_args = podman_args
+    if user_args and user_args[0] == "--":
+        user_args = user_args[1:]
+
+    if not user_args:
+        raise ValueError(
+            "No image specified. Usage: terok-shield run <container> -- <image> [cmd...]"
+        )
+
+    argv = ["podman", "run", "--name", container, *shield_args, *user_args]
+    os.execvp("podman", argv)
 
 
 def _cmd_resolve(shield: Shield, container: str, force: bool) -> None:
