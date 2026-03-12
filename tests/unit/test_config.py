@@ -3,381 +3,109 @@
 
 """Tests for shield configuration."""
 
+import dataclasses
 import tempfile
 import unittest
-import unittest.mock
 from pathlib import Path
 
 from terok_shield.config import (
+    ANNOTATION_KEY,
+    ANNOTATION_LOOPBACK_PORTS_KEY,
+    ANNOTATION_NAME_KEY,
+    ANNOTATION_STATE_DIR_KEY,
+    ANNOTATION_VERSION_KEY,
     ShieldConfig,
     ShieldMode,
-    ShieldPaths,
-    load_shield_config,
-)
-
-from ..testfs import (
-    FAKE_CONFIG_DIR,
-    FAKE_STATE_DIR,
-    FAKE_XDG_CONFIG_HOME,
-    FAKE_XDG_STATE_HOME,
-    NFT_BINARY,
-    NONEXISTENT_DIR,
+    ShieldState,
 )
 
 
 class TestShieldConfig(unittest.TestCase):
     """Tests for ShieldConfig dataclass."""
 
-    def test_defaults(self) -> None:
-        """Default config is hook mode with standard profiles."""
-        cfg = ShieldConfig()
-        self.assertEqual(cfg.mode, ShieldMode.HOOK)
-        self.assertEqual(cfg.default_profiles, ("dev-standard",))
-        self.assertEqual(cfg.loopback_ports, ())
-        self.assertTrue(cfg.audit_enabled)
-        self.assertIsNotNone(cfg.paths)
+    def test_requires_state_dir(self) -> None:
+        """ShieldConfig requires state_dir argument."""
+        with self.assertRaises(TypeError):
+            ShieldConfig()  # type: ignore[call-arg]
+
+    def test_minimal_construction(self) -> None:
+        """Construct with only state_dir."""
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = ShieldConfig(state_dir=Path(tmp))
+            self.assertEqual(cfg.state_dir, Path(tmp))
+            self.assertEqual(cfg.mode, ShieldMode.HOOK)
+            self.assertEqual(cfg.default_profiles, ("dev-standard",))
+            self.assertEqual(cfg.loopback_ports, ())
+            self.assertTrue(cfg.audit_enabled)
+            self.assertIsNone(cfg.profiles_dir)
+
+    def test_full_construction(self) -> None:
+        """Construct with all fields specified."""
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = ShieldConfig(
+                state_dir=Path(tmp),
+                mode=ShieldMode.HOOK,
+                default_profiles=("base",),
+                loopback_ports=(8080,),
+                audit_enabled=False,
+                profiles_dir=Path(tmp) / "profiles",
+            )
+            self.assertEqual(cfg.loopback_ports, (8080,))
+            self.assertFalse(cfg.audit_enabled)
+            self.assertEqual(cfg.profiles_dir, Path(tmp) / "profiles")
 
     def test_default_profiles_immutable(self) -> None:
         """Default profiles tuple cannot be mutated."""
-        cfg = ShieldConfig()
-        self.assertIsInstance(cfg.default_profiles, tuple)
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = ShieldConfig(state_dir=Path(tmp))
+            self.assertIsInstance(cfg.default_profiles, tuple)
 
     def test_frozen(self) -> None:
         """Config is immutable."""
-        cfg = ShieldConfig()
-        with self.assertRaises(AttributeError):
-            cfg.mode = ShieldMode.HOOK  # type: ignore[misc]
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = ShieldConfig(state_dir=Path(tmp))
+            with self.assertRaises(dataclasses.FrozenInstanceError):
+                cfg.mode = ShieldMode.HOOK  # type: ignore[misc]
+
+    def test_state_dir_is_first_field(self) -> None:
+        """state_dir is the first field (required, positional)."""
+        fields = [f.name for f in dataclasses.fields(ShieldConfig)]
+        self.assertEqual(fields[0], "state_dir")
 
 
-class TestShieldPaths(unittest.TestCase):
-    """Tests for ShieldPaths value object."""
+class TestShieldMode(unittest.TestCase):
+    """Tests for ShieldMode enum."""
 
-    def test_state_root_default(self) -> None:
-        """Default state root is under ~/.local/state/."""
-        with unittest.mock.patch.dict("os.environ", {}, clear=True):
-            paths = ShieldPaths.from_env()
-            self.assertTrue(str(paths.state_root).endswith("terok-shield"))
+    def test_hook_member(self) -> None:
+        """ShieldMode has HOOK member."""
+        self.assertEqual(ShieldMode.HOOK.value, "hook")
 
-    def test_state_root_env_override(self) -> None:
-        """TEROK_SHIELD_STATE_DIR overrides default."""
-        with unittest.mock.patch.dict(
-            "os.environ", {"TEROK_SHIELD_STATE_DIR": str(FAKE_STATE_DIR)}
-        ):
-            paths = ShieldPaths.from_env()
-            self.assertEqual(paths.state_root, FAKE_STATE_DIR)
 
-    def test_config_root_default(self) -> None:
-        """Default config root is under ~/.config/."""
-        with unittest.mock.patch.dict("os.environ", {}, clear=True):
-            paths = ShieldPaths.from_env()
-            self.assertTrue(str(paths.config_root).endswith("terok-shield"))
+class TestShieldState(unittest.TestCase):
+    """Tests for ShieldState enum."""
 
-    def test_config_root_env_override(self) -> None:
-        """TEROK_SHIELD_CONFIG_DIR overrides default."""
-        with unittest.mock.patch.dict(
-            "os.environ", {"TEROK_SHIELD_CONFIG_DIR": str(FAKE_CONFIG_DIR)}
-        ):
-            paths = ShieldPaths.from_env()
-            self.assertEqual(paths.config_root, FAKE_CONFIG_DIR)
-
-    def test_state_root_xdg(self) -> None:
-        """XDG_STATE_HOME is used when TEROK_SHIELD_STATE_DIR is not set."""
-        with unittest.mock.patch.dict(
-            "os.environ", {"XDG_STATE_HOME": str(FAKE_XDG_STATE_HOME)}, clear=True
-        ):
-            paths = ShieldPaths.from_env()
-            self.assertEqual(paths.state_root, FAKE_XDG_STATE_HOME / "terok-shield")
-
-    def test_config_root_xdg(self) -> None:
-        """XDG_CONFIG_HOME is used when TEROK_SHIELD_CONFIG_DIR is not set."""
-        with unittest.mock.patch.dict(
-            "os.environ", {"XDG_CONFIG_HOME": str(FAKE_XDG_CONFIG_HOME)}, clear=True
-        ):
-            paths = ShieldPaths.from_env()
-            self.assertEqual(paths.config_root, FAKE_XDG_CONFIG_HOME / "terok-shield")
-
-    def test_state_root_explicit_overrides_xdg(self) -> None:
-        """TEROK_SHIELD_STATE_DIR takes priority over XDG_STATE_HOME."""
-        with unittest.mock.patch.dict(
-            "os.environ",
+    def test_members(self) -> None:
+        """ShieldState has all expected members."""
+        members = {m.name: m.value for m in ShieldState}
+        self.assertEqual(
+            members,
             {
-                "TEROK_SHIELD_STATE_DIR": str(FAKE_STATE_DIR),
-                "XDG_STATE_HOME": str(FAKE_XDG_STATE_HOME),
+                "UP": "up",
+                "DOWN": "down",
+                "DOWN_ALL": "down_all",
+                "INACTIVE": "inactive",
+                "ERROR": "error",
             },
-        ):
-            paths = ShieldPaths.from_env()
-            self.assertEqual(paths.state_root, FAKE_STATE_DIR)
-
-    def test_logs_dir_derives_from_state(self) -> None:
-        """Logs dir is under the state root."""
-        with unittest.mock.patch.dict(
-            "os.environ", {"TEROK_SHIELD_STATE_DIR": str(FAKE_STATE_DIR)}
-        ):
-            paths = ShieldPaths.from_env()
-            self.assertEqual(paths.logs_dir, FAKE_STATE_DIR / "logs")
-
-    def test_hooks_dir(self) -> None:
-        """Hooks dir is under the state root."""
-        with unittest.mock.patch.dict(
-            "os.environ", {"TEROK_SHIELD_STATE_DIR": str(FAKE_STATE_DIR)}
-        ):
-            paths = ShieldPaths.from_env()
-            self.assertEqual(paths.hooks_dir, FAKE_STATE_DIR / "hooks")
-
-    def test_hook_entrypoint(self) -> None:
-        """Hook entrypoint is under the state root."""
-        with unittest.mock.patch.dict(
-            "os.environ", {"TEROK_SHIELD_STATE_DIR": str(FAKE_STATE_DIR)}
-        ):
-            paths = ShieldPaths.from_env()
-            self.assertEqual(paths.hook_entrypoint, FAKE_STATE_DIR / "terok-shield-hook")
-
-    def test_profiles_dir(self) -> None:
-        """Profiles dir is under the config root."""
-        with unittest.mock.patch.dict(
-            "os.environ", {"TEROK_SHIELD_CONFIG_DIR": str(FAKE_CONFIG_DIR)}
-        ):
-            paths = ShieldPaths.from_env()
-            self.assertEqual(paths.profiles_dir, FAKE_CONFIG_DIR / "profiles")
-
-    def test_dns_dir(self) -> None:
-        """DNS dir is under the state root."""
-        with unittest.mock.patch.dict(
-            "os.environ", {"TEROK_SHIELD_STATE_DIR": str(FAKE_STATE_DIR)}
-        ):
-            paths = ShieldPaths.from_env()
-            self.assertEqual(paths.dns_dir, FAKE_STATE_DIR / "dns")
-
-    def test_resolved_dir(self) -> None:
-        """Resolved dir is under the state root."""
-        with unittest.mock.patch.dict(
-            "os.environ", {"TEROK_SHIELD_STATE_DIR": str(FAKE_STATE_DIR)}
-        ):
-            paths = ShieldPaths.from_env()
-            self.assertEqual(paths.resolved_dir, FAKE_STATE_DIR / "resolved")
-
-    def test_ensure_dirs(self) -> None:
-        """ensure_dirs creates all required directories."""
-        with tempfile.TemporaryDirectory() as tmp:
-            paths = ShieldPaths(
-                state_root=Path(tmp) / "state",
-                config_root=Path(tmp) / "cfg",
-            )
-            paths.ensure_dirs()
-            self.assertTrue((Path(tmp) / "state").is_dir())
-            self.assertTrue((Path(tmp) / "state" / "hooks").is_dir())
-            self.assertTrue((Path(tmp) / "state" / "logs").is_dir())
-            self.assertTrue((Path(tmp) / "state" / "dns").is_dir())
-            self.assertTrue((Path(tmp) / "state" / "resolved").is_dir())
-            self.assertTrue((Path(tmp) / "cfg" / "profiles").is_dir())
+        )
 
 
-class TestLoadShieldConfig(unittest.TestCase):
-    """Tests for load_shield_config."""
+class TestAnnotationConstants(unittest.TestCase):
+    """Tests for annotation key constants."""
 
-    def test_missing_file_returns_defaults(
-        self,
-    ) -> None:
-        """Return defaults when config file does not exist."""
-        with unittest.mock.patch.dict(
-            "os.environ", {"TEROK_SHIELD_CONFIG_DIR": str(NONEXISTENT_DIR / "config")}
-        ):
-            cfg = load_shield_config()
-            self.assertEqual(cfg.mode, ShieldMode.HOOK)
-
-    def test_loads_yaml(self, tmp_path=None) -> None:
-        """Load configuration from YAML file."""
-        with tempfile.TemporaryDirectory() as tmp:
-            config_file = Path(tmp) / "config.yml"
-            config_file.write_text(
-                "mode: hook\n"
-                "default_profiles: [base, dev-python]\n"
-                "loopback_ports: [1234, 5678]\n"
-                "audit:\n"
-                "  enabled: false\n"
-            )
-            with unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": tmp}):
-                cfg = load_shield_config()
-                self.assertEqual(cfg.mode, ShieldMode.HOOK)
-                self.assertEqual(cfg.default_profiles, ("base", "dev-python"))
-                self.assertEqual(cfg.loopback_ports, (1234, 5678))
-                self.assertFalse(cfg.audit_enabled)
-
-    def test_auto_mode_calls_auto_detect(self) -> None:
-        """mode: auto triggers _auto_detect_mode."""
-        with tempfile.TemporaryDirectory() as tmp:
-            config_file = Path(tmp) / "config.yml"
-            config_file.write_text("mode: auto\n")
-            with (
-                unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": tmp}),
-                unittest.mock.patch(
-                    "terok_shield.config._auto_detect_mode", return_value=ShieldMode.HOOK
-                ) as mock_detect,
-            ):
-                cfg = load_shield_config()
-                mock_detect.assert_called_once()
-                self.assertEqual(cfg.mode, ShieldMode.HOOK)
-
-    def test_invalid_yaml_returns_defaults(self) -> None:
-        """Return defaults for invalid YAML."""
-        with tempfile.TemporaryDirectory() as tmp:
-            config_file = Path(tmp) / "config.yml"
-            config_file.write_text(": : : invalid yaml [[[")
-            with unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": tmp}):
-                cfg = load_shield_config()
-                self.assertEqual(cfg.mode, ShieldMode.HOOK)
-
-    def test_invalid_mode_raises(self) -> None:
-        """Raise ValueError for unknown mode string."""
-        with tempfile.TemporaryDirectory() as tmp:
-            config_file = Path(tmp) / "config.yml"
-            config_file.write_text("mode: bogus\n")
-            with (
-                unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": tmp}),
-                self.assertRaises(ValueError),
-            ):
-                load_shield_config()
-
-    def test_non_dict_yaml_returns_defaults(self) -> None:
-        """Return defaults when YAML parses to non-dict (e.g. a list)."""
-        with tempfile.TemporaryDirectory() as tmp:
-            config_file = Path(tmp) / "config.yml"
-            config_file.write_text("- item1\n- item2\n")
-            with unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": tmp}):
-                cfg = load_shield_config()
-                self.assertEqual(cfg.mode, ShieldMode.HOOK)
-
-    def test_non_list_profiles_falls_back(self) -> None:
-        """Non-list default_profiles value falls back to default."""
-        with tempfile.TemporaryDirectory() as tmp:
-            config_file = Path(tmp) / "config.yml"
-            config_file.write_text("mode: hook\ndefault_profiles: not-a-list\n")
-            with unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": tmp}):
-                cfg = load_shield_config()
-                self.assertEqual(cfg.default_profiles, ("dev-standard",))
-
-    def test_non_dict_audit_falls_back(self) -> None:
-        """Non-dict audit value falls back to defaults."""
-        with tempfile.TemporaryDirectory() as tmp:
-            config_file = Path(tmp) / "config.yml"
-            config_file.write_text("mode: hook\naudit: not-a-dict\n")
-            with unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": tmp}):
-                cfg = load_shield_config()
-                self.assertTrue(cfg.audit_enabled)
-
-    def test_non_bool_audit_flags_fall_back(self) -> None:
-        """Non-boolean audit flag values fall back to defaults."""
-        with tempfile.TemporaryDirectory() as tmp:
-            config_file = Path(tmp) / "config.yml"
-            config_file.write_text('mode: hook\naudit:\n  enabled: "yes"\n')
-            with unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": tmp}):
-                cfg = load_shield_config()
-                self.assertIs(cfg.audit_enabled, True)
-
-
-class TestAutoDetectMode(unittest.TestCase):
-    """Tests for _auto_detect_mode."""
-
-    @unittest.mock.patch("shutil.which", return_value=None)
-    @unittest.mock.patch("subprocess.run", side_effect=FileNotFoundError)
-    def test_no_tools_raises(self, _run: unittest.mock.Mock, _which: unittest.mock.Mock) -> None:
-        """Raise RuntimeError when neither nft nor podman is available."""
-        from terok_shield.config import _auto_detect_mode
-
-        with self.assertRaises(RuntimeError):
-            _auto_detect_mode()
-
-    @unittest.mock.patch("shutil.which", side_effect=lambda n: NFT_BINARY if n == "nft" else None)
-    @unittest.mock.patch("subprocess.run", side_effect=FileNotFoundError)
-    def test_nft_only_returns_hook(
-        self, _run: unittest.mock.Mock, _which: unittest.mock.Mock
-    ) -> None:
-        """Return HOOK when only nft is available."""
-        from terok_shield.config import _auto_detect_mode
-
-        self.assertEqual(_auto_detect_mode(), ShieldMode.HOOK)
-
-
-class TestLoopbackPortsValidation(unittest.TestCase):
-    """Tests for loopback_ports validation in config loading."""
-
-    def test_valid_list(self) -> None:
-        """Valid port list is accepted."""
-        with tempfile.TemporaryDirectory() as tmp:
-            config_file = Path(tmp) / "config.yml"
-            config_file.write_text("mode: hook\nloopback_ports: [8080, 9090]\n")
-            with unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": tmp}):
-                cfg = load_shield_config()
-                self.assertEqual(cfg.loopback_ports, (8080, 9090))
-
-    def test_single_int_accepted(self) -> None:
-        """A bare integer is accepted as a single-element tuple."""
-        with tempfile.TemporaryDirectory() as tmp:
-            config_file = Path(tmp) / "config.yml"
-            config_file.write_text("mode: hook\nloopback_ports: 1234\n")
-            with unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": tmp}):
-                cfg = load_shield_config()
-                self.assertEqual(cfg.loopback_ports, (1234,))
-
-    def test_empty_list(self) -> None:
-        """Empty list produces empty tuple."""
-        with tempfile.TemporaryDirectory() as tmp:
-            config_file = Path(tmp) / "config.yml"
-            config_file.write_text("mode: hook\nloopback_ports: []\n")
-            with unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": tmp}):
-                cfg = load_shield_config()
-                self.assertEqual(cfg.loopback_ports, ())
-
-    def test_missing_key_defaults_empty(self) -> None:
-        """Missing loopback_ports defaults to empty tuple."""
-        with tempfile.TemporaryDirectory() as tmp:
-            config_file = Path(tmp) / "config.yml"
-            config_file.write_text("mode: hook\n")
-            with unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": tmp}):
-                cfg = load_shield_config()
-                self.assertEqual(cfg.loopback_ports, ())
-
-    def test_bool_rejected(self) -> None:
-        """Boolean values in list are silently dropped."""
-        with tempfile.TemporaryDirectory() as tmp:
-            config_file = Path(tmp) / "config.yml"
-            config_file.write_text("mode: hook\nloopback_ports: [true]\n")
-            with unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": tmp}):
-                cfg = load_shield_config()
-                self.assertEqual(cfg.loopback_ports, ())
-
-    def test_out_of_range_dropped(self) -> None:
-        """Out-of-range ports are silently dropped."""
-        with tempfile.TemporaryDirectory() as tmp:
-            config_file = Path(tmp) / "config.yml"
-            config_file.write_text("mode: hook\nloopback_ports: [99999]\n")
-            with unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": tmp}):
-                cfg = load_shield_config()
-                self.assertEqual(cfg.loopback_ports, ())
-
-    def test_mixed_valid_invalid(self) -> None:
-        """Valid ports kept, invalid silently dropped."""
-        with tempfile.TemporaryDirectory() as tmp:
-            config_file = Path(tmp) / "config.yml"
-            config_file.write_text("mode: hook\nloopback_ports: [8080, 0, true, 9090]\n")
-            with unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": tmp}):
-                cfg = load_shield_config()
-                self.assertEqual(cfg.loopback_ports, (8080, 9090))
-
-    def test_bool_value_returns_empty(self) -> None:
-        """Bare boolean loopback_ports value returns empty tuple."""
-        with tempfile.TemporaryDirectory() as tmp:
-            config_file = Path(tmp) / "config.yml"
-            config_file.write_text("mode: hook\nloopback_ports: true\n")
-            with unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": tmp}):
-                cfg = load_shield_config()
-                self.assertEqual(cfg.loopback_ports, ())
-
-    def test_string_value_returns_empty(self) -> None:
-        """String loopback_ports value returns empty tuple."""
-        with tempfile.TemporaryDirectory() as tmp:
-            config_file = Path(tmp) / "config.yml"
-            config_file.write_text("mode: hook\nloopback_ports: not-a-list\n")
-            with unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": tmp}):
-                cfg = load_shield_config()
-                self.assertEqual(cfg.loopback_ports, ())
+    def test_annotation_keys_exist(self) -> None:
+        """All annotation key constants are defined."""
+        self.assertEqual(ANNOTATION_KEY, "terok.shield.profiles")
+        self.assertEqual(ANNOTATION_NAME_KEY, "terok.shield.name")
+        self.assertEqual(ANNOTATION_STATE_DIR_KEY, "terok.shield.state_dir")
+        self.assertEqual(ANNOTATION_LOOPBACK_PORTS_KEY, "terok.shield.loopback_ports")
+        self.assertEqual(ANNOTATION_VERSION_KEY, "terok.shield.version")

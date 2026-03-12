@@ -43,31 +43,20 @@ def test_cli_no_command(capsys) -> None:
     assert "terok-shield" in captured.out
 
 
-def test_cli_setup(capsys) -> None:
-    """CLI setup subcommand completes without error."""
-    from unittest import mock
-
-    from terok_shield.cli import main
-
-    with mock.patch("terok_shield.cli.Shield") as mock_cls:
-        main(["setup"])
-    mock_cls.return_value.setup.assert_called_once()
-    captured = capsys.readouterr()
-    assert "setup complete" in captured.out.lower()
-
-
 def test_cli_status(capsys) -> None:
     """CLI status subcommand prints mode info."""
     from unittest import mock
 
     from terok_shield.cli import main
 
-    with mock.patch("terok_shield.cli.Shield") as mock_cls:
+    with (
+        mock.patch("terok_shield.cli._build_config"),
+        mock.patch("terok_shield.cli.Shield") as mock_cls,
+    ):
         mock_cls.return_value.status.return_value = {
             "mode": "standard",
             "audit_enabled": True,
             "profiles": [],
-            "log_files": [],
         }
         main(["status"])
     mock_cls.return_value.status.assert_called_once()

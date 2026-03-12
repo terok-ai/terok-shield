@@ -3,41 +3,32 @@
 
 """Structured audit logging for shield (JSON-lines format).
 
-Provides ``AuditLogger`` (Service pattern) -- owns a logs directory and
-an enabled flag, writes JSON-lines per container.
+Provides ``AuditLogger`` -- owns an audit file path and an enabled
+flag, writes JSON-lines entries to a single per-container file.
 """
 
 import json
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Self
-
-from .config import ShieldConfig
-from .validation import validate_container_name
 
 
 class AuditLogger:
-    """Service: JSON-lines audit logger scoped to a logs directory.
+    """JSON-lines audit logger for a single container.
 
-    Each container gets its own ``<container>.jsonl`` file.
-    When disabled, all write operations are no-ops.
+    Writes to a single file (``audit_path``).  When disabled, all
+    write operations are no-ops.
     """
 
-    def __init__(self, *, logs_dir: Path, enabled: bool = True) -> None:
+    def __init__(self, *, audit_path: Path, enabled: bool = True) -> None:
         """Create an audit logger.
 
         Args:
-            logs_dir: Directory for per-container ``.jsonl`` files.
+            audit_path: Path to the ``.jsonl`` audit log file.
             enabled: Whether logging is active (can be toggled later).
         """
-        self._logs_dir = logs_dir
+        self._audit_path = audit_path
         self._enabled = enabled
-
-    @classmethod
-    def from_config(cls, config: ShieldConfig) -> Self:
-        """Construct from a ``ShieldConfig``, reading paths and audit flag."""
-        return cls(logs_dir=config.paths.logs_dir, enabled=config.audit_enabled)
 
     @property
     def enabled(self) -> bool:
@@ -49,15 +40,6 @@ class AuditLogger:
         """Toggle audit logging on or off."""
         self._enabled = value
 
-    def _log_path(self, container: str) -> Path:
-        """Return the audit log path for a container.
-
-        Raises ValueError if the container name is unsafe.
-        """
-        validate_container_name(container)
-        self._logs_dir.mkdir(parents=True, exist_ok=True)
-        return self._logs_dir / f"{container}.jsonl"
-
     def log_event(
         self,
         container: str,
@@ -66,7 +48,7 @@ class AuditLogger:
         dest: str | None = None,
         detail: str | None = None,
     ) -> None:
-        """Write a single audit event to the container's log file.
+        """Write a single audit event to the log file.
 
         No-op when audit is disabled.
 
@@ -89,31 +71,24 @@ class AuditLogger:
             entry["detail"] = detail
 
         try:
-            with self._log_path(container).open("a") as f:
+            self._audit_path.parent.mkdir(parents=True, exist_ok=True)
+            with self._audit_path.open("a") as f:
                 f.write(json.dumps(entry, separators=(",", ":")) + "\n")
         except OSError:
             pass  # audit logging is best-effort
 
-    def tail_log(self, container: str, n: int = 50) -> Iterator[dict]:
-        """Yield the last *n* audit events for a container.
+    def tail_log(self, n: int = 50) -> Iterator[dict]:
+        """Yield the last *n* audit events.
 
         Args:
-            container: Container name.
             n: Number of recent events to yield.
         """
-        path = self._log_path(container)
-        if not path.is_file():
+        if not self._audit_path.is_file():
             return
 
-        lines = path.read_text().splitlines()
+        lines = self._audit_path.read_text().splitlines()
         for line in lines[-n:] if n > 0 else []:
             try:
                 yield json.loads(line)
             except json.JSONDecodeError:
                 continue
-
-    def list_log_files(self) -> list[str]:
-        """Return container names that have audit logs."""
-        if not self._logs_dir.is_dir():
-            return []
-        return sorted(f.stem for f in self._logs_dir.glob("*.jsonl"))

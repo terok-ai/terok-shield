@@ -5,9 +5,152 @@
 
 import argparse
 import json
+import os
 import sys
+from pathlib import Path
 
-from . import ExecError, Shield, ShieldConfig
+from . import ExecError, Shield, ShieldConfig, ShieldMode
+
+# ── Config construction (formerly in config.py) ──────────
+
+
+def _resolve_state_root() -> Path:
+    """Resolve the state root from env / XDG / default."""
+    env = os.environ.get("TEROK_SHIELD_STATE_DIR")
+    if env:
+        return Path(env)
+    xdg = os.environ.get("XDG_STATE_HOME")
+    base = Path(xdg) if xdg else Path.home() / ".local" / "state"
+    return base / "terok-shield"
+
+
+def _resolve_config_root() -> Path:
+    """Resolve the config root from env / XDG / default."""
+    env = os.environ.get("TEROK_SHIELD_CONFIG_DIR")
+    if env:
+        return Path(env)
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    base = Path(xdg) if xdg else Path.home() / ".config"
+    return base / "terok-shield"
+
+
+def _parse_loopback_ports(raw: object) -> tuple[int, ...]:
+    """Parse and validate loopback_ports from config YAML.
+
+    Accepts a list of ints or a single int.  Invalid entries are silently
+    dropped.
+    """
+    if isinstance(raw, bool):
+        return ()
+    if isinstance(raw, int):
+        raw = [raw]
+    if not isinstance(raw, list):
+        return ()
+    ports: list[int] = []
+    for v in raw:
+        if isinstance(v, bool) or not isinstance(v, int):
+            continue
+        if 1 <= v <= 65535:
+            ports.append(v)
+    return tuple(ports)
+
+
+def _auto_detect_mode() -> ShieldMode:
+    """Auto-detect the best available shield mode.
+
+    Currently only hook mode is supported.
+
+    Raises:
+        RuntimeError: If no supported shield mode is available.
+    """
+    import shutil
+
+    if shutil.which("nft"):
+        return ShieldMode.HOOK
+
+    raise RuntimeError("No supported shield mode available. Install nft for hook mode.")
+
+
+def _load_config_file() -> dict:
+    """Load config.yml from the config root, returning a dict (or empty)."""
+    import yaml
+
+    config_file = _resolve_config_root() / "config.yml"
+    if not config_file.is_file():
+        return {}
+
+    try:
+        section = yaml.safe_load(config_file.read_text()) or {}
+    except (OSError, yaml.YAMLError):
+        return {}
+
+    return section if isinstance(section, dict) else {}
+
+
+def _build_config(
+    container: str | None = None,
+    *,
+    state_dir_override: Path | None = None,
+) -> ShieldConfig:
+    """Build a ShieldConfig from config.yml + env vars.
+
+    Args:
+        container: Container name (used for per-container state_dir).
+        state_dir_override: Explicit state_dir from --state-dir flag.
+    """
+    section = _load_config_file()
+
+    # Resolve mode
+    mode_str = section.get("mode", "auto")
+    if mode_str == "auto":
+        mode = _auto_detect_mode()
+    elif mode_str == "hook":
+        mode = ShieldMode.HOOK
+    else:
+        raise ValueError(f"Unknown shield mode: {mode_str!r}")
+
+    # Profiles
+    raw_profiles = section.get("default_profiles", ["dev-standard"])
+    if not isinstance(raw_profiles, list):
+        raw_profiles = ["dev-standard"]
+    profiles = tuple(raw_profiles)
+
+    # Loopback ports
+    loopback_ports = _parse_loopback_ports(section.get("loopback_ports", []))
+
+    # Audit
+    audit_section = section.get("audit", {})
+    if not isinstance(audit_section, dict):
+        audit_section = {}
+    audit_enabled = audit_section.get("enabled", True)
+    if not isinstance(audit_enabled, bool):
+        audit_enabled = True
+
+    # State dir
+    if state_dir_override:
+        state_root = state_dir_override
+    else:
+        state_root = _resolve_state_root()
+
+    if container:
+        state_dir = state_root / "containers" / container
+    else:
+        state_dir = state_root / "containers" / "_default"
+
+    # Profiles dir
+    profiles_dir = _resolve_config_root() / "profiles"
+
+    return ShieldConfig(
+        state_dir=state_dir,
+        mode=mode,
+        default_profiles=profiles,
+        loopback_ports=loopback_ports,
+        audit_enabled=audit_enabled,
+        profiles_dir=profiles_dir,
+    )
+
+
+# ── Argument parser ──────────────────────────────────────
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -21,9 +164,13 @@ def _build_parser() -> argparse.ArgumentParser:
         action="version",
         version=f"%(prog)s {_get_version()}",
     )
+    parser.add_argument(
+        "--state-dir",
+        type=Path,
+        default=None,
+        help="Override state root directory",
+    )
     sub = parser.add_subparsers(dest="command")
-
-    sub.add_parser("setup", help="Install firewall hook")
 
     sub.add_parser("status", help="Show shield status")
 
@@ -100,11 +247,15 @@ def main(argv: list[str] | None = None) -> None:
 
 def _dispatch(args: argparse.Namespace) -> None:
     """Dispatch to the appropriate subcommand handler."""
-    shield = Shield(ShieldConfig())
     cmd = args.command
-    if cmd == "setup":
-        _cmd_setup(shield)
-    elif cmd == "status":
+    state_dir_override = getattr(args, "state_dir", None)
+
+    # Commands that need a per-container config
+    container = getattr(args, "container", None)
+    config = _build_config(container, state_dir_override=state_dir_override)
+    shield = Shield(config)
+
+    if cmd == "status":
         _cmd_status(shield)
     elif cmd == "resolve":
         _cmd_resolve(shield, args.container, force=args.force)
@@ -121,13 +272,7 @@ def _dispatch(args: argparse.Namespace) -> None:
     elif cmd == "rules":
         _cmd_rules(shield, args.container)
     elif cmd == "logs":
-        _cmd_logs(shield, container=args.container, n=args.n)
-
-
-def _cmd_setup(shield: Shield) -> None:
-    """Run shield setup."""
-    shield.setup()
-    print("Shield setup complete (hook mode).")
+        _cmd_logs(shield, state_dir_override=state_dir_override, container=args.container, n=args.n)
 
 
 def _cmd_status(shield: Shield) -> None:
@@ -136,8 +281,6 @@ def _cmd_status(shield: Shield) -> None:
     print(f"Mode:     {status['mode']}")
     print(f"Audit:    {'enabled' if status['audit_enabled'] else 'disabled'}")
     print(f"Profiles: {', '.join(status['profiles']) or '(none)'}")
-    if status["log_files"]:
-        print(f"Logs:     {len(status['log_files'])} container(s)")
 
 
 def _cmd_resolve(shield: Shield, container: str, force: bool) -> None:
@@ -205,19 +348,39 @@ def _cmd_rules(shield: Shield, container: str) -> None:
         print(f"No rules found for {container}")
 
 
-def _cmd_logs(shield: Shield, container: str | None, n: int) -> None:
+def _cmd_logs(
+    shield: Shield,
+    *,
+    state_dir_override: Path | None,
+    container: str | None,
+    n: int,
+) -> None:
     """Show audit log entries."""
     if container:
-        for entry in shield.tail_log(container, n):
+        # Build a per-container shield for the specific container
+        config = _build_config(container, state_dir_override=state_dir_override)
+        ctr_shield = Shield(config)
+        for entry in ctr_shield.tail_log(n):
             print(json.dumps(entry))
     else:
-        files = shield.log_files()
-        if not files:
+        # Scan all containers
+        state_root = state_dir_override or _resolve_state_root()
+        containers_dir = state_root / "containers"
+        if not containers_dir.is_dir():
             print("No audit logs found.")
             return
-        for ctr in files:
-            for entry in shield.tail_log(ctr, n):
-                print(json.dumps(entry))
+        found = False
+        for ctr_dir in sorted(containers_dir.iterdir()):
+            audit_file = ctr_dir / "audit.jsonl"
+            if audit_file.is_file():
+                found = True
+                from .audit import AuditLogger
+
+                logger = AuditLogger(audit_path=audit_file)
+                for entry in logger.tail_log(n):
+                    print(json.dumps(entry))
+        if not found:
+            print("No audit logs found.")
 
 
 def _get_version() -> str:

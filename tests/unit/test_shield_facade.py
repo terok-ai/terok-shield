@@ -1,10 +1,12 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for the Shield facade class (__init__.py OOP API)."""
+"""Tests for the Shield facade class (__init__.py)."""
 
+import tempfile
 import unittest
 from collections.abc import Iterator
+from pathlib import Path
 from unittest import mock
 
 from terok_shield import Shield, ShieldConfig, ShieldState
@@ -17,12 +19,13 @@ class TestShieldInit(unittest.TestCase):
 
     def test_default_collaborators(self) -> None:
         """Shield creates default collaborators when none are injected."""
-        shield = Shield(ShieldConfig())
-        self.assertIsNotNone(shield.runner)
-        self.assertIsNotNone(shield.audit)
-        self.assertIsNotNone(shield.dns)
-        self.assertIsNotNone(shield.profiles)
-        self.assertIsNotNone(shield.ruleset)
+        with tempfile.TemporaryDirectory() as tmp:
+            shield = Shield(ShieldConfig(state_dir=Path(tmp)))
+            self.assertIsNotNone(shield.runner)
+            self.assertIsNotNone(shield.audit)
+            self.assertIsNotNone(shield.dns)
+            self.assertIsNotNone(shield.profiles)
+            self.assertIsNotNone(shield.ruleset)
 
     def test_injected_collaborators(self) -> None:
         """Shield uses injected collaborators when provided."""
@@ -32,58 +35,47 @@ class TestShieldInit(unittest.TestCase):
         profiles = mock.MagicMock()
         ruleset = mock.MagicMock()
 
-        shield = Shield(
-            ShieldConfig(),
-            runner=runner,
-            audit=audit,
-            dns=dns,
-            profiles=profiles,
-            ruleset=ruleset,
-        )
-        self.assertIs(shield.runner, runner)
-        self.assertIs(shield.audit, audit)
-        self.assertIs(shield.dns, dns)
-        self.assertIs(shield.profiles, profiles)
-        self.assertIs(shield.ruleset, ruleset)
+        with tempfile.TemporaryDirectory() as tmp:
+            shield = Shield(
+                ShieldConfig(state_dir=Path(tmp)),
+                runner=runner,
+                audit=audit,
+                dns=dns,
+                profiles=profiles,
+                ruleset=ruleset,
+            )
+            self.assertIs(shield.runner, runner)
+            self.assertIs(shield.audit, audit)
+            self.assertIs(shield.dns, dns)
+            self.assertIs(shield.profiles, profiles)
+            self.assertIs(shield.ruleset, ruleset)
 
     def test_unsupported_mode_raises(self) -> None:
         """ValueError for unsupported mode in _create_mode."""
-        # Create a fake unsupported mode
-        config = ShieldConfig()
-        shield = Shield.__new__(Shield)
-        shield.config = config
-        shield.runner = mock.MagicMock()
-        shield.audit = mock.MagicMock()
-        shield.dns = mock.MagicMock()
-        shield.profiles = mock.MagicMock()
-        shield.ruleset = mock.MagicMock()
+        with tempfile.TemporaryDirectory() as tmp:
+            config = ShieldConfig(state_dir=Path(tmp))
+            shield = Shield.__new__(Shield)
+            shield.config = config
+            shield.runner = mock.MagicMock()
+            shield.audit = mock.MagicMock()
+            shield.dns = mock.MagicMock()
+            shield.profiles = mock.MagicMock()
+            shield.ruleset = mock.MagicMock()
 
-        fake_mode = mock.MagicMock()
-        fake_mode.__eq__ = lambda self, other: False
-        with self.assertRaises(ValueError, msg="Unsupported shield mode"):
-            shield._create_mode(fake_mode)
-
-
-class TestShieldSetup(unittest.TestCase):
-    """Test Shield.setup()."""
-
-    def test_delegates_to_mode(self) -> None:
-        """setup() calls mode backend's setup()."""
-        mode = mock.MagicMock()
-        shield = _make_shield(mode=mode)
-        shield.setup()
-        mode.setup.assert_called_once()
+            fake_mode = mock.MagicMock()
+            fake_mode.__eq__ = lambda self, other: False
+            with self.assertRaises(ValueError, msg="Unsupported shield mode"):
+                shield._create_mode(fake_mode)
 
 
 class TestShieldStatus(unittest.TestCase):
     """Test Shield.status()."""
 
     def test_returns_expected_keys(self) -> None:
-        """status() returns dict with mode, profiles, audit_enabled, log_files."""
+        """status() returns dict with mode, profiles, audit_enabled."""
         profiles = mock.MagicMock()
         profiles.list_profiles.return_value = ["base", "dev-standard"]
         audit = mock.MagicMock()
-        audit.list_log_files.return_value = ["container1"]
 
         shield = _make_shield(profiles=profiles, audit=audit)
         result = shield.status()
@@ -91,7 +83,6 @@ class TestShieldStatus(unittest.TestCase):
         self.assertEqual(result["mode"], "hook")
         self.assertEqual(result["profiles"], ["base", "dev-standard"])
         self.assertTrue(result["audit_enabled"])
-        self.assertEqual(result["log_files"], ["container1"])
 
 
 class TestShieldPreStart(unittest.TestCase):
@@ -114,11 +105,12 @@ class TestShieldPreStart(unittest.TestCase):
         mode = mock.MagicMock()
         mode.pre_start.return_value = []
         audit = mock.MagicMock()
-        config = ShieldConfig(default_profiles=("base",))
-        shield = _make_shield(config=config, mode=mode, audit=audit)
+        with tempfile.TemporaryDirectory() as tmp:
+            config = ShieldConfig(state_dir=Path(tmp), default_profiles=("base",))
+            shield = _make_shield(config=config, mode=mode, audit=audit)
 
-        shield.pre_start("test-ctr")
-        mode.pre_start.assert_called_once_with("test-ctr", ["base"])
+            shield.pre_start("test-ctr")
+            mode.pre_start.assert_called_once_with("test-ctr", ["base"])
 
 
 class TestShieldAllow(unittest.TestCase):
@@ -310,24 +302,18 @@ class TestShieldResolve(unittest.TestCase):
 
     def test_default_profiles(self) -> None:
         """resolve() uses config.default_profiles when None."""
-        config = ShieldConfig(default_profiles=("base",))
-        profiles = mock.MagicMock()
-        profiles.compose_profiles.return_value = []
-        shield = _make_shield(config=config, profiles=profiles)
+        with tempfile.TemporaryDirectory() as tmp:
+            config = ShieldConfig(state_dir=Path(tmp), default_profiles=("base",))
+            profiles = mock.MagicMock()
+            profiles.compose_profiles.return_value = []
+            shield = _make_shield(config=config, profiles=profiles)
 
-        shield.resolve("test-ctr")
-        profiles.compose_profiles.assert_called_once_with(["base"])
+            shield.resolve("test-ctr")
+            profiles.compose_profiles.assert_called_once_with(["base"])
 
 
 class TestShieldDelegationMethods(unittest.TestCase):
     """Test simple delegation methods on Shield."""
-
-    def test_log_files(self) -> None:
-        """log_files() delegates to audit.list_log_files."""
-        audit = mock.MagicMock()
-        audit.list_log_files.return_value = ["ctr1", "ctr2"]
-        shield = _make_shield(audit=audit)
-        self.assertEqual(shield.log_files(), ["ctr1", "ctr2"])
 
     def test_profiles_list(self) -> None:
         """profiles_list() delegates to profiles.list_profiles."""
@@ -341,8 +327,8 @@ class TestShieldDelegationMethods(unittest.TestCase):
         audit = mock.MagicMock()
         audit.tail_log.return_value = iter([{"action": "setup"}])
         shield = _make_shield(audit=audit)
-        result = shield.tail_log("test-ctr", 10)
-        audit.tail_log.assert_called_once_with("test-ctr", 10)
+        result = shield.tail_log(10)
+        audit.tail_log.assert_called_once_with(10)
         self.assertIsInstance(result, Iterator)
 
     def test_compose_profiles(self) -> None:
@@ -368,9 +354,10 @@ def _make_shield(
     ruleset: mock.MagicMock | None = None,
 ) -> Shield:
     """Create a Shield with mock collaborators.  Bypasses _create_mode."""
-    cfg = config or ShieldConfig()
+    if config is None:
+        config = ShieldConfig(state_dir=Path(tempfile.mkdtemp()))
     s = Shield.__new__(Shield)
-    s.config = cfg
+    s.config = config
     s.runner = mock.MagicMock()
     s.audit = audit or mock.MagicMock()
     s.dns = dns or mock.MagicMock()

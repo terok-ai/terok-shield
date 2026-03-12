@@ -4,10 +4,12 @@
 """Tests for OCI hook entry point."""
 
 import json
+import tempfile
 import unittest
 import unittest.mock
 
-from terok_shield.config import ANNOTATION_KEY, ANNOTATION_NAME_KEY, ShieldConfig
+from terok_shield import state
+from terok_shield.config import ANNOTATION_KEY, ANNOTATION_NAME_KEY
 from terok_shield.oci_hook import _parse_oci_state, hook_main
 
 
@@ -17,10 +19,21 @@ def _oci_state(
     annotations: dict[str, str] | None = None,
 ) -> str:
     """Return a minimal OCI state JSON string."""
-    state: dict = {"id": cid, "pid": pid}
+    oci: dict = {"id": cid, "pid": pid}
     if annotations is not None:
-        state["annotations"] = annotations
-    return json.dumps(state)
+        oci["annotations"] = annotations
+    return json.dumps(oci)
+
+
+def _valid_annotations(state_dir: str) -> dict[str, str]:
+    """Return annotations with required fields for hook_main."""
+    return {
+        ANNOTATION_KEY: "dev-standard",
+        ANNOTATION_NAME_KEY: "my-ctr",
+        "terok.shield.state_dir": state_dir,
+        "terok.shield.loopback_ports": "1234",
+        "terok.shield.version": str(state.BUNDLE_VERSION),
+    }
 
 
 class TestParseOciState(unittest.TestCase):
@@ -85,13 +98,13 @@ class TestHookMain(unittest.TestCase):
     """Tests for hook_main entry point."""
 
     @unittest.mock.patch("terok_shield.oci_hook.HookExecutor")
-    @unittest.mock.patch("terok_shield.oci_hook.load_shield_config")
-    def test_success(self, mock_cfg: unittest.mock.Mock, mock_exec: unittest.mock.Mock) -> None:
+    def test_success(self, mock_exec: unittest.mock.Mock) -> None:
         """Return 0 on success (hook mode createRuntime)."""
-        mock_cfg.return_value = ShieldConfig(loopback_ports=(1234,))
-        rc = hook_main(_oci_state("test-ctr", 42))
-        self.assertEqual(rc, 0)
-        mock_exec.return_value.apply.assert_called_once_with("test-ctr", "42")
+        with tempfile.TemporaryDirectory() as tmp:
+            ann = _valid_annotations(tmp)
+            rc = hook_main(_oci_state("test-ctr", 42, annotations=ann))
+            self.assertEqual(rc, 0)
+            mock_exec.return_value.apply.assert_called_once_with("test-ctr", "42")
 
     def test_invalid_json(self) -> None:
         """Return 1 on invalid OCI state."""
@@ -99,15 +112,13 @@ class TestHookMain(unittest.TestCase):
         self.assertEqual(rc, 1)
 
     @unittest.mock.patch("terok_shield.oci_hook.HookExecutor")
-    @unittest.mock.patch("terok_shield.oci_hook.load_shield_config")
-    def test_runtime_error(
-        self, mock_cfg: unittest.mock.Mock, mock_exec: unittest.mock.Mock
-    ) -> None:
+    def test_runtime_error(self, mock_exec: unittest.mock.Mock) -> None:
         """Return 1 on RuntimeError from executor.apply."""
-        mock_cfg.return_value = ShieldConfig()
-        mock_exec.return_value.apply.side_effect = RuntimeError("boom")
-        rc = hook_main(_oci_state())
-        self.assertEqual(rc, 1)
+        with tempfile.TemporaryDirectory() as tmp:
+            ann = _valid_annotations(tmp)
+            mock_exec.return_value.apply.side_effect = RuntimeError("boom")
+            rc = hook_main(_oci_state(annotations=ann))
+            self.assertEqual(rc, 1)
 
     def test_hook_mode_requires_pid(self) -> None:
         """Return 1 when hook mode state has no valid PID."""
@@ -116,6 +127,28 @@ class TestHookMain(unittest.TestCase):
 
     def test_poststop_noop(self) -> None:
         """Poststop is a no-op returning 0 without calling HookExecutor."""
-        state = _oci_state(pid=0)
-        rc = hook_main(state, stage="poststop")
+        oci = _oci_state(pid=0)
+        rc = hook_main(oci, stage="poststop")
         self.assertEqual(rc, 0)
+
+    def test_missing_state_dir_annotation(self) -> None:
+        """Return 1 when state_dir annotation is missing."""
+        ann = {ANNOTATION_KEY: "dev-standard"}
+        rc = hook_main(_oci_state(annotations=ann))
+        self.assertEqual(rc, 1)
+
+    def test_version_mismatch(self) -> None:
+        """Return 1 when bundle version doesn't match."""
+        with tempfile.TemporaryDirectory() as tmp:
+            ann = _valid_annotations(tmp)
+            ann["terok.shield.version"] = "999"
+            rc = hook_main(_oci_state(annotations=ann))
+            self.assertEqual(rc, 1)
+
+    def test_invalid_version(self) -> None:
+        """Return 1 when version annotation is not a valid integer."""
+        with tempfile.TemporaryDirectory() as tmp:
+            ann = _valid_annotations(tmp)
+            ann["terok.shield.version"] = "not-a-number"
+            rc = hook_main(_oci_state(annotations=ann))
+            self.assertEqual(rc, 1)

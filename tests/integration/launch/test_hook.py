@@ -9,7 +9,15 @@ from pathlib import Path
 
 import pytest
 
+from terok_shield import state
 from terok_shield.audit import AuditLogger
+from terok_shield.config import (
+    ANNOTATION_KEY,
+    ANNOTATION_LOOPBACK_PORTS_KEY,
+    ANNOTATION_NAME_KEY,
+    ANNOTATION_STATE_DIR_KEY,
+    ANNOTATION_VERSION_KEY,
+)
 from terok_shield.nft import RulesetBuilder, verify_ruleset
 from terok_shield.oci_hook import HookExecutor, hook_main
 from terok_shield.run import SubprocessRunner
@@ -27,17 +35,31 @@ from ..helpers import wget as _wget
 def _make_executor(tmp: str) -> HookExecutor:
     """Create a HookExecutor wired to a temp directory."""
     runner = SubprocessRunner()
-    audit = AuditLogger(logs_dir=Path(tmp) / "logs")
+    audit = AuditLogger(audit_path=state.audit_path(Path(tmp)))
     ruleset = RulesetBuilder()
     return HookExecutor(
         runner=runner,
         audit=audit,
         ruleset=ruleset,
-        resolved_dir=Path(tmp) / "resolved",
+        state_dir=Path(tmp),
     )
 
 
-# ── HookExecutor.apply end-to-end ────────────────────────
+def _oci_state_with_annotations(
+    container: str, pid: int, tmp: str, *, loopback_ports: str = ""
+) -> str:
+    """Build OCI state JSON with required annotations."""
+    annotations = {
+        ANNOTATION_KEY: "dev-standard",
+        ANNOTATION_NAME_KEY: container,
+        ANNOTATION_STATE_DIR_KEY: tmp,
+        ANNOTATION_LOOPBACK_PORTS_KEY: loopback_ports,
+        ANNOTATION_VERSION_KEY: str(state.BUNDLE_VERSION),
+    }
+    return json.dumps({"id": container, "pid": pid, "annotations": annotations})
+
+
+# -- HookExecutor.apply end-to-end ----------------------------
 
 
 @pytest.mark.needs_podman
@@ -66,14 +88,12 @@ class TestApplyHookE2E:
     def test_apply_hook_with_pre_resolved_ips(
         self, container: str, container_pid: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """HookExecutor.apply loads pre-resolved IPs from the cache file."""
+        """HookExecutor.apply loads pre-resolved IPs from the allowlist files."""
         with tempfile.TemporaryDirectory() as tmp:
             monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", tmp)
 
-            resolved_dir = Path(tmp) / "resolved"
-            resolved_dir.mkdir(parents=True)
             resolved_ips = [*ALLOWED_TARGET_IPS, GOOGLE_DNS_IP]
-            (resolved_dir / f"{container}.resolved").write_text("\n".join(resolved_ips) + "\n")
+            state.profile_allowed_path(Path(tmp)).write_text("\n".join(resolved_ips) + "\n")
 
             executor = _make_executor(tmp)
             executor.apply(container, container_pid)
@@ -102,11 +122,7 @@ class TestApplyHookE2E:
         with tempfile.TemporaryDirectory() as tmp:
             monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", tmp)
 
-            resolved_dir = Path(tmp) / "resolved"
-            resolved_dir.mkdir(parents=True)
-            (resolved_dir / f"{container}.resolved").write_text(
-                "\n".join(ALLOWED_TARGET_IPS) + "\n"
-            )
+            state.profile_allowed_path(Path(tmp)).write_text("\n".join(ALLOWED_TARGET_IPS) + "\n")
 
             executor = _make_executor(tmp)
             executor.apply(container, container_pid)
@@ -156,7 +172,7 @@ class TestApplyHookE2E:
             assert errors == [], f"Re-apply verification failed: {errors}"
 
 
-# ── hook_main (pure parsing — no container needed) ───────
+# -- hook_main (pure parsing — no container needed) -----------
 
 
 def test_hook_main_invalid_json() -> None:
@@ -165,7 +181,7 @@ def test_hook_main_invalid_json() -> None:
     assert rc == 1
 
 
-# ── hook_main end-to-end ─────────────────────────────────
+# -- hook_main end-to-end -------------------------------------
 
 
 @pytest.mark.needs_podman
@@ -183,7 +199,7 @@ class TestHookMainE2E:
         with tempfile.TemporaryDirectory() as tmp:
             monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", tmp)
 
-            oci_state = json.dumps({"id": container, "pid": int(container_pid)})
+            oci_state = _oci_state_with_annotations(container, int(container_pid), tmp)
             rc = hook_main(oci_state)
             assert rc == 0
 
@@ -194,7 +210,7 @@ class TestHookMainE2E:
         """hook_main returns 1 for unreachable PID."""
         with tempfile.TemporaryDirectory() as tmp:
             monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", tmp)
-            oci_state = json.dumps({"id": container, "pid": 999999})
+            oci_state = _oci_state_with_annotations(container, 999999, tmp)
             rc = hook_main(oci_state)
             assert rc == 1
 
@@ -206,13 +222,9 @@ class TestHookMainE2E:
             monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", tmp)
 
             # Pre-resolve: allow Cloudflare anycast pair only
-            resolved_dir = Path(tmp) / "resolved"
-            resolved_dir.mkdir(parents=True)
-            (resolved_dir / f"{container}.resolved").write_text(
-                "\n".join(ALLOWED_TARGET_IPS) + "\n"
-            )
+            state.profile_allowed_path(Path(tmp)).write_text("\n".join(ALLOWED_TARGET_IPS) + "\n")
 
-            oci_state = json.dumps({"id": container, "pid": int(container_pid)})
+            oci_state = _oci_state_with_annotations(container, int(container_pid), tmp)
             rc = hook_main(oci_state)
             assert rc == 0
 

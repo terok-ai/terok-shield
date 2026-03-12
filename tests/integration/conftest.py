@@ -49,7 +49,7 @@ def _image_available() -> bool:
     return r.returncode == 0
 
 
-# ── Skip conditions ─────────────────────────────────────
+# -- Skip conditions -----------------------------------------
 # Cheap binary-existence checks only.  The real nft capability check
 # is the session-scoped `nft_in_netns` fixture (needs a running container).
 #
@@ -64,18 +64,19 @@ nft_missing = pytest.mark.skipif(not _has("nft"), reason="nft not installed")
 dig_missing = pytest.mark.skipif(not _has("dig"), reason="dig not installed")
 
 
-# ── Fixtures ─────────────────────────────────────────────
+# -- Fixtures -------------------------------------------------
 
 
 @pytest.fixture
 def shield_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     """Provide an isolated state directory for shield operations.
 
-    Sets ``TEROK_SHIELD_STATE_DIR`` to a temporary directory so that hooks,
-    resolved caches, and logs do not touch the real system.
+    Sets ``TEROK_SHIELD_STATE_DIR`` so that CLI-based tests (which call
+    ``_build_config()``) resolve paths correctly.  API-based tests should
+    construct ``ShieldConfig(state_dir=...)`` explicitly.
 
     Yields:
-        Path to the temporary state directory.
+        Path to the temporary state root directory.
     """
     with tempfile.TemporaryDirectory() as tmp:
         monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", tmp)
@@ -237,22 +238,21 @@ def shielded_container(
 ) -> Iterator[str]:
     """Start a container with firewall applied via the public API lifecycle.
 
-    1. ``Shield.setup()`` installs OCI hook files.
-    2. ``Shield.pre_start()`` resolves DNS and returns podman args.
-    3. ``podman run`` starts the container with the hook-dir / annotation.
-    4. Yields the container name.
-    5. Cleanup: ``podman rm -f``.
+    1. ``Shield.pre_start()`` installs hooks, resolves DNS, returns podman args.
+    2. ``podman run`` starts the container with the hook-dir / annotation.
+    3. Yields the container name.
+    4. Cleanup: ``podman rm -f``.
 
     Yields:
         Container name with shield firewall applied.
     """
     from terok_shield import Shield, ShieldConfig
 
-    cfg = ShieldConfig()
-    shield = Shield(cfg)
-    shield.setup()
-
     name = f"{CTR_PREFIX}-api-{os.getpid()}"
+    state_dir = shield_env / "containers" / name
+    cfg = ShieldConfig(state_dir=state_dir)
+    shield = Shield(cfg)
+
     subprocess.run(["podman", "rm", "-f", name], capture_output=True)
 
     try:

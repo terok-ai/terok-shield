@@ -3,6 +3,9 @@
 
 """Integration tests: allow/deny traffic behavior."""
 
+import tempfile
+from pathlib import Path
+
 import pytest
 
 from terok_shield import Shield, ShieldConfig
@@ -18,7 +21,7 @@ from tests.testnet import (
 from ..conftest import nft_missing, nsenter_nft, podman_missing
 from ..helpers import assert_blocked, assert_reachable, wget as _wget
 
-# ── Low-level nft allow behavior ─────────────────────────
+# -- Low-level nft allow behavior -----------------------------
 
 
 @pytest.mark.needs_podman
@@ -72,7 +75,7 @@ class TestFirewallAllowing:
         assert blocked.returncode != 0, "Non-allowed IP should be rejected"
 
 
-# ── RFC1918 whitelist behavior ───────────────────────────
+# -- RFC1918 whitelist behavior -------------------------------
 
 
 @pytest.mark.needs_podman
@@ -101,7 +104,7 @@ class TestRFC1918Allow:
         assert allow_pos < rfc_pos, "Allow set must precede RFC1918 reject rules"
 
 
-# ── Public API allow/deny ────────────────────────────────
+# -- Public API allow/deny ------------------------------------
 
 
 @pytest.mark.needs_podman
@@ -114,7 +117,7 @@ class TestAllowDenyAPI:
 
     def test_shield_allow_ip(self, shielded_container: str) -> None:
         """``Shield.allow()`` with an IP makes it reachable."""
-        shield = Shield(ShieldConfig())
+        shield = Shield(ShieldConfig(state_dir=Path(tempfile.mkdtemp())))
         allowed = shield.allow(shielded_container, ALLOWED_TARGET_IPS[0])
         assert ALLOWED_TARGET_IPS[0] in allowed
 
@@ -124,7 +127,7 @@ class TestAllowDenyAPI:
 
     def test_shield_allow_deny_cycle(self, shielded_container: str) -> None:
         """``Shield.allow()`` then ``Shield.deny()`` blocks IP again."""
-        shield = Shield(ShieldConfig())
+        shield = Shield(ShieldConfig(state_dir=Path(tempfile.mkdtemp())))
         for ip in ALLOWED_TARGET_IPS:
             shield.allow(shielded_container, ip)
         assert_reachable(shielded_container, ALLOWED_TARGET_HTTP)

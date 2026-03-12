@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for the HookExecutor class (OOP API)."""
+"""Tests for the HookExecutor class."""
 
 import json
 import tempfile
@@ -9,10 +9,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from terok_shield import state
 from terok_shield.oci_hook import HookExecutor
 from terok_shield.run import ExecError
 
-from ..testfs import FAKE_RESOLVED_DIR, FORBIDDEN_TRAVERSAL
 from ..testnet import RFC1918_HOST, TEST_IP1, TEST_IP2
 
 
@@ -24,18 +24,18 @@ class TestHookExecutorInit(unittest.TestCase):
         runner = mock.MagicMock()
         audit = mock.MagicMock()
         ruleset = mock.MagicMock()
-        resolved_dir = FAKE_RESOLVED_DIR
 
-        executor = HookExecutor(
-            runner=runner,
-            audit=audit,
-            ruleset=ruleset,
-            resolved_dir=resolved_dir,
-        )
-        self.assertIs(executor._runner, runner)
-        self.assertIs(executor._audit, audit)
-        self.assertIs(executor._ruleset, ruleset)
-        self.assertEqual(executor._resolved_dir, resolved_dir)
+        with tempfile.TemporaryDirectory() as tmp:
+            executor = HookExecutor(
+                runner=runner,
+                audit=audit,
+                ruleset=ruleset,
+                state_dir=Path(tmp),
+            )
+            self.assertIs(executor._runner, runner)
+            self.assertIs(executor._audit, audit)
+            self.assertIs(executor._ruleset, ruleset)
+            self.assertEqual(executor._state_dir, Path(tmp))
 
 
 class TestHookExecutorApply(unittest.TestCase):
@@ -56,7 +56,7 @@ class TestHookExecutorApply(unittest.TestCase):
                 runner=runner,
                 audit=audit,
                 ruleset=ruleset,
-                resolved_dir=Path(tmp),
+                state_dir=Path(tmp),
             )
             executor.apply("test-ctr", "42")
 
@@ -70,7 +70,7 @@ class TestHookExecutorApply(unittest.TestCase):
     def test_success_with_ips(self) -> None:
         """Apply with pre-resolved IPs."""
         with tempfile.TemporaryDirectory() as tmp:
-            (Path(tmp) / "test-ctr.resolved").write_text(f"{TEST_IP1}\n{TEST_IP2}\n")
+            state.profile_allowed_path(Path(tmp)).write_text(f"{TEST_IP1}\n{TEST_IP2}\n")
             runner = mock.MagicMock()
             runner.nft_via_nsenter.side_effect = ["", "", "valid list output"]
             audit = mock.MagicMock()
@@ -83,7 +83,7 @@ class TestHookExecutorApply(unittest.TestCase):
                 runner=runner,
                 audit=audit,
                 ruleset=ruleset,
-                resolved_dir=Path(tmp),
+                state_dir=Path(tmp),
             )
             executor.apply("test-ctr", "42")
             self.assertEqual(runner.nft_via_nsenter.call_count, 3)
@@ -101,7 +101,7 @@ class TestHookExecutorApply(unittest.TestCase):
                 runner=runner,
                 audit=audit,
                 ruleset=ruleset,
-                resolved_dir=Path(tmp),
+                state_dir=Path(tmp),
             )
             with self.assertRaises(RuntimeError):
                 executor.apply("test-ctr", "42")
@@ -124,42 +124,55 @@ class TestHookExecutorApply(unittest.TestCase):
                 runner=runner,
                 audit=audit,
                 ruleset=ruleset,
-                resolved_dir=Path(tmp),
+                state_dir=Path(tmp),
             )
             with self.assertRaises(RuntimeError) as ctx:
                 executor.apply("test-ctr", "42")
             self.assertIn("verification failed", str(ctx.exception))
 
 
-class TestHookExecutorReadResolvedIps(unittest.TestCase):
-    """Test HookExecutor._read_resolved_ips()."""
+class TestHookExecutorReadAllowedIps(unittest.TestCase):
+    """Test HookExecutor._read_allowed_ips()."""
 
-    def test_reads_file(self) -> None:
-        """Read IPs from resolved file."""
+    def test_reads_profile_allowed(self) -> None:
+        """Read IPs from profile.allowed file."""
         with tempfile.TemporaryDirectory() as tmp:
-            (Path(tmp) / "test-ctr.resolved").write_text(f"{TEST_IP1}\n{TEST_IP2}\n")
-            executor = _make_executor(resolved_dir=Path(tmp))
-            result = executor._read_resolved_ips("test-ctr")
+            state.profile_allowed_path(Path(tmp)).write_text(f"{TEST_IP1}\n{TEST_IP2}\n")
+            executor = _make_executor(state_dir=Path(tmp))
+            result = executor._read_allowed_ips()
             self.assertEqual(result, [TEST_IP1, TEST_IP2])
 
-    def test_missing_file(self) -> None:
-        """Return empty list for missing resolved file."""
+    def test_reads_both_files(self) -> None:
+        """Read and merge IPs from both profile.allowed and live.allowed."""
         with tempfile.TemporaryDirectory() as tmp:
-            executor = _make_executor(resolved_dir=Path(tmp))
-            result = executor._read_resolved_ips("nonexistent")
+            state.profile_allowed_path(Path(tmp)).write_text(f"{TEST_IP1}\n")
+            state.live_allowed_path(Path(tmp)).write_text(f"{TEST_IP2}\n")
+            executor = _make_executor(state_dir=Path(tmp))
+            result = executor._read_allowed_ips()
+            self.assertEqual(result, [TEST_IP1, TEST_IP2])
+
+    def test_deduplicates(self) -> None:
+        """Duplicate IPs across files are deduplicated."""
+        with tempfile.TemporaryDirectory() as tmp:
+            state.profile_allowed_path(Path(tmp)).write_text(f"{TEST_IP1}\n")
+            state.live_allowed_path(Path(tmp)).write_text(f"{TEST_IP1}\n{TEST_IP2}\n")
+            executor = _make_executor(state_dir=Path(tmp))
+            result = executor._read_allowed_ips()
+            self.assertEqual(result, [TEST_IP1, TEST_IP2])
+
+    def test_missing_files(self) -> None:
+        """Return empty list when no allowlist files exist."""
+        with tempfile.TemporaryDirectory() as tmp:
+            executor = _make_executor(state_dir=Path(tmp))
+            result = executor._read_allowed_ips()
             self.assertEqual(result, [])
 
-    def test_rejects_path_traversal(self) -> None:
-        """Return empty list for names with path traversal."""
-        executor = _make_executor()
-        self.assertEqual(executor._read_resolved_ips(FORBIDDEN_TRAVERSAL), [])
-
     def test_skips_blank_lines(self) -> None:
-        """Skip blank lines in resolved file."""
+        """Skip blank lines in allowlist files."""
         with tempfile.TemporaryDirectory() as tmp:
-            (Path(tmp) / "test-ctr.resolved").write_text(f"\n{TEST_IP1}\n\n")
-            executor = _make_executor(resolved_dir=Path(tmp))
-            result = executor._read_resolved_ips("test-ctr")
+            state.profile_allowed_path(Path(tmp)).write_text(f"\n{TEST_IP1}\n\n")
+            executor = _make_executor(state_dir=Path(tmp))
+            result = executor._read_allowed_ips()
             self.assertEqual(result, [TEST_IP1])
 
 
@@ -220,7 +233,7 @@ class TestHookExecutorClassifyLogging(unittest.TestCase):
     def test_rfc1918_logged_as_note(self) -> None:
         """RFC1918 IPs produce a 'note' log entry."""
         with tempfile.TemporaryDirectory() as tmp:
-            (Path(tmp) / "test-ctr.resolved").write_text(f"{RFC1918_HOST}\n")
+            state.profile_allowed_path(Path(tmp)).write_text(f"{RFC1918_HOST}\n")
             runner = mock.MagicMock()
             runner.nft_via_nsenter.side_effect = ["", "", "valid"]
             audit = mock.MagicMock()
@@ -233,7 +246,7 @@ class TestHookExecutorClassifyLogging(unittest.TestCase):
                 runner=runner,
                 audit=audit,
                 ruleset=ruleset,
-                resolved_dir=Path(tmp),
+                state_dir=Path(tmp),
             )
             executor.apply("test-ctr", "42")
 
@@ -250,41 +263,43 @@ class TestHookExecutorCacheReadError(unittest.TestCase):
 
     def test_oserror_raises_runtime(self) -> None:
         """OSError reading resolved cache raises RuntimeError."""
-        runner = mock.MagicMock()
-        runner.nft_via_nsenter.return_value = ""
-        audit = mock.MagicMock()
-        ruleset = mock.MagicMock()
-        ruleset.build_hook.return_value = "hook"
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = mock.MagicMock()
+            runner.nft_via_nsenter.return_value = ""
+            audit = mock.MagicMock()
+            ruleset = mock.MagicMock()
+            ruleset.build_hook.return_value = "hook"
 
-        executor = HookExecutor(
-            runner=runner,
-            audit=audit,
-            ruleset=ruleset,
-            resolved_dir=FAKE_RESOLVED_DIR,
-        )
-        with mock.patch.object(executor, "_read_resolved_ips", side_effect=OSError("disk fail")):
-            with self.assertRaises(RuntimeError):
-                executor.apply("test-ctr", "42")
+            executor = HookExecutor(
+                runner=runner,
+                audit=audit,
+                ruleset=ruleset,
+                state_dir=Path(tmp),
+            )
+            with mock.patch.object(executor, "_read_allowed_ips", side_effect=OSError("disk fail")):
+                with self.assertRaises(RuntimeError):
+                    executor.apply("test-ctr", "42")
 
     def test_unicodeerror_raises_runtime(self) -> None:
         """UnicodeError reading resolved cache raises RuntimeError."""
-        runner = mock.MagicMock()
-        runner.nft_via_nsenter.return_value = ""
-        audit = mock.MagicMock()
-        ruleset = mock.MagicMock()
-        ruleset.build_hook.return_value = "hook"
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = mock.MagicMock()
+            runner.nft_via_nsenter.return_value = ""
+            audit = mock.MagicMock()
+            ruleset = mock.MagicMock()
+            ruleset.build_hook.return_value = "hook"
 
-        executor = HookExecutor(
-            runner=runner,
-            audit=audit,
-            ruleset=ruleset,
-            resolved_dir=FAKE_RESOLVED_DIR,
-        )
-        with mock.patch.object(
-            executor, "_read_resolved_ips", side_effect=UnicodeError("bad encoding")
-        ):
-            with self.assertRaises(RuntimeError):
-                executor.apply("test-ctr", "42")
+            executor = HookExecutor(
+                runner=runner,
+                audit=audit,
+                ruleset=ruleset,
+                state_dir=Path(tmp),
+            )
+            with mock.patch.object(
+                executor, "_read_allowed_ips", side_effect=UnicodeError("bad encoding")
+            ):
+                with self.assertRaises(RuntimeError):
+                    executor.apply("test-ctr", "42")
 
 
 # ── Helper ──────────────────────────────────────────────
@@ -295,12 +310,12 @@ def _make_executor(
     runner: mock.MagicMock | None = None,
     audit: mock.MagicMock | None = None,
     ruleset: mock.MagicMock | None = None,
-    resolved_dir: Path | None = None,
+    state_dir: Path | None = None,
 ) -> HookExecutor:
     """Create a HookExecutor with mock collaborators."""
     return HookExecutor(
         runner=runner or mock.MagicMock(),
         audit=audit or mock.MagicMock(),
         ruleset=ruleset or mock.MagicMock(),
-        resolved_dir=resolved_dir or FAKE_RESOLVED_DIR,
+        state_dir=state_dir or Path(tempfile.mkdtemp()),
     )

@@ -1,13 +1,12 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for the ProfileLoader class (OOP API)."""
+"""Tests for the ProfileLoader class."""
 
 import tempfile
 import unittest
 from pathlib import Path
 
-from terok_shield.config import ShieldConfig
 from terok_shield.profiles import ProfileLoader
 
 from ..testfs import FAKE_PROFILES_DIR, FORBIDDEN_TRAVERSAL, NONEXISTENT_DIR
@@ -22,12 +21,6 @@ class TestProfileLoaderInit(unittest.TestCase):
         loader = ProfileLoader(user_dir=FAKE_PROFILES_DIR)
         self.assertEqual(loader._user_dir, FAKE_PROFILES_DIR)
         self.assertIsNotNone(loader._bundled_dir)
-
-    def test_from_config(self) -> None:
-        """Construct from ShieldConfig."""
-        config = ShieldConfig()
-        loader = ProfileLoader.from_config(config)
-        self.assertEqual(loader._user_dir, config.paths.profiles_dir)
 
 
 class TestProfileLoaderFindProfile(unittest.TestCase):

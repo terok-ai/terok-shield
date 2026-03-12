@@ -30,6 +30,11 @@ depends_on = [
     "terok_shield.nft_constants",
 ]
 
+# Per-container state bundle layout — zero dependencies
+[[modules]]
+path = "terok_shield.state"
+depends_on = []
+
 # Shared utilities — standalone, no internal deps
 [[modules]]
 path = "terok_shield.util"
@@ -45,40 +50,32 @@ depends_on = []
 path = "terok_shield.run"
 depends_on = []
 
-# Configuration — depends on nft_constants for network defaults
+# Configuration — pure data definitions, no dependencies
 [[modules]]
 path = "terok_shield.config"
-depends_on = [
-    "terok_shield.nft_constants",
-]
+depends_on = []
 
-# Audit logging — depends on config + validation
+# Audit logging — no internal deps (takes explicit path)
 [[modules]]
 path = "terok_shield.audit"
-depends_on = [
-    "terok_shield.config",
-    "terok_shield.validation",
-]
+depends_on = []
 
-# DNS resolution and caching — depends on config + run + util + validation
+# DNS resolution and caching — depends on run + util
 [[modules]]
 path = "terok_shield.dns"
 depends_on = [
-    "terok_shield.config",
     "terok_shield.run",
     "terok_shield.util",
-    "terok_shield.validation",
 ]
 
-# Profile loading — depends on config + validation
+# Profile loading — depends on validation
 [[modules]]
 path = "terok_shield.profiles"
 depends_on = [
-    "terok_shield.config",
     "terok_shield.validation",
 ]
 
-# OCI hook entry point — depends on audit, config, nft, run, validation
+# OCI hook entry point — depends on audit, config, nft, run, state
 [[modules]]
 path = "terok_shield.oci_hook"
 depends_on = [
@@ -86,7 +83,7 @@ depends_on = [
     "terok_shield.config",
     "terok_shield.nft",
     "terok_shield.run",
-    "terok_shield.validation",
+    "terok_shield.state",
 ]
 
 # Hook mode — OCI hooks, per-container netns
@@ -96,15 +93,16 @@ depends_on = [
     "terok_shield.config",
     "terok_shield.nft",
     "terok_shield.run",
+    "terok_shield.state",
     "terok_shield.util",
-    "terok_shield.validation",
 ]
 
-# CLI — depends on package root (public API)
+# CLI — depends on package root (public API) + audit for logs scanning
 [[modules]]
 path = "terok_shield.cli"
 depends_on = [
     "terok_shield",
+    "terok_shield.audit",
 ]
 
 # Package root — public API, dispatches to mode modules
@@ -118,5 +116,6 @@ depends_on = [
     "terok_shield.nft",
     "terok_shield.profiles",
     "terok_shield.run",
+    "terok_shield.state",
     "terok_shield.util",
 ]

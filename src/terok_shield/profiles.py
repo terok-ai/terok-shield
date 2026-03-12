@@ -3,15 +3,13 @@
 
 """Profile loading and composition from .txt allowlists.
 
-Provides ``ProfileLoader`` (Repository pattern) -- finds, reads, and
-merges allowlist profiles from user and bundled directories.
+Provides ``ProfileLoader`` -- finds, reads, and merges allowlist
+profiles from user and bundled directories.
 """
 
 from importlib import resources as importlib_resources
 from pathlib import Path
-from typing import Self
 
-from .config import ShieldConfig
 from .validation import parse_entries as _parse_entries, validate_safe_name
 
 _BUNDLED_PACKAGE = "terok_shield.resources.dns"
@@ -25,11 +23,11 @@ def _bundled_dir() -> Path:
     return Path(str(importlib_resources.files(_BUNDLED_PACKAGE)))
 
 
-# ── ProfileLoader (Repository) ──────────────────────────
+# ── ProfileLoader ────────────────────────────────────────
 
 
 class ProfileLoader:
-    """Repository: loads and composes .txt allowlist profiles.
+    """Loads and composes .txt allowlist profiles.
 
     Searches user profiles first (overriding bundled), then falls
     back to the bundled profiles shipped with the package.
@@ -49,11 +47,6 @@ class ProfileLoader:
         """
         self._user_dir = user_dir
         self._bundled_dir = bundled_dir or _bundled_dir()
-
-    @classmethod
-    def from_config(cls, config: ShieldConfig) -> Self:
-        """Construct from a ``ShieldConfig``, reading the profiles dir."""
-        return cls(user_dir=config.paths.profiles_dir)
 
     def _find_profile(self, name: str) -> Path | None:
         """Find a profile file by name.  User profiles override bundled."""

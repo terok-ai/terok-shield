@@ -3,6 +3,9 @@
 
 """Integration tests: rules and logs inspection (API + CLI)."""
 
+import tempfile
+from pathlib import Path
+
 import pytest
 
 from terok_shield import Shield, ShieldConfig
@@ -11,7 +14,13 @@ from terok_shield.nft_constants import BYPASS_LOG_PREFIX
 
 from ..conftest import nft_missing, podman_missing
 
-# ── Public API rules ─────────────────────────────────────
+
+def _shield() -> Shield:
+    """Create a Shield with a disposable state_dir (for nft-only ops)."""
+    return Shield(ShieldConfig(state_dir=Path(tempfile.mkdtemp())))
+
+
+# -- Public API rules -----------------------------------------
 
 
 @pytest.mark.needs_podman
@@ -24,12 +33,12 @@ class TestRulesAPI:
 
     def test_shield_rules_returns_ruleset(self, shielded_container: str) -> None:
         """``Shield.rules()`` returns text containing ``terok_shield``."""
-        rules = Shield(ShieldConfig()).rules(shielded_container)
+        rules = _shield().rules(shielded_container)
         assert "terok_shield" in rules
         assert "allow_v4" in rules
 
 
-# ── CLI rules ────────────────────────────────────────────
+# -- CLI rules ------------------------------------------------
 
 
 @pytest.mark.needs_podman
@@ -58,13 +67,13 @@ class TestRulesCLI:
         self, shielded_container: str, capsys: pytest.CaptureFixture
     ) -> None:
         """``main(["rules", container])`` shows State: down after bypass."""
-        Shield(ShieldConfig()).down(shielded_container)
+        _shield().down(shielded_container)
         main(["rules", shielded_container])
         captured = capsys.readouterr()
         assert "State: down" in captured.out
 
 
-# ── Rules content in bypass mode ────────────────────────
+# -- Rules content in bypass mode ----------------------------
 
 
 @pytest.mark.needs_podman
@@ -77,7 +86,7 @@ class TestRulesBypassAPI:
 
     def test_rules_contain_bypass_prefix(self, shielded_container: str) -> None:
         """Bypass ruleset contains the TEROK_SHIELD_BYPASS log prefix."""
-        shield = Shield(ShieldConfig())
+        shield = _shield()
         shield.down(shielded_container)
         rules = shield.rules(shielded_container)
         assert BYPASS_LOG_PREFIX in rules
@@ -85,7 +94,7 @@ class TestRulesBypassAPI:
 
     def test_rules_restored_after_up(self, shielded_container: str) -> None:
         """Rules revert to deny-all after shield.up()."""
-        shield = Shield(ShieldConfig())
+        shield = _shield()
         shield.down(shielded_container)
         assert "policy accept" in shield.rules(shielded_container)
 
@@ -95,7 +104,7 @@ class TestRulesBypassAPI:
         assert BYPASS_LOG_PREFIX not in rules
 
 
-# ── CLI logs ─────────────────────────────────────────────
+# -- CLI logs -------------------------------------------------
 
 
 @pytest.mark.needs_podman

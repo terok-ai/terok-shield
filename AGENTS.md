@@ -142,6 +142,51 @@ make test-map               # generate integration test map (Markdown)
 - `tests/integration/helpers.py` provides assertion helpers: `assert_blocked`, `assert_reachable`, `assert_ruleset_applied`, `exec_in_container`, `wget`
 - nft commands run inside the container's network namespace via `podman unshare nsenter -t PID -n nft` (not the host netns — rootless nft only has `CAP_NET_ADMIN` inside container-owned namespaces)
 
+## Architecture
+
+The library is a pure function of its inputs. Given a `ShieldConfig` with `state_dir`, it writes to that directory and nowhere else. No env-var reading, no config-file parsing inside the library.
+
+### Core types
+
+- **`ShieldConfig`** (frozen dataclass) — per-container configuration with required `state_dir: Path`
+- **`Shield`** (facade) — public API; delegates to collaborators injected via constructor
+- **`HookMode`** (strategy) — nft-based hook mode implementation of `ShieldModeBackend` protocol
+- **`HookExecutor`** (command) — applies nft ruleset inside a container's netns
+- **`AuditLogger`** — writes JSONL audit events to a single file
+- **`DnsResolver`** — stateless DNS resolution; takes explicit `cache_path` parameter
+- **`ProfileLoader`** — loads `.txt` allowlists from bundled + user directories
+- **`RulesetBuilder`** — generates and verifies nft rulesets
+
+### Per-container state bundle
+
+Each container gets an isolated `state_dir` with this layout:
+
+```
+{state_dir}/
+├── hooks/
+│   ├── terok-shield-createRuntime.json
+│   └── terok-shield-poststop.json
+├── terok-shield-hook              # entrypoint script
+├── profile.allowed                # IPs from DNS resolution
+├── live.allowed                   # IPs from allow/deny
+└── audit.jsonl                    # per-container audit log
+```
+
+Path functions in `state.py` derive all paths from `state_dir`. `BUNDLE_VERSION` in `state.py` provides a cross-process contract between `pre_start()` and the OCI hook.
+
+### Data flow
+
+1. **CLI / terok** constructs `ShieldConfig(state_dir=...)` and creates `Shield(config)`
+2. **`Shield.pre_start()`** installs hooks, resolves DNS → writes `profile.allowed`, sets OCI annotations (`state_dir`, `loopback_ports`, `version`), returns podman args
+3. **OCI hook** (`hook_main()`) reads annotations, constructs `HookExecutor(state_dir=...)`, reads `profile.allowed` + `live.allowed`, applies nft ruleset
+4. **`Shield.allow()` / `deny()`** modify nft sets immediately + persist to `live.allowed`
+5. **`Shield.up()`** re-applies ruleset, restoring IPs from both allowlist files
+
+### Configuration layer separation
+
+- **Library** (`config.py`): Pure data definitions — `ShieldConfig`, `ShieldMode`, `ShieldState`, `ShieldModeBackend` protocol, annotation constants
+- **CLI** (`cli.py`): Config construction — reads `config.yml`, env vars, XDG paths; builds `ShieldConfig` for each command
+
 ## Key Guidelines
 
 - **Fail-closed**: Any hook/ruleset failure must prevent the container from starting unrestricted

@@ -11,6 +11,7 @@ import pytest
 
 _NONEXISTENT_PID = "4000000"  # Well above typical PID range
 
+from terok_shield import state
 from terok_shield.audit import AuditLogger
 from terok_shield.nft import RulesetBuilder
 from terok_shield.oci_hook import HookExecutor
@@ -19,40 +20,38 @@ from tests.testnet import ALLOWED_TARGET_IPS, IPV6_CLOUDFLARE, TEST_IP1, TEST_IP
 
 from ..conftest import nft_missing, podman_missing
 
-# ── Filesystem audit (no container needed) ───────────────
+# -- Filesystem audit (no container needed) -------------------
 
 
 @pytest.mark.needs_host_features
 class TestAuditLive:
     """Audit logging with real temp directories."""
 
-    def test_log_and_tail(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_log_and_tail(self, tmp_path: Path) -> None:
         """Write audit events and read them back."""
-        monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", str(tmp_path))
-        audit = AuditLogger(logs_dir=tmp_path / "logs")
+        audit = AuditLogger(audit_path=state.audit_path(tmp_path))
 
         audit.log_event("test-ctr", "setup", detail="integration test")
         audit.log_event("test-ctr", "allowed", dest=TEST_IP1)
         audit.log_event("test-ctr", "denied", dest=TEST_IP2)
 
-        events = list(audit.tail_log("test-ctr", n=10))
+        events = list(audit.tail_log(n=10))
         assert len(events) == 3
         assert events[0]["action"] == "setup"
         assert events[1]["dest"] == TEST_IP1
         assert events[2]["action"] == "denied"
 
-    def test_jsonl_format(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_jsonl_format(self, tmp_path: Path) -> None:
         """Each line must be valid compact JSON."""
-        monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", str(tmp_path))
-        audit = AuditLogger(logs_dir=tmp_path / "logs")
+        audit_path = state.audit_path(tmp_path)
+        audit = AuditLogger(audit_path=audit_path)
 
         audit.log_event("fmt-test", "setup")
         audit.log_event("fmt-test", "teardown")
 
-        log_file = tmp_path / "logs" / "fmt-test.jsonl"
-        assert log_file.is_file()
+        assert audit_path.is_file()
 
-        for line in log_file.read_text().splitlines():
+        for line in audit_path.read_text().splitlines():
             entry = json.loads(line)
             assert "ts" in entry
             assert "container" in entry
@@ -61,40 +60,27 @@ class TestAuditLive:
             assert ", " not in line
             assert ": " not in line
 
-    def test_list_log_files(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """list_log_files returns container names with logs."""
-        monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", str(tmp_path))
-        audit = AuditLogger(logs_dir=tmp_path / "logs")
+    def test_tail_empty_returns_no_events(self, tmp_path: Path) -> None:
+        """Tailing when no log file exists returns no events."""
+        audit = AuditLogger(audit_path=state.audit_path(tmp_path))
 
-        audit.log_event("alpha", "setup")
-        audit.log_event("bravo", "setup")
-
-        names = audit.list_log_files()
-        assert "alpha" in names
-        assert "bravo" in names
-
-    def test_tail_empty_container(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Tailing a non-existent container returns no events."""
-        monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", str(tmp_path))
-        audit = AuditLogger(logs_dir=tmp_path / "logs")
-
-        events = list(audit.tail_log("nonexistent", n=10))
+        events = list(audit.tail_log(n=10))
         assert events == []
 
 
-# ── Hook audit trail (container needed) ──────────────────
+# -- Hook audit trail (container needed) ----------------------
 
 
 def _make_executor(tmp: str) -> HookExecutor:
     """Create a HookExecutor wired to a temp directory."""
     runner = SubprocessRunner()
-    audit = AuditLogger(logs_dir=Path(tmp) / "logs")
+    audit = AuditLogger(audit_path=state.audit_path(Path(tmp)))
     ruleset = RulesetBuilder()
     return HookExecutor(
         runner=runner,
         audit=audit,
         ruleset=ruleset,
-        resolved_dir=Path(tmp) / "resolved",
+        state_dir=Path(tmp),
     )
 
 
@@ -115,7 +101,7 @@ class TestApplyHookAudit:
             executor = _make_executor(tmp)
             executor.apply(container, container_pid)
 
-            log_file = Path(tmp) / "logs" / f"{container}.jsonl"
+            log_file = state.audit_path(Path(tmp))
             assert log_file.is_file(), "Audit log must be created"
             entries = [json.loads(line) for line in log_file.read_text().splitlines()]
             details = [e.get("detail", "") for e in entries]
@@ -135,15 +121,13 @@ class TestApplyHookAudit:
         """Audit entries include actual resolved IPs."""
         with tempfile.TemporaryDirectory() as tmp:
             monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", tmp)
-            resolved_dir = Path(tmp) / "resolved"
-            resolved_dir.mkdir(parents=True)
             resolved_ips = [*ALLOWED_TARGET_IPS, IPV6_CLOUDFLARE]
-            (resolved_dir / f"{container}.resolved").write_text("\n".join(resolved_ips) + "\n")
+            state.profile_allowed_path(Path(tmp)).write_text("\n".join(resolved_ips) + "\n")
 
             executor = _make_executor(tmp)
             executor.apply(container, container_pid)
 
-            log_file = Path(tmp) / "logs" / f"{container}.jsonl"
+            log_file = state.audit_path(Path(tmp))
             entries = [json.loads(line) for line in log_file.read_text().splitlines()]
             details = [e.get("detail", "") for e in entries]
             # IPs must appear in the tagged detail lines
@@ -160,7 +144,7 @@ class TestApplyHookAudit:
             with pytest.raises(RuntimeError):
                 executor.apply(container, _NONEXISTENT_PID)
 
-            log_file = Path(tmp) / "logs" / f"{container}.jsonl"
+            log_file = state.audit_path(Path(tmp))
             assert log_file.is_file(), "Audit log must be created even on failure"
             entries = [json.loads(line) for line in log_file.read_text().splitlines()]
             assert any(e.get("action") == "error" for e in entries)

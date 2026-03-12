@@ -8,11 +8,12 @@ immediately when terok starts depending on terok-shield.
 """
 
 import dataclasses
+import tempfile
 import unittest
 from pathlib import Path
 
 import terok_shield
-from terok_shield import ExecError, ShieldConfig, ShieldMode, ShieldPaths, ShieldState
+from terok_shield import ExecError, ShieldConfig, ShieldMode, ShieldState
 
 EXPECTED_ALL = [
     "AuditLogger",
@@ -24,10 +25,8 @@ EXPECTED_ALL = [
     "Shield",
     "ShieldConfig",
     "ShieldMode",
-    "ShieldPaths",
     "ShieldState",
     "SubprocessRunner",
-    "load_shield_config",
 ]
 
 
@@ -68,21 +67,30 @@ class TestAPISurface(unittest.TestCase):
         names = [f.name for f in dataclasses.fields(ShieldConfig)]
         self.assertEqual(
             names,
-            ["mode", "default_profiles", "loopback_ports", "audit_enabled", "paths"],
+            [
+                "state_dir",
+                "mode",
+                "default_profiles",
+                "loopback_ports",
+                "audit_enabled",
+                "profiles_dir",
+            ],
         )
 
-        cfg = ShieldConfig()
-        self.assertEqual(cfg.mode, ShieldMode.HOOK)
-        self.assertEqual(cfg.default_profiles, ("dev-standard",))
-        self.assertEqual(cfg.loopback_ports, ())
-        self.assertIs(cfg.audit_enabled, True)
-        self.assertIsInstance(cfg.paths, ShieldPaths)
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = ShieldConfig(state_dir=Path(tmp))
+            self.assertEqual(cfg.mode, ShieldMode.HOOK)
+            self.assertEqual(cfg.default_profiles, ("dev-standard",))
+            self.assertEqual(cfg.loopback_ports, ())
+            self.assertIs(cfg.audit_enabled, True)
+            self.assertIsNone(cfg.profiles_dir)
 
     def test_shield_config_frozen(self):
         """ShieldConfig is frozen — assignment raises FrozenInstanceError."""
-        cfg = ShieldConfig()
-        with self.assertRaises(dataclasses.FrozenInstanceError):
-            cfg.mode = ShieldMode.HOOK  # type: ignore[misc]
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = ShieldConfig(state_dir=Path(tmp))
+            with self.assertRaises(dataclasses.FrozenInstanceError):
+                cfg.mode = ShieldMode.HOOK  # type: ignore[misc]
 
     # ── ExecError ────────────────────────────────────────
 

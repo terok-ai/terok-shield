@@ -8,16 +8,18 @@ Public API for standalone use and integration with terok.
 The primary entry point is the ``Shield`` facade class:
 
     >>> from terok_shield import Shield, ShieldConfig
-    >>> shield = Shield(ShieldConfig())
-    >>> shield.setup()
+    >>> shield = Shield(ShieldConfig(state_dir=Path("/tmp/my-container")))
+    >>> shield.pre_start("my-container", ["dev-standard"])
 """
 
 from collections.abc import Iterator
+from pathlib import Path
 
 __version__ = "0.1.3"
 
+from . import state
 from .audit import AuditLogger
-from .config import ShieldConfig, ShieldMode, ShieldPaths, ShieldState, load_shield_config
+from .config import ShieldConfig, ShieldMode, ShieldState
 from .dns import DnsResolver
 from .nft import RulesetBuilder
 from .profiles import ProfileLoader
@@ -50,18 +52,23 @@ class Shield:
         """Create the shield facade.
 
         Args:
-            config: Shield configuration.
+            config: Shield configuration (must include state_dir).
             runner: Command runner (default: ``SubprocessRunner``).
-            audit: Audit logger (default: from config).
-            dns: DNS resolver (default: from config + runner).
-            profiles: Profile loader (default: from config).
+            audit: Audit logger (default: from config.state_dir).
+            dns: DNS resolver (default: from runner).
+            profiles: Profile loader (default: from config.profiles_dir).
             ruleset: Ruleset builder (default: from config loopback_ports).
         """
         self.config = config
         self.runner = runner or SubprocessRunner()
-        self.audit = audit or AuditLogger.from_config(config)
-        self.dns = dns or DnsResolver.from_config(config, self.runner)
-        self.profiles = profiles or ProfileLoader.from_config(config)
+        self.audit = audit or AuditLogger(
+            audit_path=state.audit_path(config.state_dir),
+            enabled=config.audit_enabled,
+        )
+        self.dns = dns or DnsResolver(runner=self.runner)
+        self.profiles = profiles or ProfileLoader(
+            user_dir=config.profiles_dir or Path("/nonexistent"),
+        )
         self.ruleset = ruleset or RulesetBuilder(loopback_ports=config.loopback_ports)
         self._mode = self._create_mode(config.mode)
 
@@ -80,17 +87,12 @@ class Shield:
             )
         raise ValueError(f"Unsupported shield mode: {mode!r}")
 
-    def setup(self) -> None:
-        """Run shield setup (install hooks)."""
-        self._mode.setup()
-
     def status(self) -> dict:
         """Return current shield status information."""
         return {
             "mode": self.config.mode.value,
             "profiles": self.profiles.list_profiles(),
             "audit_enabled": self.config.audit_enabled,
-            "log_files": self.audit.list_log_files(),
         }
 
     def pre_start(self, container: str, profiles: list[str] | None = None) -> list[str]:
@@ -167,19 +169,16 @@ class Shield:
         if not entries:
             return []
         max_age = 0 if force else 3600
-        return self.dns.resolve_and_cache(entries, container, max_age=max_age)
-
-    def log_files(self) -> list[str]:
-        """Return container names that have audit logs."""
-        return self.audit.list_log_files()
+        cache_path = state.profile_allowed_path(self.config.state_dir)
+        return self.dns.resolve_and_cache(entries, cache_path, max_age=max_age)
 
     def profiles_list(self) -> list[str]:
         """List available profile names."""
         return self.profiles.list_profiles()
 
-    def tail_log(self, container: str, n: int = 50) -> Iterator[dict]:
-        """Yield the last *n* audit events for a container."""
-        return self.audit.tail_log(container, n)
+    def tail_log(self, n: int = 50) -> Iterator[dict]:
+        """Yield the last *n* audit events."""
+        return self.audit.tail_log(n)
 
     def compose_profiles(self, names: list[str]) -> list[str]:
         """Load and merge multiple profiles."""
@@ -196,8 +195,6 @@ __all__ = [
     "Shield",
     "ShieldConfig",
     "ShieldMode",
-    "ShieldPaths",
     "ShieldState",
     "SubprocessRunner",
-    "load_shield_config",
 ]

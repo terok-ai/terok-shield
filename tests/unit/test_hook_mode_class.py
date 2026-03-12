@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for the HookMode class (OOP API)."""
+"""Tests for the HookMode class."""
 
 import json
 import tempfile
@@ -9,16 +9,17 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from terok_shield import state
 from terok_shield.config import ANNOTATION_KEY, ShieldConfig, ShieldState
 from terok_shield.mode_hook import HookMode, install_hooks
 from terok_shield.nft import bypass_ruleset, hook_ruleset
 from terok_shield.run import ExecError
 
-from ..testfs import NONEXISTENT_DIR
 from ..testnet import IPV6_CLOUDFLARE, TEST_DOMAIN, TEST_IP1
 
 
 def _make_hook_mode(
+    tmp_path: Path | None = None,
     config: ShieldConfig | None = None,
     *,
     runner: mock.MagicMock | None = None,
@@ -28,8 +29,12 @@ def _make_hook_mode(
     ruleset: mock.MagicMock | None = None,
 ) -> HookMode:
     """Create a HookMode with mock collaborators."""
+    if config is None:
+        if tmp_path is None:
+            tmp_path = Path(tempfile.mkdtemp())
+        config = ShieldConfig(state_dir=tmp_path)
     return HookMode(
-        config=config or ShieldConfig(),
+        config=config,
         runner=runner or mock.MagicMock(),
         audit=audit or mock.MagicMock(),
         dns=dns or mock.MagicMock(),
@@ -48,103 +53,80 @@ class TestHookModeInit(unittest.TestCase):
         dns = mock.MagicMock()
         profiles = mock.MagicMock()
         ruleset = mock.MagicMock()
-        config = ShieldConfig()
-        mode = HookMode(
-            config=config,
-            runner=runner,
-            audit=audit,
-            dns=dns,
-            profiles=profiles,
-            ruleset=ruleset,
-        )
-        self.assertIs(mode._config, config)
-        self.assertIs(mode._runner, runner)
-        self.assertIs(mode._audit, audit)
-        self.assertIs(mode._dns, dns)
-        self.assertIs(mode._profiles, profiles)
-        self.assertIs(mode._ruleset, ruleset)
-
-
-class TestHookModeSetup(unittest.TestCase):
-    """Test HookMode.setup()."""
-
-    def test_installs_hooks(self) -> None:
-        """setup() calls ensure_dirs and install_hooks with config paths."""
         with tempfile.TemporaryDirectory() as tmp:
-            from terok_shield.config import ShieldPaths
-
-            paths = ShieldPaths(state_root=Path(tmp) / "state", config_root=Path(tmp) / "cfg")
-            config = ShieldConfig(paths=paths)
-            mode = _make_hook_mode(config=config)
-            with mock.patch("terok_shield.mode_hook.install_hooks") as mock_install:
-                mode.setup()
-                mock_install.assert_called_once_with(
-                    hook_entrypoint=config.paths.hook_entrypoint,
-                    hooks_dir=config.paths.hooks_dir,
-                )
-            # ensure_dirs was called — check dirs only it creates (not install_hooks)
-            self.assertTrue(paths.state_root.is_dir())
-            self.assertTrue(paths.logs_dir.is_dir())
-            self.assertTrue(paths.resolved_dir.is_dir())
-            self.assertTrue(paths.profiles_dir.is_dir())
+            config = ShieldConfig(state_dir=Path(tmp))
+            mode = HookMode(
+                config=config,
+                runner=runner,
+                audit=audit,
+                dns=dns,
+                profiles=profiles,
+                ruleset=ruleset,
+            )
+            self.assertIs(mode._config, config)
+            self.assertIs(mode._runner, runner)
+            self.assertIs(mode._audit, audit)
+            self.assertIs(mode._dns, dns)
+            self.assertIs(mode._profiles, profiles)
+            self.assertIs(mode._ruleset, ruleset)
 
 
 class TestHookModePreStart(unittest.TestCase):
     """Test HookMode.pre_start()."""
 
-    def setUp(self):
-        """Create temp dir with hooks/entrypoint for each test."""
-        self._tmpdir_obj = tempfile.TemporaryDirectory()
-        self._tmpdir = Path(self._tmpdir_obj.name)
-        hooks_dir = self._tmpdir / "hooks"
-        hooks_dir.mkdir()
-        (hooks_dir / "terok-shield-createRuntime.json").touch()
-        ep = self._tmpdir / "terok-shield-hook"
-        ep.write_text("#!/bin/sh\n")
-        ep.chmod(0o755)
-        self._config = ShieldConfig(
-            paths=mock.MagicMock(
-                hooks_dir=hooks_dir,
-                hook_entrypoint=ep,
-                resolved_dir=self._tmpdir / "resolved",
-            ),
-            loopback_ports=(8080,),
-        )
-
-    def tearDown(self):
-        self._tmpdir_obj.cleanup()
-
     @mock.patch("os.geteuid", return_value=1000)
     def test_pasta_args(self, _euid) -> None:
         """Pre-start returns pasta network args for rootless mode."""
-        runner = mock.MagicMock()
-        runner.run.return_value = json.dumps({"host": {"rootlessNetworkCmd": "pasta"}})
-        profiles = mock.MagicMock()
-        profiles.compose_profiles.return_value = [TEST_DOMAIN]
-        dns = mock.MagicMock()
-        mode = _make_hook_mode(
-            config=self._config,
-            runner=runner,
-            profiles=profiles,
-            dns=dns,
-        )
-        args = mode.pre_start("test", ["dev-standard"])
-        self.assertIn("--network", args)
-        net_idx = args.index("--network") + 1
-        self.assertIn("pasta:", args[net_idx])
-        self.assertIn("-T,8080", args[net_idx])
+        with tempfile.TemporaryDirectory() as tmp:
+            config = ShieldConfig(state_dir=Path(tmp), loopback_ports=(8080,))
+            runner = mock.MagicMock()
+            runner.run.return_value = json.dumps({"host": {"rootlessNetworkCmd": "pasta"}})
+            profiles_mock = mock.MagicMock()
+            profiles_mock.compose_profiles.return_value = [TEST_DOMAIN]
+            dns = mock.MagicMock()
+            mode = _make_hook_mode(
+                config=config,
+                runner=runner,
+                profiles=profiles_mock,
+                dns=dns,
+            )
+            args = mode.pre_start("test", ["dev-standard"])
+            self.assertIn("--network", args)
+            net_idx = args.index("--network") + 1
+            self.assertIn("pasta:", args[net_idx])
+            self.assertIn("-T,8080", args[net_idx])
 
-    def test_missing_hook_raises(self) -> None:
-        """Pre-start raises RuntimeError if hook not installed."""
-        config = ShieldConfig(
-            paths=mock.MagicMock(
-                hooks_dir=NONEXISTENT_DIR,
-                hook_entrypoint=NONEXISTENT_DIR / "ep",
-            ),
-        )
-        mode = _make_hook_mode(config=config)
-        with self.assertRaises(RuntimeError):
-            mode.pre_start("test", ["dev-standard"])
+    def test_installs_hooks(self) -> None:
+        """pre_start installs hooks and creates state dirs."""
+        with tempfile.TemporaryDirectory() as tmp:
+            config = ShieldConfig(state_dir=Path(tmp))
+            profiles_mock = mock.MagicMock()
+            profiles_mock.compose_profiles.return_value = []
+            dns = mock.MagicMock()
+            mode = _make_hook_mode(config=config, profiles=profiles_mock, dns=dns)
+            with mock.patch("os.geteuid", return_value=0):
+                mode.pre_start("test", ["dev-standard"])
+            # Check hooks were installed
+            self.assertTrue(state.hooks_dir(Path(tmp)).is_dir())
+            self.assertTrue(state.hook_entrypoint(Path(tmp)).is_file())
+
+    def test_annotations_include_state_dir(self) -> None:
+        """pre_start includes state_dir annotation."""
+        with tempfile.TemporaryDirectory() as tmp:
+            config = ShieldConfig(state_dir=Path(tmp), loopback_ports=(1234,))
+            profiles_mock = mock.MagicMock()
+            profiles_mock.compose_profiles.return_value = []
+            dns = mock.MagicMock()
+            mode = _make_hook_mode(config=config, profiles=profiles_mock, dns=dns)
+            with mock.patch("os.geteuid", return_value=0):
+                args = mode.pre_start("test", ["dev-standard"])
+            # Find state_dir annotation
+            for i, arg in enumerate(args):
+                if arg == "--annotation" and "terok.shield.state_dir=" in args[i + 1]:
+                    self.assertIn(str(Path(tmp)), args[i + 1])
+                    break
+            else:
+                self.fail("state_dir annotation not found in args")
 
 
 class TestHookModeAllowDeny(unittest.TestCase):
@@ -152,39 +134,70 @@ class TestHookModeAllowDeny(unittest.TestCase):
 
     def test_allow_ipv4(self) -> None:
         """allow_ip adds element to allow_v4 set."""
-        runner = mock.MagicMock()
-        ruleset = mock.MagicMock()
-        ruleset.safe_ip.return_value = TEST_IP1
-        mode = _make_hook_mode(runner=runner, ruleset=ruleset)
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = mock.MagicMock()
+            ruleset = mock.MagicMock()
+            ruleset.safe_ip.return_value = TEST_IP1
+            mode = _make_hook_mode(tmp_path=Path(tmp), runner=runner, ruleset=ruleset)
 
-        mode.allow_ip("test-ctr", TEST_IP1)
-        runner.nft_via_nsenter.assert_called_once()
-        call_args = runner.nft_via_nsenter.call_args[0]
-        self.assertIn("add", call_args)
-        self.assertIn("allow_v4", call_args)
+            mode.allow_ip("test-ctr", TEST_IP1)
+            runner.nft_via_nsenter.assert_called_once()
+            call_args = runner.nft_via_nsenter.call_args[0]
+            self.assertIn("add", call_args)
+            self.assertIn("allow_v4", call_args)
+
+    def test_allow_persists_to_live_allowed(self) -> None:
+        """allow_ip persists IP to live.allowed file."""
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = mock.MagicMock()
+            ruleset = mock.MagicMock()
+            ruleset.safe_ip.return_value = TEST_IP1
+            mode = _make_hook_mode(tmp_path=Path(tmp), runner=runner, ruleset=ruleset)
+
+            mode.allow_ip("test-ctr", TEST_IP1)
+            live_path = state.live_allowed_path(Path(tmp))
+            self.assertTrue(live_path.is_file())
+            self.assertIn(TEST_IP1, live_path.read_text())
 
     def test_allow_ipv6(self) -> None:
         """allow_ip adds element to allow_v6 set for IPv6."""
-        runner = mock.MagicMock()
-        ruleset = mock.MagicMock()
-        ruleset.safe_ip.return_value = IPV6_CLOUDFLARE
-        mode = _make_hook_mode(runner=runner, ruleset=ruleset)
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = mock.MagicMock()
+            ruleset = mock.MagicMock()
+            ruleset.safe_ip.return_value = IPV6_CLOUDFLARE
+            mode = _make_hook_mode(tmp_path=Path(tmp), runner=runner, ruleset=ruleset)
 
-        mode.allow_ip("test-ctr", IPV6_CLOUDFLARE)
-        call_args = runner.nft_via_nsenter.call_args[0]
-        self.assertIn("allow_v6", call_args)
+            mode.allow_ip("test-ctr", IPV6_CLOUDFLARE)
+            call_args = runner.nft_via_nsenter.call_args[0]
+            self.assertIn("allow_v6", call_args)
 
     def test_deny_ipv4(self) -> None:
         """deny_ip removes element from allow_v4 set."""
-        runner = mock.MagicMock()
-        ruleset = mock.MagicMock()
-        ruleset.safe_ip.return_value = TEST_IP1
-        mode = _make_hook_mode(runner=runner, ruleset=ruleset)
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = mock.MagicMock()
+            ruleset = mock.MagicMock()
+            ruleset.safe_ip.return_value = TEST_IP1
+            mode = _make_hook_mode(tmp_path=Path(tmp), runner=runner, ruleset=ruleset)
 
-        mode.deny_ip("test-ctr", TEST_IP1)
-        call_args = runner.nft_via_nsenter.call_args[0]
-        self.assertIn("delete", call_args)
-        self.assertIn("allow_v4", call_args)
+            mode.deny_ip("test-ctr", TEST_IP1)
+            call_args = runner.nft_via_nsenter.call_args[0]
+            self.assertIn("delete", call_args)
+            self.assertIn("allow_v4", call_args)
+
+    def test_deny_removes_from_live_allowed(self) -> None:
+        """deny_ip removes IP from live.allowed file."""
+        with tempfile.TemporaryDirectory() as tmp:
+            live_path = state.live_allowed_path(Path(tmp))
+            live_path.parent.mkdir(parents=True, exist_ok=True)
+            live_path.write_text(f"{TEST_IP1}\n")
+
+            runner = mock.MagicMock()
+            ruleset = mock.MagicMock()
+            ruleset.safe_ip.return_value = TEST_IP1
+            mode = _make_hook_mode(tmp_path=Path(tmp), runner=runner, ruleset=ruleset)
+
+            mode.deny_ip("test-ctr", TEST_IP1)
+            self.assertNotIn(TEST_IP1, live_path.read_text().splitlines())
 
 
 class TestHookModeListRules(unittest.TestCase):
@@ -244,88 +257,50 @@ class TestHookModeShieldUp(unittest.TestCase):
 
     def test_applies_hook_ruleset(self) -> None:
         """shield_up applies hook ruleset and verifies."""
-        runner = mock.MagicMock()
-        runner.nft_via_nsenter.side_effect = ["", "valid output"]
-        runner.podman_inspect.return_value = "test"
-        ruleset = mock.MagicMock()
-        ruleset.build_hook.return_value = "hook ruleset"
-        ruleset.verify_hook.return_value = []
-        ruleset.add_elements_dual.return_value = ""
-
-        with tempfile.TemporaryDirectory() as td:
-            config = ShieldConfig(
-                paths=mock.MagicMock(resolved_dir=Path(td)),
-            )
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = mock.MagicMock()
+            runner.nft_via_nsenter.side_effect = ["", "valid output"]
+            ruleset = mock.MagicMock()
+            ruleset.build_hook.return_value = "hook ruleset"
+            ruleset.verify_hook.return_value = []
+            ruleset.add_elements_dual.return_value = ""
+            config = ShieldConfig(state_dir=Path(tmp))
             mode = _make_hook_mode(config=config, runner=runner, ruleset=ruleset)
             mode.shield_up("test-ctr")
             self.assertEqual(runner.nft_via_nsenter.call_count, 2)
 
     def test_readds_cached_ips(self) -> None:
-        """shield_up re-adds cached IPs from resolved file."""
-        with tempfile.TemporaryDirectory() as td:
-            resolved = Path(td) / "test.resolved"
-            resolved.write_text(f"{TEST_IP1}\n")
+        """shield_up re-adds cached IPs from allowlist files."""
+        with tempfile.TemporaryDirectory() as tmp:
+            profile_path = state.profile_allowed_path(Path(tmp))
+            profile_path.write_text(f"{TEST_IP1}\n")
 
             runner = mock.MagicMock()
             runner.nft_via_nsenter.side_effect = ["", "", "valid output"]
-            runner.podman_inspect.return_value = "test"
             ruleset = mock.MagicMock()
             ruleset.build_hook.return_value = "hook"
             ruleset.verify_hook.return_value = []
             ruleset.add_elements_dual.return_value = f"add element {TEST_IP1}"
 
-            config = ShieldConfig(paths=mock.MagicMock(resolved_dir=Path(td)))
+            config = ShieldConfig(state_dir=Path(tmp))
             mode = _make_hook_mode(config=config, runner=runner, ruleset=ruleset)
             mode.shield_up("test-ctr")
             self.assertEqual(runner.nft_via_nsenter.call_count, 3)
 
     def test_verification_failure_raises(self) -> None:
         """shield_up raises RuntimeError on verification failure."""
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory() as tmp:
             runner = mock.MagicMock()
             runner.nft_via_nsenter.side_effect = ["", "bad output"]
-            runner.podman_inspect.return_value = "test"
             ruleset = mock.MagicMock()
             ruleset.build_hook.return_value = "hook"
             ruleset.verify_hook.return_value = ["error"]
             ruleset.add_elements_dual.return_value = ""
 
-            config = ShieldConfig(paths=mock.MagicMock(resolved_dir=Path(td)))
+            config = ShieldConfig(state_dir=Path(tmp))
             mode = _make_hook_mode(config=config, runner=runner, ruleset=ruleset)
             with self.assertRaises(RuntimeError):
                 mode.shield_up("test-ctr")
-
-
-class TestHookModeResolveContainerName(unittest.TestCase):
-    """Test HookMode._resolve_container_name()."""
-
-    def test_returns_annotation_name(self) -> None:
-        """Returns canonical name from annotation."""
-        runner = mock.MagicMock()
-        runner.podman_inspect.return_value = "my-container"
-        mode = _make_hook_mode(runner=runner)
-        self.assertEqual(mode._resolve_container_name("abc123"), "my-container")
-
-    def test_falls_back_on_error(self) -> None:
-        """Falls back to raw arg when podman inspect fails."""
-        runner = mock.MagicMock()
-        runner.podman_inspect.side_effect = RuntimeError("not running")
-        mode = _make_hook_mode(runner=runner)
-        self.assertEqual(mode._resolve_container_name("abc123"), "abc123")
-
-    def test_falls_back_on_no_value(self) -> None:
-        """Falls back to raw arg when annotation returns <no value>."""
-        runner = mock.MagicMock()
-        runner.podman_inspect.return_value = "<no value>"
-        mode = _make_hook_mode(runner=runner)
-        self.assertEqual(mode._resolve_container_name("abc123"), "abc123")
-
-    def test_falls_back_on_empty(self) -> None:
-        """Falls back to raw arg when annotation is empty."""
-        runner = mock.MagicMock()
-        runner.podman_inspect.return_value = ""
-        mode = _make_hook_mode(runner=runner)
-        self.assertEqual(mode._resolve_container_name("abc123"), "abc123")
 
 
 class TestHookModeShieldState(unittest.TestCase):
@@ -445,11 +420,11 @@ class TestInstallHooks(unittest.TestCase):
             self.assertIn("terok_shield.oci_hook", content)
 
             # Both hook JSON files exist with correct structure
-            for stage in ("createRuntime", "poststop"):
-                hook_file = hooks / f"terok-shield-{stage}.json"
+            for stage_name in ("createRuntime", "poststop"):
+                hook_file = hooks / f"terok-shield-{stage_name}.json"
                 self.assertTrue(hook_file.exists())
                 data = json.loads(hook_file.read_text())
                 self.assertEqual(data["version"], "1.0.0")
                 self.assertEqual(data["hook"]["path"], str(ep))
-                self.assertIn(stage, data["stages"])
+                self.assertIn(stage_name, data["stages"])
                 self.assertIn(ANNOTATION_KEY, data["when"]["annotations"])

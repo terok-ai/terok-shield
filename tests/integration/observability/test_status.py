@@ -10,7 +10,7 @@ import pytest
 from terok_shield import Shield, ShieldConfig
 from terok_shield.cli import main
 
-# ── Public API status ────────────────────────────────────
+# -- Public API status ----------------------------------------
 
 
 @pytest.mark.needs_host_features
@@ -19,16 +19,16 @@ class TestShieldStatus:
 
     def test_status_returns_dict(self, shield_env: Path) -> None:
         """Status dict contains expected keys."""
-        status = Shield(ShieldConfig()).status()
+        sd = shield_env / "containers" / "_default"
+        status = Shield(ShieldConfig(state_dir=sd)).status()
         assert isinstance(status, dict)
         assert "mode" in status
         assert "profiles" in status
         assert "audit_enabled" in status
-        assert "log_files" in status
         assert isinstance(status["profiles"], list)
 
 
-# ── CLI status ───────────────────────────────────────────
+# -- CLI status -----------------------------------------------
 
 
 @pytest.mark.needs_host_features

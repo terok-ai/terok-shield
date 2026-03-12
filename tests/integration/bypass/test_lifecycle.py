@@ -10,11 +10,12 @@ Each test checks both actual network behavior and state correctness.
 
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
 
-from terok_shield import Shield, ShieldConfig, ShieldState
+from terok_shield import Shield, ShieldConfig, ShieldState, state
 from tests.testnet import (
     ALLOWED_TARGET_HTTP,
     ALLOWED_TARGET_IPS,
@@ -28,7 +29,8 @@ from ..helpers import assert_blocked, assert_connectable, assert_reachable, star
 
 
 def _shield() -> Shield:
-    return Shield(ShieldConfig())
+    """Create a Shield with a disposable state_dir (for nft-only ops)."""
+    return Shield(ShieldConfig(state_dir=Path(tempfile.mkdtemp())))
 
 
 @pytest.mark.needs_podman
@@ -154,7 +156,7 @@ class TestBypassWithAllowDeny:
 
         shield.up() atomically replaces the ruleset, so any runtime
         allow() calls during bypass do not survive the transition.
-        Only cached IPs from the .resolved file are re-added.
+        Only cached IPs from the allowlist files are re-added.
         """
         shield = _shield()
         shield.down(shielded_container)
@@ -191,15 +193,15 @@ class TestBypassIPRestoration:
     """Verify cached IPs are restored when going back up."""
 
     def test_cached_ips_restored_on_shield_up(self, shield_env: Path, _pull_image: None) -> None:
-        """Pre-resolved IPs from .resolved cache are re-added on shield.up().
+        """Pre-resolved IPs from allowlist files are re-added on shield.up().
 
-        Full lifecycle: setup -> pre_start (populates cache) -> run ->
+        Full lifecycle: pre_start (populates cache) -> run ->
         allow -> verify reachable -> down -> up -> verify still reachable.
         """
-        shield = Shield(ShieldConfig())
-        shield.setup()
-
         name = f"{CTR_PREFIX}-bypass-cache-{os.getpid()}-{os.urandom(4).hex()}"
+        sd = shield_env / "containers" / name
+        shield = Shield(ShieldConfig(state_dir=sd))
+
         subprocess.run(["podman", "rm", "-f", name], capture_output=True)
 
         try:
@@ -211,10 +213,8 @@ class TestBypassIPRestoration:
                 shield.allow(name, ip)
             assert_reachable(name, ALLOWED_TARGET_HTTP)
 
-            # Write these IPs to the resolved cache (simulating DNS resolution)
-            resolved_dir = shield_env / "resolved"
-            resolved_dir.mkdir(parents=True, exist_ok=True)
-            (resolved_dir / f"{name}.resolved").write_text("\n".join(ALLOWED_TARGET_IPS) + "\n")
+            # Write these IPs to the profile.allowed (simulating DNS resolution)
+            state.profile_allowed_path(sd).write_text("\n".join(ALLOWED_TARGET_IPS) + "\n")
 
             # Go down (all traffic allowed regardless)
             shield.down(name)
@@ -237,13 +237,14 @@ class TestBypassIPRestoration:
 class TestBypassAuditTrail:
     """Verify audit log events for bypass operations."""
 
-    def test_down_up_audit_events(self, shielded_container: str) -> None:
+    def test_down_up_audit_events(self, shielded_container: str, shield_env: Path) -> None:
         """shield.down and shield.up produce audit log entries."""
-        shield = _shield()
+        sd = shield_env / "containers" / shielded_container
+        shield = Shield(ShieldConfig(state_dir=sd))
         shield.down(shielded_container)
         shield.up(shielded_container)
 
-        events = list(shield.tail_log(shielded_container))
+        events = list(shield.tail_log())
         actions = [e["action"] for e in events]
         assert "shield_down" in actions
         assert "shield_up" in actions
@@ -253,12 +254,13 @@ class TestBypassAuditTrail:
         up_idx = actions.index("shield_up")
         assert down_idx < up_idx
 
-    def test_down_all_logs_detail(self, shielded_container: str) -> None:
+    def test_down_all_logs_detail(self, shielded_container: str, shield_env: Path) -> None:
         """shield.down(allow_all=True) logs the allow_all detail."""
-        shield = _shield()
+        sd = shield_env / "containers" / shielded_container
+        shield = Shield(ShieldConfig(state_dir=sd))
         shield.down(shielded_container, allow_all=True)
 
-        events = list(shield.tail_log(shielded_container))
+        events = list(shield.tail_log())
         down_events = [e for e in events if e["action"] == "shield_down"]
         assert any(e.get("detail") == "allow_all=True" for e in down_events)
 
@@ -279,17 +281,17 @@ class TestBypassFullE2E:
     def test_discovery_workflow(self, shield_env: Path, _pull_image: None) -> None:
         """Complete traffic-discovery workflow as the user would execute it.
 
-        1. Setup and start shielded container
+        1. Start shielded container
         2. Allow known-good IPs, verify traffic works
         3. Down for discovery — all traffic flows
         4. Up — original IPs still work (from cache)
         5. Verify blocked target is blocked again
         6. Audit trail has the complete story
         """
-        shield = Shield(ShieldConfig())
-        shield.setup()
-
         name = f"{CTR_PREFIX}-bypass-e2e-{os.getpid()}-{os.urandom(4).hex()}"
+        sd = shield_env / "containers" / name
+        shield = Shield(ShieldConfig(state_dir=sd))
+
         subprocess.run(["podman", "rm", "-f", name], capture_output=True)
 
         try:
@@ -307,10 +309,8 @@ class TestBypassFullE2E:
             assert_reachable(name, ALLOWED_TARGET_HTTP)
             assert_blocked(name, BLOCKED_TARGET_HTTP)
 
-            # Persist to cache for restoration
-            resolved_dir = shield_env / "resolved"
-            resolved_dir.mkdir(parents=True, exist_ok=True)
-            (resolved_dir / f"{name}.resolved").write_text("\n".join(ALLOWED_TARGET_IPS) + "\n")
+            # Persist to profile.allowed for restoration
+            state.profile_allowed_path(sd).write_text("\n".join(ALLOWED_TARGET_IPS) + "\n")
 
             # Step 3: Down for discovery
             shield.down(name)
@@ -338,7 +338,7 @@ class TestBypassFullE2E:
             assert_blocked(name, BLOCKED_TARGET_HTTP)
 
             # Step 7: Verify audit trail tells the whole story
-            events = list(shield.tail_log(name))
+            events = list(shield.tail_log())
             actions = [e["action"] for e in events]
             assert "setup" in actions
             assert "allowed" in actions

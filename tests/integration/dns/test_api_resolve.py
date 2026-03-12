@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from terok_shield import Shield, ShieldConfig
+from terok_shield import Shield, ShieldConfig, state
 from terok_shield.cli import main
 from tests.testnet import TEST_IP4
 
-# ── Public API resolve ───────────────────────────────────
+# -- Public API resolve ---------------------------------------
 
 
 @pytest.mark.needs_internet
@@ -20,36 +20,35 @@ class TestShieldResolve:
 
     def test_resolve_returns_ips(self, shield_env: Path) -> None:
         """``Shield.resolve()`` returns a list of IPs."""
-        ips = Shield(ShieldConfig()).resolve("resolve-test-ctr")
+        sd = shield_env / "containers" / "resolve-test-ctr"
+        ips = Shield(ShieldConfig(state_dir=sd)).resolve("resolve-test-ctr")
         assert len(ips) > 0, "Resolve should return at least one IP"
         for ip in ips:
             assert isinstance(ip, str)
 
     def test_resolve_creates_cache(self, shield_env: Path) -> None:
-        """A cache file exists after ``Shield.resolve()``."""
-        Shield(ShieldConfig()).resolve("cache-test-ctr")
+        """A profile.allowed file exists after ``Shield.resolve()``."""
+        sd = shield_env / "containers" / "cache-test-ctr"
+        Shield(ShieldConfig(state_dir=sd)).resolve("cache-test-ctr")
 
-        resolved_dir = shield_env / "resolved"
-        assert resolved_dir.is_dir()
-        cache_files = list(resolved_dir.iterdir())
-        assert any("cache-test-ctr" in f.name for f in cache_files)
+        allowed = state.profile_allowed_path(sd)
+        assert allowed.is_file(), "profile.allowed should be created"
 
     def test_resolve_force_bypasses_cache(self, shield_env: Path) -> None:
         """``force=True`` re-resolves even if cache is fresh."""
-        # Seed the cache with a sentinel IP that real DNS will never return
-        resolved_dir = shield_env / "resolved"
-        resolved_dir.mkdir(exist_ok=True)
-        cache_file = resolved_dir / "force-test-ctr.resolved"
+        sd = shield_env / "containers" / "force-test-ctr"
+        sd.mkdir(parents=True, exist_ok=True)
+        cache_file = state.profile_allowed_path(sd)
         cache_file.write_text(f"{TEST_IP4}\n")
 
-        ips = Shield(ShieldConfig()).resolve("force-test-ctr", force=True)
+        ips = Shield(ShieldConfig(state_dir=sd)).resolve("force-test-ctr", force=True)
 
         assert ips, "Force-resolve should return at least one IP"
         assert TEST_IP4 not in ips, "Sentinel IP should be replaced by real resolution"
         assert TEST_IP4 not in cache_file.read_text(), "Cache should be overwritten"
 
 
-# ── CLI resolve ──────────────────────────────────────────
+# -- CLI resolve ----------------------------------------------
 
 
 @pytest.mark.needs_internet

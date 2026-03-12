@@ -3,6 +3,9 @@
 
 """Integration tests: CLI down/up/rules/preview commands with real containers."""
 
+import tempfile
+from pathlib import Path
+
 import pytest
 
 from terok_shield import Shield, ShieldConfig, ShieldState
@@ -12,6 +15,11 @@ from tests.testnet import BLOCKED_TARGET_DNS_PORT, BLOCKED_TARGET_HTTP, BLOCKED_
 
 from ..conftest import nft_missing, podman_missing
 from ..helpers import assert_blocked, assert_connectable
+
+
+def _shield() -> Shield:
+    """Create a Shield with a disposable state_dir (for nft-only ops)."""
+    return Shield(ShieldConfig(state_dir=Path(tempfile.mkdtemp())))
 
 
 @pytest.mark.needs_podman
@@ -27,24 +35,24 @@ class TestBypassCLI:
         main(["down", shielded_container])
         captured = capsys.readouterr()
         assert "Shield down" in captured.out
-        assert Shield(ShieldConfig()).state(shielded_container) == ShieldState.DOWN
+        assert _shield().state(shielded_container) == ShieldState.DOWN
 
     def test_cli_down_all(self, shielded_container: str, capsys: pytest.CaptureFixture) -> None:
         """``main(["down", container, "--all"])`` enables full bypass."""
         main(["down", shielded_container, "--all"])
         captured = capsys.readouterr()
         assert "all traffic" in captured.out
-        assert Shield(ShieldConfig()).state(shielded_container) == ShieldState.DOWN_ALL
+        assert _shield().state(shielded_container) == ShieldState.DOWN_ALL
 
     def test_cli_up(self, shielded_container: str, capsys: pytest.CaptureFixture) -> None:
         """``main(["up", container])`` restores deny-all mode."""
         main(["down", shielded_container])
-        assert Shield(ShieldConfig()).state(shielded_container) == ShieldState.DOWN
+        assert _shield().state(shielded_container) == ShieldState.DOWN
 
         main(["up", shielded_container])
         captured = capsys.readouterr()
         assert "Shield up" in captured.out
-        assert Shield(ShieldConfig()).state(shielded_container) == ShieldState.UP
+        assert _shield().state(shielded_container) == ShieldState.UP
 
     def test_cli_down_then_traffic(self, shielded_container: str) -> None:
         """CLI down enables traffic; CLI up blocks it again."""

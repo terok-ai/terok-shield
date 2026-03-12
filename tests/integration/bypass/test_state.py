@@ -8,13 +8,20 @@ as UP, DOWN, DOWN_ALL, or INACTIVE by querying actual container
 network namespaces.
 """
 
+import tempfile
 import uuid
+from pathlib import Path
 
 import pytest
 
 from terok_shield import Shield, ShieldConfig, ShieldState
 
 from ..conftest import nft_missing, podman_missing
+
+
+def _shield() -> Shield:
+    """Create a Shield with a disposable state_dir (for nft-only ops)."""
+    return Shield(ShieldConfig(state_dir=Path(tempfile.mkdtemp())))
 
 
 @pytest.mark.needs_podman
@@ -27,27 +34,23 @@ class TestShieldState:
 
     def test_state_up_after_setup(self, shielded_container: str) -> None:
         """A freshly shielded container reports state UP."""
-        shield = Shield(ShieldConfig())
-        state = shield.state(shielded_container)
-        assert state == ShieldState.UP
+        assert _shield().state(shielded_container) == ShieldState.UP
 
     def test_state_down_after_shield_down(self, shielded_container: str) -> None:
         """State is DOWN after shield.down() (RFC1918 protection kept)."""
-        shield = Shield(ShieldConfig())
+        shield = _shield()
         shield.down(shielded_container)
-        state = shield.state(shielded_container)
-        assert state == ShieldState.DOWN
+        assert shield.state(shielded_container) == ShieldState.DOWN
 
     def test_state_down_all_after_shield_down_all(self, shielded_container: str) -> None:
         """State is DOWN_ALL after shield.down(allow_all=True)."""
-        shield = Shield(ShieldConfig())
+        shield = _shield()
         shield.down(shielded_container, allow_all=True)
-        state = shield.state(shielded_container)
-        assert state == ShieldState.DOWN_ALL
+        assert shield.state(shielded_container) == ShieldState.DOWN_ALL
 
     def test_state_up_after_shield_up(self, shielded_container: str) -> None:
         """State returns to UP after shield.down() then shield.up()."""
-        shield = Shield(ShieldConfig())
+        shield = _shield()
         shield.down(shielded_container)
         assert shield.state(shielded_container) == ShieldState.DOWN
 
@@ -63,13 +66,9 @@ class TestShieldStateInactive:
 
     def test_state_inactive_for_stopped_container(self) -> None:
         """A nonexistent/stopped container reports INACTIVE."""
-        shield = Shield(ShieldConfig())
         bogus = f"nonexistent-{uuid.uuid4().hex[:12]}"
-        state = shield.state(bogus)
-        assert state == ShieldState.INACTIVE
+        assert _shield().state(bogus) == ShieldState.INACTIVE
 
     def test_state_inactive_for_bare_container(self, container: str) -> None:
         """A running container with no shield ruleset reports INACTIVE."""
-        shield = Shield(ShieldConfig())
-        state = shield.state(container)
-        assert state == ShieldState.INACTIVE
+        assert _shield().state(container) == ShieldState.INACTIVE

@@ -22,16 +22,19 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from . import state
 from .config import (
     ANNOTATION_KEY,
+    ANNOTATION_LOOPBACK_PORTS_KEY,
     ANNOTATION_NAME_KEY,
+    ANNOTATION_STATE_DIR_KEY,
+    ANNOTATION_VERSION_KEY,
     ShieldConfig,
     ShieldState,
 )
 from .nft import NFT_TABLE
 from .run import ExecError
 from .util import is_ipv4
-from .validation import validate_container_name
 
 if TYPE_CHECKING:
     from .audit import AuditLogger
@@ -83,9 +86,9 @@ def install_hooks(*, hook_entrypoint: Path, hooks_dir: Path) -> None:
     hook_entrypoint.chmod(hook_entrypoint.stat().st_mode | stat.S_IEXEC)
 
     hooks_dir.mkdir(parents=True, exist_ok=True)
-    for stage in ("createRuntime", "poststop"):
-        hook_json = _generate_hook_json(str(hook_entrypoint), stage)
-        (hooks_dir / f"terok-shield-{stage}.json").write_text(hook_json)
+    for stage_name in ("createRuntime", "poststop"):
+        hook_json = _generate_hook_json(str(hook_entrypoint), stage_name)
+        (hooks_dir / f"terok-shield-{stage_name}.json").write_text(hook_json)
 
 
 # ── HookMode (Strategy) ─────────────────────────────────
@@ -95,10 +98,10 @@ class HookMode:
     """Strategy: hook-mode shield backend (implements ``ShieldModeBackend``).
 
     Manages the full lifecycle of OCI-hook-based container firewalling:
-    setup, pre-start DNS resolution, live allow/deny, bypass, and
-    ruleset preview.  Collaborates with ``RulesetBuilder``,
-    ``CommandRunner``, ``AuditLogger``, ``DnsResolver``, and
-    ``ProfileLoader`` via constructor injection.
+    pre-start DNS resolution (including hook installation), live
+    allow/deny, bypass, and ruleset preview.  Collaborates with
+    ``RulesetBuilder``, ``CommandRunner``, ``AuditLogger``,
+    ``DnsResolver``, and ``ProfileLoader`` via constructor injection.
     """
 
     def __init__(
@@ -114,7 +117,7 @@ class HookMode:
         """Create a hook mode backend with all collaborators.
 
         Args:
-            config: Shield configuration.
+            config: Shield configuration (provides state_dir).
             runner: Command runner for subprocess calls.
             audit: Audit logger for event logging.
             dns: DNS resolver for domain resolution and caching.
@@ -128,34 +131,28 @@ class HookMode:
         self._profiles = profiles
         self._ruleset = ruleset
 
-    def setup(self) -> None:
-        """Install OCI hook JSON and entrypoint script."""
-        self._config.paths.ensure_dirs()
-        install_hooks(
-            hook_entrypoint=self._config.paths.hook_entrypoint,
-            hooks_dir=self._config.paths.hooks_dir,
-        )
-
     def pre_start(self, container: str, profiles: list[str]) -> list[str]:
         """Prepare for container start in hook mode.
 
-        Composes profiles, resolves DNS domains, caches results, and
-        returns the podman CLI arguments needed for shield protection.
+        Installs hooks (idempotent), composes profiles, resolves DNS
+        domains, writes allowlist, sets annotations, and returns the
+        podman CLI arguments needed for shield protection.
         """
-        hooks_dir = self._config.paths.hooks_dir
-        hook_json = hooks_dir / "terok-shield-createRuntime.json"
-        if not hook_json.is_file():
-            raise RuntimeError("Shield hook not installed. Run 'terok-shield setup' first.")
+        sd = self._config.state_dir
 
-        ep = self._config.paths.hook_entrypoint
-        if not ep.is_file() or not os.access(ep, os.X_OK):
-            raise RuntimeError(
-                "Shield hook entrypoint missing or not executable. Run 'terok-shield setup' first."
-            )
+        # Ensure state dirs and install hooks (idempotent)
+        state.ensure_state_dirs(sd)
+        install_hooks(
+            hook_entrypoint=state.hook_entrypoint(sd),
+            hooks_dir=state.hooks_dir(sd),
+        )
 
+        # Resolve DNS and write profile allowlist
         entries = self._profiles.compose_profiles(profiles)
-        self._dns.resolve_and_cache(entries, container)
+        cache_path = state.profile_allowed_path(sd)
+        self._dns.resolve_and_cache(entries, cache_path)
 
+        # Build podman args
         args: list[str] = []
 
         if os.geteuid() != 0:
@@ -177,13 +174,21 @@ class HookMode:
                     "host.containers.internal:127.0.0.1",
                 ]
 
+        # Annotations: profiles, name, state_dir, loopback_ports, version
+        ports_str = ",".join(str(p) for p in self._config.loopback_ports)
         args += [
             "--annotation",
             f"{ANNOTATION_KEY}={','.join(profiles)}",
             "--annotation",
             f"{ANNOTATION_NAME_KEY}={container}",
+            "--annotation",
+            f"{ANNOTATION_STATE_DIR_KEY}={sd}",
+            "--annotation",
+            f"{ANNOTATION_LOOPBACK_PORTS_KEY}={ports_str}",
+            "--annotation",
+            f"{ANNOTATION_VERSION_KEY}={state.BUNDLE_VERSION}",
             "--hooks-dir",
-            str(hooks_dir),
+            str(state.hooks_dir(sd)),
             "--cap-drop",
             "NET_ADMIN",
             "--cap-drop",
@@ -221,6 +226,11 @@ class HookMode:
             self._set_for_ip(ip),
             f"{{ {ip} }}",
         )
+        # Persist to live.allowed
+        live_path = state.live_allowed_path(self._config.state_dir)
+        live_path.parent.mkdir(parents=True, exist_ok=True)
+        with live_path.open("a") as f:
+            f.write(f"{ip}\n")
 
     def deny_ip(self, container: str, ip: str) -> None:
         """Live-deny an IP for a running container via nsenter."""
@@ -234,6 +244,12 @@ class HookMode:
             self._set_for_ip(ip),
             f"{{ {ip} }}",
         )
+        # Remove from live.allowed
+        live_path = state.live_allowed_path(self._config.state_dir)
+        if live_path.is_file():
+            lines = live_path.read_text().splitlines()
+            lines = [line for line in lines if line.strip() != ip]
+            live_path.write_text("\n".join(lines) + "\n" if lines else "")
 
     def list_rules(self, container: str) -> str:
         """List current nft rules for a running container."""
@@ -265,15 +281,24 @@ class HookMode:
         stdin = f"delete table {NFT_TABLE}\n{rs}"
         self._runner.nft_via_nsenter(container, stdin=stdin)
 
-        try:
-            name = validate_container_name(self._resolve_container_name(container))
-        except ValueError:
-            resolved_file = None
-        else:
-            resolved_file = self._config.paths.resolved_dir / f"{name}.resolved"
-        if resolved_file and resolved_file.is_file():
-            ips = [line.strip() for line in resolved_file.read_text().splitlines() if line.strip()]
-            elements_cmd = self._ruleset.add_elements_dual(ips)
+        # Re-add IPs from both allowlist files
+        sd = self._config.state_dir
+        ips: list[str] = []
+        for allowlist_path in (state.profile_allowed_path(sd), state.live_allowed_path(sd)):
+            if allowlist_path.is_file():
+                ips.extend(
+                    line.strip() for line in allowlist_path.read_text().splitlines() if line.strip()
+                )
+        # Deduplicate preserving order
+        seen: set[str] = set()
+        unique_ips: list[str] = []
+        for ip in ips:
+            if ip not in seen:
+                seen.add(ip)
+                unique_ips.append(ip)
+
+        if unique_ips:
+            elements_cmd = self._ruleset.add_elements_dual(unique_ips)
             if elements_cmd:
                 self._runner.nft_via_nsenter(container, stdin=elements_cmd)
 
@@ -281,19 +306,6 @@ class HookMode:
         errors = self._ruleset.verify_hook(output)
         if errors:
             raise RuntimeError(f"Ruleset verification failed: {'; '.join(errors)}")
-
-    def _resolve_container_name(self, container: str) -> str:
-        """Resolve the canonical container name from the shield annotation."""
-        try:
-            name = self._runner.podman_inspect(
-                container,
-                '{{index .Config.Annotations "' + ANNOTATION_NAME_KEY + '"}}',
-            )
-            if name and name != "<no value>":
-                return name
-        except (OSError, RuntimeError):
-            pass
-        return container
 
     def shield_state(self, container: str) -> ShieldState:
         """Query the live nft ruleset to determine the container's shield state."""
