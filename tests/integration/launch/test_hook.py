@@ -12,6 +12,7 @@ import pytest
 from terok_shield import state
 from terok_shield.audit import AuditLogger
 from terok_shield.config import (
+    ANNOTATION_AUDIT_ENABLED_KEY,
     ANNOTATION_KEY,
     ANNOTATION_LOOPBACK_PORTS_KEY,
     ANNOTATION_NAME_KEY,
@@ -21,6 +22,7 @@ from terok_shield.config import (
 from terok_shield.nft import RulesetBuilder, verify_ruleset
 from terok_shield.oci_hook import HookExecutor, hook_main
 from terok_shield.run import SubprocessRunner
+from tests.testfs import NONEXISTENT_SENTINEL
 from tests.testnet import (
     ALLOWED_TARGET_HTTP,
     ALLOWED_TARGET_IPS,
@@ -46,7 +48,12 @@ def _make_executor(tmp: str) -> HookExecutor:
 
 
 def _oci_state_with_annotations(
-    container: str, pid: int, tmp: str, *, loopback_ports: str = ""
+    container: str,
+    pid: int,
+    tmp: str,
+    *,
+    loopback_ports: str = "",
+    audit_enabled: str = "true",
 ) -> str:
     """Build OCI state JSON with required annotations."""
     annotations = {
@@ -55,6 +62,7 @@ def _oci_state_with_annotations(
         ANNOTATION_STATE_DIR_KEY: tmp,
         ANNOTATION_LOOPBACK_PORTS_KEY: loopback_ports,
         ANNOTATION_VERSION_KEY: str(state.BUNDLE_VERSION),
+        ANNOTATION_AUDIT_ENABLED_KEY: audit_enabled,
     }
     return json.dumps({"id": container, "pid": pid, "annotations": annotations})
 
@@ -198,7 +206,7 @@ class TestHookMainE2E:
         """hook_main returns 0 on success and applies the firewall."""
         with tempfile.TemporaryDirectory() as tmp:
             # Set env to a *different* path to prove hook_main uses annotation
-            monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", "/nonexistent/sentinel")
+            monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", NONEXISTENT_SENTINEL)
 
             oci_state = _oci_state_with_annotations(container, int(container_pid), tmp)
             rc = hook_main(oci_state)
@@ -210,7 +218,7 @@ class TestHookMainE2E:
     def test_hook_main_bad_pid(self, container: str, monkeypatch: pytest.MonkeyPatch) -> None:
         """hook_main returns 1 for unreachable PID."""
         with tempfile.TemporaryDirectory() as tmp:
-            monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", "/nonexistent/sentinel")
+            monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", NONEXISTENT_SENTINEL)
             oci_state = _oci_state_with_annotations(container, 999999, tmp)
             rc = hook_main(oci_state)
             assert rc == 1
@@ -221,7 +229,7 @@ class TestHookMainE2E:
         """Full lifecycle: OCI state → hook_main → traffic filtered."""
         with tempfile.TemporaryDirectory() as tmp:
             # Set env to a *different* path to prove hook_main uses annotation
-            monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", "/nonexistent/sentinel")
+            monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", NONEXISTENT_SENTINEL)
 
             # Pre-resolve: allow Cloudflare anycast pair only
             state.profile_allowed_path(Path(tmp)).write_text("\n".join(ALLOWED_TARGET_IPS) + "\n")

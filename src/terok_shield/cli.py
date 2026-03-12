@@ -355,6 +355,22 @@ def _cmd_rules(shield: Shield, container: str) -> None:
         print(f"No rules found for {container}")
 
 
+def _collect_all_audit_entries(state_root: Path, n: int) -> list[dict]:
+    """Collect audit entries from all containers, sorted by timestamp, trimmed to n."""
+    from .audit import AuditLogger
+
+    containers_dir = state_root / "containers"
+    if not containers_dir.is_dir():
+        return []
+    entries: list[dict] = []
+    for ctr_dir in sorted(containers_dir.iterdir()):
+        audit_file = ctr_dir / "audit.jsonl"
+        if audit_file.is_file():
+            entries.extend(AuditLogger(audit_path=audit_file).tail_log(n))
+    entries.sort(key=lambda e: e.get("timestamp", ""))
+    return entries[-n:]
+
+
 def _cmd_logs(
     *,
     state_dir_override: Path | None,
@@ -369,30 +385,17 @@ def _cmd_logs(
     """
     from .audit import AuditLogger
 
+    state_root = state_dir_override or _resolve_state_root()
     if container:
-        state_root = state_dir_override or _resolve_state_root()
         audit_file = state_root / "containers" / container / "audit.jsonl"
-        logger = AuditLogger(audit_path=audit_file)
-        for entry in logger.tail_log(n):
+        for entry in AuditLogger(audit_path=audit_file).tail_log(n):
             print(json.dumps(entry))
     else:
-        # Scan all containers, merge entries, sort by timestamp
-        state_root = state_dir_override or _resolve_state_root()
-        containers_dir = state_root / "containers"
-        if not containers_dir.is_dir():
+        entries = _collect_all_audit_entries(state_root, n)
+        if not entries:
             print("No audit logs found.")
             return
-        all_entries: list[dict] = []
-        for ctr_dir in sorted(containers_dir.iterdir()):
-            audit_file = ctr_dir / "audit.jsonl"
-            if audit_file.is_file():
-                logger = AuditLogger(audit_path=audit_file)
-                all_entries.extend(logger.tail_log(n))
-        if not all_entries:
-            print("No audit logs found.")
-            return
-        all_entries.sort(key=lambda e: e.get("timestamp", ""))
-        for entry in all_entries[-n:]:
+        for entry in entries:
             print(json.dumps(entry))
 
 

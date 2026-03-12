@@ -3,28 +3,15 @@
 
 """Integration tests: CLI down/up/rules/preview commands with real containers."""
 
-import tempfile
-from pathlib import Path
-
 import pytest
 
-from terok_shield import Shield, ShieldConfig, ShieldState
+from terok_shield import ShieldState
 from terok_shield.cli import main
 from terok_shield.nft_constants import BYPASS_LOG_PREFIX
 from tests.testnet import BLOCKED_TARGET_DNS_PORT, BLOCKED_TARGET_HTTP, BLOCKED_TARGET_IP
 
 from ..conftest import nft_missing, podman_missing
-from ..helpers import assert_blocked, assert_connectable
-
-_DISPOSABLE_DIRS: list[tempfile.TemporaryDirectory] = []
-"""Managed temp dirs for nft-only tests (cleaned up at process exit)."""
-
-
-def _shield() -> Shield:
-    """Create a Shield with a disposable state_dir (for nft-only ops)."""
-    td = tempfile.TemporaryDirectory()
-    _DISPOSABLE_DIRS.append(td)
-    return Shield(ShieldConfig(state_dir=Path(td.name)))
+from ..helpers import assert_blocked, assert_connectable, disposable_shield as _shield
 
 
 @pytest.mark.needs_podman

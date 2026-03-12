@@ -8,25 +8,14 @@ as UP, DOWN, DOWN_ALL, or INACTIVE by querying actual container
 network namespaces.
 """
 
-import tempfile
 import uuid
-from pathlib import Path
 
 import pytest
 
-from terok_shield import Shield, ShieldConfig, ShieldState
+from terok_shield import ShieldState
 
 from ..conftest import nft_missing, podman_missing
-
-_DISPOSABLE_DIRS: list[tempfile.TemporaryDirectory] = []
-"""Managed temp dirs for nft-only tests (cleaned up at process exit)."""
-
-
-def _shield() -> Shield:
-    """Create a Shield with a disposable state_dir (for nft-only ops)."""
-    td = tempfile.TemporaryDirectory()
-    _DISPOSABLE_DIRS.append(td)
-    return Shield(ShieldConfig(state_dir=Path(td.name)))
+from ..helpers import disposable_shield as _shield
 
 
 @pytest.mark.needs_podman

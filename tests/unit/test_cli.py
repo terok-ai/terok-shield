@@ -530,6 +530,32 @@ class TestAutoDetectMode(unittest.TestCase):
         self.assertEqual(_auto_detect_mode(), ShieldMode.HOOK)
 
 
+class TestLoadConfigFile(unittest.TestCase):
+    """Tests for _load_config_file edge cases."""
+
+    def test_malformed_yaml_returns_empty(self) -> None:
+        """Malformed YAML returns empty dict."""
+        from terok_shield.cli import _load_config_file
+
+        with tempfile.TemporaryDirectory() as cfg_dir:
+            config_file = Path(cfg_dir) / "config.yml"
+            config_file.write_text(": [invalid yaml\n  bad: {unclosed")
+            with mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": cfg_dir}):
+                result = _load_config_file()
+                self.assertEqual(result, {})
+
+    def test_non_dict_yaml_returns_empty(self) -> None:
+        """YAML that parses to a non-dict returns empty dict."""
+        from terok_shield.cli import _load_config_file
+
+        with tempfile.TemporaryDirectory() as cfg_dir:
+            config_file = Path(cfg_dir) / "config.yml"
+            config_file.write_text("- just\n- a\n- list\n")
+            with mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": cfg_dir}):
+                result = _load_config_file()
+                self.assertEqual(result, {})
+
+
 class TestBuildConfig(unittest.TestCase):
     """Tests for _build_config."""
 
@@ -580,3 +606,124 @@ class TestBuildConfig(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             config = _build_config(state_dir_override=Path(tmp))
             self.assertEqual(config.state_dir, Path(tmp) / "containers" / "_default")
+
+    def test_unknown_mode_raises(self) -> None:
+        """Unknown mode string raises ValueError."""
+        with tempfile.TemporaryDirectory() as cfg_dir:
+            config_file = Path(cfg_dir) / "config.yml"
+            config_file.write_text("mode: bridge\n")
+            with (
+                mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": cfg_dir}),
+                tempfile.TemporaryDirectory() as state_dir,
+            ):
+                with self.assertRaises(ValueError, msg="Unknown shield mode"):
+                    _build_config("ctr", state_dir_override=Path(state_dir))
+
+    @mock.patch("terok_shield.cli._auto_detect_mode", return_value=ShieldMode.HOOK)
+    def test_non_list_profiles_uses_default(self, _mock_mode: mock.Mock) -> None:
+        """Non-list default_profiles falls back to dev-standard."""
+        with tempfile.TemporaryDirectory() as cfg_dir:
+            config_file = Path(cfg_dir) / "config.yml"
+            config_file.write_text("default_profiles: not-a-list\n")
+            with (
+                mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": cfg_dir}),
+                tempfile.TemporaryDirectory() as state_dir,
+            ):
+                config = _build_config("ctr", state_dir_override=Path(state_dir))
+                self.assertEqual(config.default_profiles, ("dev-standard",))
+
+    @mock.patch("terok_shield.cli._auto_detect_mode", return_value=ShieldMode.HOOK)
+    def test_non_dict_audit_section_uses_default(self, _mock_mode: mock.Mock) -> None:
+        """Non-dict audit section falls back to defaults."""
+        with tempfile.TemporaryDirectory() as cfg_dir:
+            config_file = Path(cfg_dir) / "config.yml"
+            config_file.write_text("audit: not-a-dict\n")
+            with (
+                mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": cfg_dir}),
+                tempfile.TemporaryDirectory() as state_dir,
+            ):
+                config = _build_config("ctr", state_dir_override=Path(state_dir))
+                self.assertTrue(config.audit_enabled)
+
+    @mock.patch("terok_shield.cli._auto_detect_mode", return_value=ShieldMode.HOOK)
+    def test_non_bool_audit_enabled_uses_default(self, _mock_mode: mock.Mock) -> None:
+        """Non-bool audit.enabled falls back to True."""
+        with tempfile.TemporaryDirectory() as cfg_dir:
+            config_file = Path(cfg_dir) / "config.yml"
+            config_file.write_text("audit:\n  enabled: yes-please\n")
+            with (
+                mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": cfg_dir}),
+                tempfile.TemporaryDirectory() as state_dir,
+            ):
+                config = _build_config("ctr", state_dir_override=Path(state_dir))
+                self.assertTrue(config.audit_enabled)
+
+    @mock.patch("terok_shield.cli._auto_detect_mode", return_value=ShieldMode.HOOK)
+    def test_no_state_dir_override_uses_resolve(self, _mock_mode: mock.Mock) -> None:
+        """Without --state-dir, _resolve_state_root is used."""
+        with (
+            mock.patch.dict(
+                "os.environ",
+                {
+                    "TEROK_SHIELD_STATE_DIR": str(FAKE_STATE_DIR),
+                    "TEROK_SHIELD_CONFIG_DIR": str(NONEXISTENT_DIR / "config"),
+                },
+            ),
+        ):
+            config = _build_config("ctr")
+            self.assertEqual(config.state_dir, FAKE_STATE_DIR / "containers" / "ctr")
+
+
+class TestCmdLogsGlobal(unittest.TestCase):
+    """Tests for _cmd_logs multi-container merge/sort."""
+
+    def test_global_logs_merges_and_sorts(self) -> None:
+        """Global logs merges entries across containers and sorts by timestamp."""
+        with tempfile.TemporaryDirectory() as tmp:
+            # Create two container audit logs with interleaved timestamps
+            for name, entries in [
+                (
+                    "ctr-a",
+                    [
+                        '{"action":"a1","timestamp":"2026-01-01T00:00:02"}',
+                        '{"action":"a2","timestamp":"2026-01-01T00:00:04"}',
+                    ],
+                ),
+                (
+                    "ctr-b",
+                    [
+                        '{"action":"b1","timestamp":"2026-01-01T00:00:01"}',
+                        '{"action":"b2","timestamp":"2026-01-01T00:00:03"}',
+                    ],
+                ),
+            ]:
+                ctr_dir = Path(tmp) / "containers" / name
+                ctr_dir.mkdir(parents=True)
+                (ctr_dir / "audit.jsonl").write_text("\n".join(entries) + "\n")
+
+            captured = io.StringIO()
+            sys.stdout = captured
+            try:
+                main(["--state-dir", tmp, "logs", "-n", "3"])
+            finally:
+                sys.stdout = sys.__stdout__
+
+            lines = captured.getvalue().strip().splitlines()
+            self.assertEqual(len(lines), 3)
+            actions = [json.loads(line)["action"] for line in lines]
+            # Last 3 sorted by timestamp: a1 (02), b2 (03), a2 (04)
+            self.assertEqual(actions, ["a1", "b2", "a2"])
+
+    def test_global_logs_empty_containers(self) -> None:
+        """Global logs prints 'No audit logs found' when containers exist but have no audit files."""
+        with tempfile.TemporaryDirectory() as tmp:
+            ctr_dir = Path(tmp) / "containers" / "empty-ctr"
+            ctr_dir.mkdir(parents=True)
+
+            captured = io.StringIO()
+            sys.stdout = captured
+            try:
+                main(["--state-dir", tmp, "logs"])
+            finally:
+                sys.stdout = sys.__stdout__
+            self.assertIn("No audit logs found", captured.getvalue())

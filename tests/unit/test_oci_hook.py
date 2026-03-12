@@ -10,7 +10,16 @@ import unittest.mock
 
 from terok_shield import state
 from terok_shield.config import ANNOTATION_KEY, ANNOTATION_NAME_KEY
-from terok_shield.oci_hook import _parse_oci_state, hook_main
+from terok_shield.oci_hook import (
+    _classify_cidr,
+    _classify_ips,
+    _is_private_addr,
+    _parse_loopback_ports,
+    _parse_oci_state,
+    hook_main,
+)
+
+from ..testnet import RFC1918_HOST
 
 
 def _oci_state(
@@ -34,6 +43,107 @@ def _valid_annotations(state_dir: str) -> dict[str, str]:
         "terok.shield.loopback_ports": "1234",
         "terok.shield.version": str(state.BUNDLE_VERSION),
     }
+
+
+class TestClassifyCidr(unittest.TestCase):
+    """Tests for _classify_cidr helper."""
+
+    def test_private_v4(self) -> None:
+        """RFC1918 network is classified as private."""
+        import ipaddress
+
+        is_private, is_broad = _classify_cidr(ipaddress.ip_network("10.0.0.0/8"))
+        self.assertTrue(is_private)
+        self.assertTrue(is_broad)
+
+    def test_public_v4(self) -> None:
+        """Public network is not private."""
+        import ipaddress
+
+        is_private, is_broad = _classify_cidr(ipaddress.ip_network("8.8.8.0/24"))
+        self.assertFalse(is_private)
+        self.assertFalse(is_broad)
+
+    def test_narrow_cidr_not_broad(self) -> None:
+        """Narrow CIDR is not classified as broad."""
+        import ipaddress
+
+        _, is_broad = _classify_cidr(ipaddress.ip_network("192.168.1.0/24"))
+        self.assertFalse(is_broad)
+
+    def test_private_v6(self) -> None:
+        """ULA IPv6 network is classified as private."""
+        import ipaddress
+
+        is_private, _ = _classify_cidr(ipaddress.ip_network("fc00::/7"))
+        self.assertTrue(is_private)
+
+
+class TestIsPrivateAddr(unittest.TestCase):
+    """Tests for _is_private_addr helper."""
+
+    def test_rfc1918_is_private(self) -> None:
+        """RFC1918 address is private."""
+        import ipaddress
+
+        self.assertTrue(_is_private_addr(ipaddress.ip_address(RFC1918_HOST)))
+
+    def test_public_is_not_private(self) -> None:
+        """Public address is not private."""
+        import ipaddress
+
+        self.assertFalse(_is_private_addr(ipaddress.ip_address("8.8.8.8")))
+
+
+class TestCheckPrivateRanges(unittest.TestCase):
+    """Tests for _classify_ips classification."""
+
+    def test_mixed_ips(self) -> None:
+        """Classifies mix of private and public IPs."""
+        private, broad = _classify_ips([RFC1918_HOST, "8.8.8.8"])
+        self.assertIn(RFC1918_HOST, private)
+        self.assertNotIn("8.8.8.8", private)
+        self.assertEqual(broad, [])
+
+    def test_broad_cidr(self) -> None:
+        """Broad CIDR is flagged."""
+        private, broad = _classify_ips(["10.0.0.0/8"])
+        self.assertIn("10.0.0.0/8", broad)
+        self.assertIn("10.0.0.0/8", private)
+
+    def test_invalid_ip_skipped(self) -> None:
+        """Invalid IP strings are silently skipped."""
+        private, broad = _classify_ips(["not-an-ip", "8.8.8.8"])
+        self.assertEqual(private, [])
+        self.assertEqual(broad, [])
+
+
+class TestParseLoopbackPortsAnnotation(unittest.TestCase):
+    """Tests for _parse_loopback_ports (annotation string version)."""
+
+    def test_valid_ports(self) -> None:
+        """Comma-separated port string is parsed."""
+        self.assertEqual(_parse_loopback_ports("8080,9090"), (8080, 9090))
+
+    def test_empty_string(self) -> None:
+        """Empty string returns empty tuple."""
+        self.assertEqual(_parse_loopback_ports(""), ())
+
+    def test_invalid_port_skipped(self) -> None:
+        """Non-integer port values are skipped."""
+        self.assertEqual(_parse_loopback_ports("8080,bad,9090"), (8080, 9090))
+
+    def test_out_of_range_skipped(self) -> None:
+        """Out-of-range ports are skipped."""
+        self.assertEqual(_parse_loopback_ports("0,8080,99999"), (8080,))
+
+    def test_whitespace_handled(self) -> None:
+        """Whitespace around ports is stripped."""
+        self.assertEqual(_parse_loopback_ports(" 8080 , 9090 "), (8080, 9090))
+
+    def test_trailing_comma(self) -> None:
+        """Trailing comma produces no extra entry."""
+        self.assertEqual(_parse_loopback_ports("8080,"), (8080,))
 
 
 class TestParseOciState(unittest.TestCase):
@@ -92,6 +202,14 @@ class TestParseOciState(unittest.TestCase):
             json.dumps({"id": "abc", "pid": 1, "annotations": "not-a-dict"})
         )
         self.assertEqual(annotations, {})
+
+    def test_annotation_values_normalized_to_str(self) -> None:
+        """Non-string annotation values are coerced to strings."""
+        _, _, annotations = _parse_oci_state(
+            json.dumps({"id": "abc", "pid": 1, "annotations": {"key": 42, "flag": True}})
+        )
+        self.assertEqual(annotations["key"], "42")
+        self.assertEqual(annotations["flag"], "True")
 
 
 class TestHookMain(unittest.TestCase):

@@ -13,6 +13,22 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from terok_shield import Shield, ShieldConfig
+
+_DISPOSABLE_DIRS: list[tempfile.TemporaryDirectory] = []
+"""Managed temp dirs for nft-only tests (cleaned up at process exit)."""
+
+
+def disposable_shield() -> Shield:
+    """Create a Shield with a disposable state_dir (for nft-only ops).
+
+    The temp directory is kept alive until process exit by appending to
+    the module-level ``_DISPOSABLE_DIRS`` list.
+    """
+    td = tempfile.TemporaryDirectory()
+    _DISPOSABLE_DIRS.append(td)
+    return Shield(ShieldConfig(state_dir=Path(td.name)))
+
 
 def _hook_diagnostics(extra_args: list[str]) -> str:
     """Gather OCI hook file diagnostics from extra_args (called only on failure)."""

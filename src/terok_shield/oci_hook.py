@@ -125,6 +125,8 @@ def _parse_oci_state(stdin_data: str) -> tuple[str, str, dict[str, str]]:
     annotations = oci_state.get("annotations", {})
     if not isinstance(annotations, dict):
         annotations = {}
+    # Normalize values to strings (OCI spec says string, but be defensive)
+    annotations = {str(k): str(v) for k, v in annotations.items()}
     return str(cid), str(pid) if pid else "", annotations
 
 
