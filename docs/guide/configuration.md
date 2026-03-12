@@ -99,7 +99,8 @@ terok-shield resolve my-container --force
 
 ## OCI annotations
 
-These annotations are set by `pre_start()` and read by the OCI hook:
+These annotations are set automatically by `terok-shield run` (or
+`pre_start()` in the Python API) and read by the OCI hook:
 
 | Annotation | Value | Purpose |
 |------------|-------|---------|

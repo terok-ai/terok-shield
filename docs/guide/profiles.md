@@ -74,30 +74,28 @@ takes precedence. The bundled version is ignored.
 
 ### At container start
 
-Specify profiles via the podman annotation:
+Specify profiles with the `--profiles` flag:
 
 ```bash
-# Single profile
-podman run --annotation terok.shield.profiles=dev-standard ...
+# Default profile (dev-standard)
+terok-shield run my-container -- alpine:latest sh
 
-# Multiple profiles (comma-separated, merged with deduplication)
-podman run --annotation terok.shield.profiles=dev-standard,dev-python,my-project ...
+# Multiple profiles (space-separated)
+terok-shield run my-container --profiles dev-standard dev-python my-project \
+  -- alpine:latest sh
 ```
+
+DNS resolution happens automatically at launch — domains are resolved and
+cached in the container's `profile.allowed` file (default freshness: 1 hour).
 
 ### Pre-resolving DNS
 
-Before starting a container, resolve the profile domains to IPs:
+You can also pre-resolve DNS separately, for debugging or to inspect the
+resolved IPs:
 
 ```bash
 terok-shield resolve my-container
-```
-
-This resolves all domains from the configured profiles using `dig` and caches
-the results in the container's `profile.allowed` file. The cache is
-automatically refreshed when stale (default: 1 hour). Force a refresh with:
-
-```bash
-terok-shield resolve my-container --force
+terok-shield resolve my-container --force   # bypass cache freshness
 ```
 
 ### Changing the default profile
@@ -118,7 +116,9 @@ deduplication (first occurrence wins). This lets you layer profiles —
 for example:
 
 ```bash
-podman run --annotation terok.shield.profiles=base,dev-standard,dev-python,my-project ...
+terok-shield run my-container \
+  --profiles base dev-standard dev-python my-project \
+  -- alpine:latest sh
 ```
 
 Each profile must be listed explicitly. There is no implicit inclusion —

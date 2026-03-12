@@ -41,25 +41,20 @@ is applied externally at container creation time.
 ### 2. Start a shielded container
 
 ```bash
-terok-shield resolve my-container    # pre-resolve DNS → cached IPs
-
-podman run --rm -it \
-  --name my-container \
-  --annotation terok.shield.profiles=dev-standard \
-  --annotation terok.shield.state_dir=$HOME/.local/state/terok-shield/containers/my-container \
-  --annotation terok.shield.version=1 \
-  --hooks-dir ~/.local/state/terok-shield/containers/my-container/hooks \
-  --cap-drop NET_ADMIN --cap-drop NET_RAW \
-  --security-opt no-new-privileges \
-  alpine:latest sh
+terok-shield run my-container -- alpine:latest sh
 ```
 
-The container starts with a default-deny firewall — only destinations in the
-`dev-standard` [allowlist profile](guide/profiles.md) are reachable.
+This resolves DNS, installs OCI hooks, and launches the container with a
+default-deny firewall — only destinations in the `dev-standard`
+[allowlist profile](guide/profiles.md) are reachable. To use custom profiles:
 
-!!! tip "Python API"
-    `Shield.pre_start()` generates all annotations and podman args automatically.
-    This is how [terok](https://github.com/terok-ai/terok) uses terok-shield.
+```bash
+terok-shield run my-container --profiles dev-standard dev-python -- alpine:latest sh
+```
+
+!!! tip "Scripting"
+    For scripting or advanced workflows, use `terok-shield prepare` to get
+    the podman flags without launching — see the [CLI Reference](guide/cli.md).
 
 ### 3. Allow a domain at runtime
 

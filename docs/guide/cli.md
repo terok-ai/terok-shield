@@ -9,6 +9,64 @@ Global options:
 | `--version` | Show version and exit |
 | `--state-dir <path>` | Override state root directory |
 
+## run
+
+Launch a shielded container via podman. Resolves DNS, installs hooks, and
+execs into `podman run` with the correct flags.
+
+```bash
+terok-shield run <container> [--profiles <profile>...] -- <image> [cmd...]
+```
+
+| Argument | Description |
+|----------|-------------|
+| `container` | Container name |
+| `--profiles` | Override default profiles (space-separated) |
+| `-- ...` | Everything after `--` is passed to `podman run` |
+
+```bash
+# Basic usage
+terok-shield run my-container -- alpine:latest sh
+
+# With custom profiles
+terok-shield run my-container --profiles dev-standard dev-python -- alpine:latest sh
+
+# With extra podman flags (after --)
+terok-shield run my-container -- --rm -it -e FOO=bar alpine:latest sh
+```
+
+Shield-managed flags (`--name`, `--hooks-dir`, `--annotation`, `--cap-drop`,
+`--cap-add`, `--security-opt`, `--network`) are set automatically and rejected
+if passed after `--`.
+
+## prepare
+
+Resolve DNS, install hooks, and print the podman flags needed to launch a
+shielded container. Useful for scripting or inspecting what `run` would do.
+
+```bash
+terok-shield prepare <container> [--profiles <profile>...] [--json]
+```
+
+| Argument | Description |
+|----------|-------------|
+| `container` | Container name |
+| `--profiles` | Override default profiles (space-separated) |
+| `--json` | Output as a JSON array (machine-readable) |
+
+```bash
+# Shell-quoted output (default)
+terok-shield prepare my-container
+# --hooks-dir /home/user/.local/state/... --annotation ... --name my-container
+
+# Use with eval for manual podman invocations
+eval "podman run $(terok-shield prepare my-ctr) alpine:latest sh"
+
+# JSON output for programmatic consumption
+terok-shield prepare my-container --json
+# ["--hooks-dir", "/home/user/.local/state/...", "--name", "my-container"]
+```
+
 ## status
 
 Show current shield status: active mode, available profiles, audit state.
