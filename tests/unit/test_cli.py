@@ -30,6 +30,9 @@ from ..testfs import (
     FORBIDDEN_TRAVERSAL,
     NFT_BINARY,
     NONEXISTENT_DIR,
+    STATE_DIR_WITH_SPACES,
+    VOLUME_MOUNT_DATA,
+    VOLUME_MOUNT_HOST,
 )
 from ..testnet import TEST_DOMAIN, TEST_IP1
 
@@ -47,6 +50,45 @@ class TestBuildParser(unittest.TestCase):
             else:
                 ns = parser.parse_args([cmd, "ctr"])
             self.assertEqual(ns.command, cmd)
+
+    def test_prepare_requires_container(self) -> None:
+        """Prepare subcommand requires container arg."""
+        parser = _build_parser()
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["prepare"])
+
+    def test_prepare_basic(self) -> None:
+        """Prepare subcommand parses container arg."""
+        parser = _build_parser()
+        ns = parser.parse_args(["prepare", "my-ctr"])
+        self.assertEqual(ns.command, "prepare")
+        self.assertEqual(ns.container, "my-ctr")
+        self.assertIsNone(ns.profiles)
+
+    def test_prepare_profiles(self) -> None:
+        """Prepare subcommand parses --profiles flag."""
+        parser = _build_parser()
+        ns = parser.parse_args(["prepare", "my-ctr", "--profiles", "base", "extra"])
+        self.assertEqual(ns.profiles, ["base", "extra"])
+
+    def test_run_requires_container(self) -> None:
+        """Run subcommand requires container arg."""
+        parser = _build_parser()
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["run"])
+
+    def test_run_basic(self) -> None:
+        """Run subcommand parses container arg."""
+        parser = _build_parser()
+        ns = parser.parse_args(["run", "my-ctr"])
+        self.assertEqual(ns.command, "run")
+        self.assertEqual(ns.container, "my-ctr")
+
+    def test_run_profiles(self) -> None:
+        """Run subcommand parses --profiles flag."""
+        parser = _build_parser()
+        ns = parser.parse_args(["run", "my-ctr", "--profiles", "base"])
+        self.assertEqual(ns.profiles, ["base"])
 
     def test_resolve_requires_container(self):
         """Resolve subcommand requires container arg."""
@@ -166,6 +208,209 @@ class TestMainDispatch(unittest.TestCase):
 
     @mock.patch("terok_shield.cli.Shield")
     @mock.patch("terok_shield.cli._build_config")
+    def test_prepare(self, mock_cfg: mock.MagicMock, mock_cls: mock.MagicMock) -> None:
+        """CLI prepare calls shield.pre_start() and prints flags."""
+        mock_cls.return_value.pre_start.return_value = ["--annotation", "a=b"]
+        captured = io.StringIO()
+        sys.stdout = captured
+        try:
+            main(["prepare", "test"])
+        finally:
+            sys.stdout = sys.__stdout__
+        mock_cls.return_value.pre_start.assert_called_once_with("test", None)
+        output = captured.getvalue().strip()
+        self.assertIn("--annotation", output)
+        self.assertIn("--name", output)
+        self.assertIn("test", output)
+
+    @mock.patch("terok_shield.cli.Shield")
+    @mock.patch("terok_shield.cli._build_config")
+    def test_prepare_with_profiles(
+        self, mock_cfg: mock.MagicMock, mock_cls: mock.MagicMock
+    ) -> None:
+        """CLI prepare --profiles passes profiles to pre_start."""
+        mock_cls.return_value.pre_start.return_value = ["--annotation", "a=b"]
+        captured = io.StringIO()
+        sys.stdout = captured
+        try:
+            main(["prepare", "test", "--profiles", "base", "extra"])
+        finally:
+            sys.stdout = sys.__stdout__
+        mock_cls.return_value.pre_start.assert_called_once_with("test", ["base", "extra"])
+
+    @mock.patch("os.execvp")
+    @mock.patch("terok_shield.cli.Shield")
+    @mock.patch("terok_shield.cli._build_config")
+    def test_run(
+        self,
+        mock_cfg: mock.MagicMock,
+        mock_cls: mock.MagicMock,
+        mock_exec: mock.MagicMock,
+    ) -> None:
+        """CLI run calls pre_start then execs podman."""
+        mock_cls.return_value.pre_start.return_value = ["--annotation", "a=b"]
+        main(["run", "test", "--", "alpine:latest", "sh"])
+        mock_cls.return_value.pre_start.assert_called_once_with("test", None)
+        mock_exec.assert_called_once()
+        argv = mock_exec.call_args[0][1]
+        self.assertEqual(argv[0], "podman")
+        self.assertEqual(argv[1], "run")
+        self.assertIn("--name", argv)
+        self.assertIn("test", argv)
+        self.assertIn("alpine:latest", argv)
+        self.assertIn("sh", argv)
+
+    @mock.patch("os.execvp")
+    @mock.patch("terok_shield.cli.Shield")
+    @mock.patch("terok_shield.cli._build_config")
+    def test_run_with_profiles(
+        self,
+        mock_cfg: mock.MagicMock,
+        mock_cls: mock.MagicMock,
+        mock_exec: mock.MagicMock,
+    ) -> None:
+        """CLI run --profiles passes profiles to pre_start."""
+        mock_cls.return_value.pre_start.return_value = ["--annotation", "a=b"]
+        # main() receives the full argv; it splits on '--' internally
+        main(["run", "test", "--profiles", "custom", "--", "alpine:latest"])
+        mock_cls.return_value.pre_start.assert_called_once_with("test", ["custom"])
+        mock_exec.assert_called_once()
+
+    @mock.patch("os.execvp")
+    @mock.patch("terok_shield.cli.Shield")
+    @mock.patch("terok_shield.cli._build_config")
+    def test_run_trailing_args_split(
+        self,
+        mock_cfg: mock.MagicMock,
+        mock_cls: mock.MagicMock,
+        mock_exec: mock.MagicMock,
+    ) -> None:
+        """CLI run splits argv on '--' and passes trailing args to podman."""
+        mock_cls.return_value.pre_start.return_value = ["--annotation", "a=b"]
+        main(["run", "test", "--", "-v", VOLUME_MOUNT_HOST, "alpine:latest", "sh"])
+        argv = mock_exec.call_args[0][1]
+        self.assertIn("-v", argv)
+        self.assertIn(VOLUME_MOUNT_HOST, argv)
+        self.assertIn("alpine:latest", argv)
+        self.assertIn("sh", argv)
+
+    @mock.patch("terok_shield.cli.Shield")
+    @mock.patch("terok_shield.cli._build_config")
+    def test_run_no_image_exits_1(self, mock_cfg: mock.MagicMock, mock_cls: mock.MagicMock) -> None:
+        """CLI run without image after '--' exits with code 1."""
+        with self.assertRaises(SystemExit) as ctx:
+            main(["run", "test", "--"])
+        self.assertEqual(ctx.exception.code, 1)
+        # pre_start must NOT be called when image is missing
+        mock_cls.return_value.pre_start.assert_not_called()
+
+    @mock.patch("terok_shield.cli.Shield")
+    @mock.patch("terok_shield.cli._build_config")
+    def test_run_no_separator_exits_1(
+        self, mock_cfg: mock.MagicMock, mock_cls: mock.MagicMock
+    ) -> None:
+        """CLI run without '--' and no args exits with code 1."""
+        with self.assertRaises(SystemExit) as ctx:
+            main(["run", "test"])
+        self.assertEqual(ctx.exception.code, 1)
+        mock_cls.return_value.pre_start.assert_not_called()
+
+    def test_separator_on_non_run_exits_2(self) -> None:
+        """CLI rejects '--' separator on non-run subcommands."""
+        with self.assertRaises(SystemExit) as ctx:
+            main(["resolve", "test", "--", "junk"])
+        self.assertEqual(ctx.exception.code, 2)
+
+    def test_bare_separator_no_command_exits_2(self) -> None:
+        """CLI rejects bare '--' with no subcommand."""
+        with self.assertRaises(SystemExit) as ctx:
+            main(["--", "junk"])
+        self.assertEqual(ctx.exception.code, 2)
+
+    @mock.patch("terok_shield.cli.Shield")
+    @mock.patch("terok_shield.cli._build_config")
+    def test_run_rejects_shield_managed_flags(
+        self, mock_cfg: mock.MagicMock, mock_cls: mock.MagicMock
+    ) -> None:
+        """CLI run rejects flags that conflict with shield configuration."""
+        for flag in (
+            "--name",
+            "--network",
+            "--hooks-dir",
+            "--annotation",
+            "--cap-add",
+            "--cap-drop",
+            "--security-opt",
+        ):
+            with self.assertRaises(SystemExit) as ctx:
+                main(["run", "test", "--", flag, "val", "alpine:latest"])
+            self.assertEqual(ctx.exception.code, 1, f"{flag} should be rejected")
+            mock_cls.return_value.pre_start.assert_not_called()
+
+        # Equals-form (--flag=value) must also be rejected
+        for flag_eq in (
+            "--network=host",
+            "--name=other",
+            "--annotation=a=b",
+            "--hooks-dir=/tmp",
+            "--cap-add=NET_ADMIN",
+            "--cap-drop=ALL",
+            "--security-opt=no-new-privileges",
+        ):
+            with self.assertRaises(SystemExit) as ctx:
+                main(["run", "test", "--", flag_eq, "alpine:latest"])
+            self.assertEqual(ctx.exception.code, 1, f"{flag_eq} should be rejected")
+            mock_cls.return_value.pre_start.assert_not_called()
+
+    @mock.patch("os.execvp")
+    @mock.patch("terok_shield.cli.Shield")
+    @mock.patch("terok_shield.cli._build_config")
+    def test_run_allows_non_managed_flags(
+        self,
+        mock_cfg: mock.MagicMock,
+        mock_cls: mock.MagicMock,
+        mock_exec: mock.MagicMock,
+    ) -> None:
+        """CLI run passes through non-managed podman flags."""
+        mock_cls.return_value.pre_start.return_value = ["--annotation", "a=b"]
+        main(["run", "test", "--", "-d", "-e", "FOO=bar", "alpine:latest"])
+        mock_exec.assert_called_once()
+        argv = mock_exec.call_args[0][1]
+        self.assertIn("-d", argv)
+        self.assertIn("-e", argv)
+
+    @mock.patch("terok_shield.cli.Shield")
+    @mock.patch("terok_shield.cli._build_config")
+    def test_prepare_json_output(self, mock_cfg: mock.MagicMock, mock_cls: mock.MagicMock) -> None:
+        """CLI prepare --json outputs a JSON array."""
+        mock_cls.return_value.pre_start.return_value = ["--annotation", "a=b"]
+        captured = io.StringIO()
+        sys.stdout = captured
+        try:
+            main(["prepare", "test", "--json"])
+        finally:
+            sys.stdout = sys.__stdout__
+        result = json.loads(captured.getvalue())
+        self.assertIsInstance(result, list)
+        self.assertIn("--annotation", result)
+        self.assertIn("--name", result)
+        self.assertIn("test", result)
+
+    @mock.patch("terok_shield.cli.Shield")
+    @mock.patch("terok_shield.cli._build_config")
+    def test_main_none_argv(self, mock_cfg: mock.MagicMock, mock_cls: mock.MagicMock) -> None:
+        """CLI main(None) reads from sys.argv."""
+        mock_cls.return_value.status.return_value = {
+            "mode": "hook",
+            "audit_enabled": True,
+            "profiles": ["dev-standard"],
+        }
+        with mock.patch("sys.argv", ["terok-shield", "status"]):
+            main(None)
+        mock_cls.return_value.status.assert_called_once()
+
+    @mock.patch("terok_shield.cli.Shield")
+    @mock.patch("terok_shield.cli._build_config")
     def test_resolve(self, mock_cfg: mock.MagicMock, mock_cls: mock.MagicMock) -> None:
         """CLI resolve calls shield.resolve()."""
         mock_cls.return_value.resolve.return_value = [TEST_IP1]
@@ -260,6 +505,45 @@ class TestMainDispatch(unittest.TestCase):
 
 class TestMainOutputFormatting(unittest.TestCase):
     """Test CLI output formatting for various subcommands."""
+
+    @mock.patch("terok_shield.cli.Shield")
+    @mock.patch("terok_shield.cli._build_config")
+    def test_prepare_output_shell_safe(
+        self, mock_cfg: mock.MagicMock, mock_cls: mock.MagicMock
+    ) -> None:
+        """CLI prepare output is shell-safe (values with spaces are quoted)."""
+        annotation_val = f"terok.shield.state_dir={STATE_DIR_WITH_SPACES}"
+        mock_cls.return_value.pre_start.return_value = [
+            "--annotation",
+            annotation_val,
+        ]
+        captured = io.StringIO()
+        sys.stdout = captured
+        try:
+            main(["prepare", "test"])
+        finally:
+            sys.stdout = sys.__stdout__
+        output = captured.getvalue().strip()
+        # The path with spaces should be quoted
+        self.assertIn(f"'{annotation_val}'", output)
+
+    @mock.patch("os.execvp")
+    @mock.patch("terok_shield.cli.Shield")
+    @mock.patch("terok_shield.cli._build_config")
+    def test_run_passes_user_podman_flags(
+        self,
+        mock_cfg: mock.MagicMock,
+        mock_cls: mock.MagicMock,
+        mock_exec: mock.MagicMock,
+    ) -> None:
+        """CLI run passes user flags (like -v, -p) through to podman."""
+        mock_cls.return_value.pre_start.return_value = ["--annotation", "a=b"]
+        main(["run", "test", "--", "-v", VOLUME_MOUNT_DATA, "-p", "8080:80", "alpine:latest"])
+        argv = mock_exec.call_args[0][1]
+        self.assertIn("-v", argv)
+        self.assertIn(VOLUME_MOUNT_DATA, argv)
+        self.assertIn("-p", argv)
+        self.assertIn("8080:80", argv)
 
     @mock.patch("terok_shield.cli.Shield")
     @mock.patch("terok_shield.cli._build_config")

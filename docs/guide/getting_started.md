@@ -22,63 +22,42 @@ Verify the installation:
 terok-shield --version
 ```
 
-## Resolve DNS allowlists
-
-Before starting a container, pre-resolve the domains from your allowlist
-profiles into cached IPs:
+## Quick start
 
 ```bash
-terok-shield resolve my-container
+terok-shield run my-container -- alpine:latest sh
 ```
 
-```text
-Resolved 28 IPs for my-container
-  140.82.121.3
-  140.82.121.4
-  ...
-```
+This single command:
 
-The IPs are cached per-container and automatically refreshed when stale
-(default: 1 hour). Force a refresh with `--force`.
+1. Resolves DNS domains from your allowlist profiles into cached IPs
+2. Installs OCI hooks in the container's state directory
+3. Launches `podman run` with all required flags (annotations, hooks-dir,
+   cap-drop, security-opt)
 
-## Run a shielded container
+The container starts with a default-deny firewall — only destinations in the
+default `dev-standard` profile are reachable.
 
-The simplest way is to let `pre_start()` handle everything via the Python API
-(this is how [terok](https://github.com/terok-ai/terok) uses it). For
-standalone CLI usage, you need to pass the right podman flags:
+### Multiple profiles
 
 ```bash
-podman run --rm -it \
-  --name my-container \
-  --annotation terok.shield.profiles=dev-standard \
-  --annotation terok.shield.state_dir=$HOME/.local/state/terok-shield/containers/my-container \
-  --annotation terok.shield.version=1 \
-  --hooks-dir ~/.local/state/terok-shield/containers/my-container/hooks \
-  --cap-drop NET_ADMIN --cap-drop NET_RAW \
-  --security-opt no-new-privileges \
-  alpine:latest sh
+terok-shield run my-container --profiles dev-standard dev-python my-project \
+  -- alpine:latest sh
 ```
 
-Breaking this down:
+### Passing extra podman flags
 
-| Flag | Purpose |
-|------|---------|
-| `--name my-container` | Names the container (used by `allow`, `deny`, `rules`, etc.) |
-| `--annotation terok.shield.profiles=dev-standard` | Tells the OCI hook which allowlist profiles to apply |
-| `--annotation terok.shield.state_dir=...` | Where the hook finds its state bundle |
-| `--annotation terok.shield.version=1` | Bundle version (must match installed version) |
-| `--hooks-dir ...` | Points podman to the container's hook directory |
-| `--cap-drop NET_ADMIN` | Prevents the workload from modifying the firewall |
-| `--cap-drop NET_RAW` | Prevents raw socket access |
-| `--security-opt no-new-privileges` | Prevents privilege escalation |
+Everything after `--` is forwarded to `podman run`. Shield-managed flags
+(`--name`, `--hooks-dir`, `--annotation`, `--cap-drop`, `--security-opt`)
+are set automatically and cannot be overridden:
 
-!!! tip "Multiple profiles"
-    Combine profiles with commas:
-    `--annotation terok.shield.profiles=dev-standard,dev-python,nvidia-hpc`
+```bash
+terok-shield run my-container -- --rm -it -e FOO=bar alpine:latest sh
+```
 
-!!! tip "Easier with the Python API"
-    `Shield.pre_start()` generates all annotations and podman args automatically.
-    The CLI flags above are what it produces under the hood.
+!!! tip "Scripting and advanced usage"
+    Use `terok-shield prepare` to get the podman flags without launching.
+    See the [CLI Reference](cli.md#prepare) for details.
 
 ### What happens at startup
 

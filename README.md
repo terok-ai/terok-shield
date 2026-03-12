@@ -65,21 +65,16 @@ EOF
 ### 2. Start a container with the shield
 
 ```bash
-terok-shield resolve my-container    # pre-resolve DNS → cached IPs
-
-podman run --rm -it \
-  --name my-container \
-  --annotation terok.shield.profiles=dev-standard,my-project \
-  --annotation terok.shield.state_dir=$HOME/.local/state/terok-shield/containers/my-container \
-  --annotation terok.shield.version=1 \
-  --hooks-dir ~/.local/state/terok-shield/containers/my-container/hooks \
-  --cap-drop NET_ADMIN --cap-drop NET_RAW \
-  --security-opt no-new-privileges \
-  alpine:latest sh
+terok-shield run my-container -- alpine:latest sh
 ```
 
-The container starts with a default-deny firewall — only destinations in the
-`dev-standard` and `my-project` profiles are reachable.
+This resolves DNS, installs OCI hooks, and launches the container with a
+default-deny firewall — only destinations in the `dev-standard` profile are
+reachable. To use custom profiles:
+
+```bash
+terok-shield run my-container --profiles dev-standard my-project -- alpine:latest sh
+```
 
 ### 3. Allow a domain at runtime
 

@@ -62,27 +62,20 @@ Each container's hooks and state are isolated in its own directory:
 
 ### Running containers
 
-Via the Python API (recommended — this is how terok uses it):
+Via the CLI (recommended for standalone usage):
+
+```bash
+terok-shield run my-container -- my-image
+```
+
+Via the Python API (this is how [terok](https://github.com/terok-ai/terok)
+uses terok-shield as a library):
 
 ```python
 from terok_shield import Shield, ShieldConfig
 shield = Shield(ShieldConfig(state_dir=Path("~/.local/state/terok-shield/containers/my-ctr")))
 extra_args = shield.pre_start("my-ctr", ["dev-standard"])
 # pass extra_args to podman run
-```
-
-Or manually with the CLI-provided annotations:
-
-```bash
-podman run \
-  --name my-container \
-  --annotation terok.shield.profiles=dev-standard \
-  --annotation terok.shield.state_dir=$HOME/.local/state/terok-shield/containers/my-container \
-  --annotation terok.shield.version=1 \
-  --hooks-dir ~/.local/state/terok-shield/containers/my-container/hooks \
-  --cap-drop NET_ADMIN --cap-drop NET_RAW \
-  --security-opt no-new-privileges \
-  my-image
 ```
 
 !!! note "Future modes"

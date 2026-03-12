@@ -130,5 +130,6 @@ unrestricted."**
 | Self-verification fails | Hook exits → torn down |
 
 The fail-closed guarantee applies once hooks are installed by `pre_start()`.
-**Callers must invoke `pre_start()` before starting containers** — without hooks,
-containers start without firewall rules and no egress filtering is applied.
+**Use `terok-shield run` (or call `pre_start()` via the Python API) before
+starting containers** — without hooks, containers start without firewall rules
+and no egress filtering is applied.

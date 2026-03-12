@@ -36,6 +36,13 @@ NONEXISTENT_SENTINEL: str = str(NONEXISTENT_DIR / "sentinel")
 FORBIDDEN_TRAVERSAL = "../nonexistent/forbidden"
 FORBIDDEN_ABSOLUTE = "/nonexistent/forbidden"
 
+# ── Volume mount paths (for CLI run/prepare tests) ──
+# These are podman -v bind-mount strings, not real filesystem paths.
+
+VOLUME_MOUNT_HOST = "/host:/ctr"
+VOLUME_MOUNT_DATA = "/data:/data"
+STATE_DIR_WITH_SPACES = "/path/with spaces/dir"
+
 # ── Binary paths (for mocking shutil.which results) ──
 
 NFT_BINARY = "/usr/bin/nft"
