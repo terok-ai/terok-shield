@@ -1,31 +1,31 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""Integration tests: shield_pre_start and firewall application."""
+"""Integration tests: Shield.pre_start and firewall application."""
 
 from pathlib import Path
 
 import pytest
 
-from terok_shield import ShieldConfig, shield_pre_start, shield_setup
+from terok_shield import Shield, ShieldConfig
 
 from ..conftest import nft_missing, podman_missing
 from ..helpers import assert_ruleset_applied
 
-# ── shield_pre_start ─────────────────────────────────────
+# ── Shield.pre_start ─────────────────────────────────────
 
 
 @pytest.mark.needs_podman
 @podman_missing
 @nft_missing
 class TestShieldPreStart:
-    """Verify ``shield_pre_start()`` returns correct podman args."""
+    """Verify ``Shield.pre_start()`` returns correct podman args."""
 
     def test_pre_start_returns_podman_args(self, shield_env: Path) -> None:
         """Returned args contain ``--hooks-dir``, ``--annotation``, ``--cap-drop``."""
-        cfg = ShieldConfig()
-        shield_setup(config=cfg)
-        args = shield_pre_start("test-container", config=cfg)
+        shield = Shield(ShieldConfig())
+        shield.setup()
+        args = shield.pre_start("test-container")
 
         assert "--hooks-dir" in args
         assert "--annotation" in args
@@ -33,17 +33,17 @@ class TestShieldPreStart:
         assert "--security-opt" in args
 
     def test_pre_start_without_setup_raises(self, shield_env: Path) -> None:
-        """Calling ``shield_pre_start()`` before setup raises ``RuntimeError``."""
-        cfg = ShieldConfig()
+        """Calling ``Shield.pre_start()`` before setup raises ``RuntimeError``."""
+        shield = Shield(ShieldConfig())
         with pytest.raises(RuntimeError, match="hook not installed"):
-            shield_pre_start("test-container", config=cfg)
+            shield.pre_start("test-container")
 
     @pytest.mark.needs_internet
     def test_pre_start_resolves_dns(self, shield_env: Path) -> None:
-        """The resolved cache file is created after ``shield_pre_start()``."""
-        cfg = ShieldConfig()
-        shield_setup(config=cfg)
-        shield_pre_start("dns-test-ctr", config=cfg)
+        """The resolved cache file is created after ``Shield.pre_start()``."""
+        shield = Shield(ShieldConfig())
+        shield.setup()
+        shield.pre_start("dns-test-ctr")
 
         resolved_dir = shield_env / "resolved"
         assert resolved_dir.is_dir()

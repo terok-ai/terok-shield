@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from terok_shield import shield_status
+from terok_shield import Shield, ShieldConfig
 from terok_shield.cli import main
 
 # ── Public API status ────────────────────────────────────
@@ -15,11 +15,11 @@ from terok_shield.cli import main
 
 @pytest.mark.needs_host_features
 class TestShieldStatus:
-    """Verify ``shield_status()`` returns expected structure."""
+    """Verify ``Shield.status()`` returns expected structure."""
 
     def test_status_returns_dict(self, shield_env: Path) -> None:
         """Status dict contains expected keys."""
-        status = shield_status()
+        status = Shield(ShieldConfig()).status()
         assert isinstance(status, dict)
         assert "mode" in status
         assert "profiles" in status

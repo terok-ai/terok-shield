@@ -11,7 +11,7 @@ from importlib import resources as importlib_resources
 from pathlib import Path
 from typing import Self
 
-from .config import ShieldConfig, shield_profiles_dir
+from .config import ShieldConfig
 from .validation import parse_entries as _parse_entries, validate_safe_name
 
 _BUNDLED_PACKAGE = "terok_shield.resources.dns"
@@ -105,41 +105,3 @@ class ProfileLoader:
             if directory.is_dir():
                 names.update(f.stem for f in directory.glob("*.txt"))
         return sorted(names)
-
-
-# ── Module-level free functions (backwards compat) ───────
-
-
-def _default_loader() -> ProfileLoader:
-    """Return a ProfileLoader using environment-derived paths."""
-    return ProfileLoader(user_dir=shield_profiles_dir())
-
-
-def load_profile(name: str) -> list[str]:
-    """Load a profile by name and return its entries.
-
-    User profiles in ``shield_profiles_dir()`` take precedence over
-    bundled profiles in ``resources/dns/``.
-
-    Raises:
-        ValueError: If the name contains path separators or traversal.
-        FileNotFoundError: If the profile does not exist.
-    """
-    return _default_loader().load_profile(name)
-
-
-def compose_profiles(names: list[str]) -> list[str]:
-    """Load and merge multiple profiles, deduplicating entries.
-
-    Preserves insertion order (first occurrence wins).
-
-    Raises:
-        ValueError: If any name contains path separators or traversal.
-        FileNotFoundError: If any named profile does not exist.
-    """
-    return _default_loader().compose_profiles(names)
-
-
-def list_profiles() -> list[str]:
-    """List available profile names (bundled + user, deduplicated)."""
-    return _default_loader().list_profiles()

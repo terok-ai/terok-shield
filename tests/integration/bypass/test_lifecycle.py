@@ -14,19 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from terok_shield import (
-    ShieldConfig,
-    ShieldState,
-    shield_allow,
-    shield_deny,
-    shield_down,
-    shield_pre_start,
-    shield_rules,
-    shield_setup,
-    shield_state,
-    shield_up,
-    tail_log,
-)
+from terok_shield import Shield, ShieldConfig, ShieldState
 from tests.testnet import (
     ALLOWED_TARGET_HTTP,
     ALLOWED_TARGET_IPS,
@@ -39,6 +27,10 @@ from ..conftest import CTR_PREFIX, IMAGE, nft_missing, podman_missing
 from ..helpers import assert_blocked, assert_connectable, assert_reachable, start_shielded_container
 
 
+def _shield() -> Shield:
+    return Shield(ShieldConfig())
+
+
 @pytest.mark.needs_podman
 @pytest.mark.needs_internet
 @podman_missing
@@ -49,31 +41,33 @@ class TestBypassBasicLifecycle:
 
     def test_up_down_up_cycle(self, shielded_container: str) -> None:
         """Full cycle: UP -> DOWN -> UP with traffic checks at each step."""
+        shield = _shield()
         # Initial state: UP, traffic blocked
-        assert shield_state(shielded_container) == ShieldState.UP
+        assert shield.state(shielded_container) == ShieldState.UP
         assert_blocked(shielded_container, BLOCKED_TARGET_HTTP)
 
         # Shield down: traffic allowed
-        shield_down(shielded_container)
-        assert shield_state(shielded_container) == ShieldState.DOWN
+        shield.down(shielded_container)
+        assert shield.state(shielded_container) == ShieldState.DOWN
         assert_connectable(shielded_container, BLOCKED_TARGET_IP, BLOCKED_TARGET_DNS_PORT)
 
         # Shield up: traffic blocked again
-        shield_up(shielded_container)
-        assert shield_state(shielded_container) == ShieldState.UP
+        shield.up(shielded_container)
+        assert shield.state(shielded_container) == ShieldState.UP
         assert_blocked(shielded_container, BLOCKED_TARGET_HTTP)
 
     def test_up_down_all_up_cycle(self, shielded_container: str) -> None:
         """Full cycle with allow_all: UP -> DOWN_ALL -> UP."""
-        shield_down(shielded_container, allow_all=True)
-        assert shield_state(shielded_container) == ShieldState.DOWN_ALL
+        shield = _shield()
+        shield.down(shielded_container, allow_all=True)
+        assert shield.state(shielded_container) == ShieldState.DOWN_ALL
 
-        rules = shield_rules(shielded_container)
+        rules = shield.rules(shielded_container)
         assert "policy accept" in rules
         assert_connectable(shielded_container, BLOCKED_TARGET_IP, BLOCKED_TARGET_DNS_PORT)
 
-        shield_up(shielded_container)
-        assert shield_state(shielded_container) == ShieldState.UP
+        shield.up(shielded_container)
+        assert shield.state(shielded_container) == ShieldState.UP
         assert_blocked(shielded_container, BLOCKED_TARGET_HTTP)
 
 
@@ -86,26 +80,29 @@ class TestBypassIdempotency:
     """Verify repeated operations are safe and idempotent."""
 
     def test_down_twice_stays_down(self, shielded_container: str) -> None:
-        """Calling shield_down() twice does not break anything."""
-        shield_down(shielded_container)
-        assert shield_state(shielded_container) == ShieldState.DOWN
+        """Calling shield.down() twice does not break anything."""
+        shield = _shield()
+        shield.down(shielded_container)
+        assert shield.state(shielded_container) == ShieldState.DOWN
 
-        shield_down(shielded_container)
-        assert shield_state(shielded_container) == ShieldState.DOWN
+        shield.down(shielded_container)
+        assert shield.state(shielded_container) == ShieldState.DOWN
         assert_connectable(shielded_container, BLOCKED_TARGET_IP, BLOCKED_TARGET_DNS_PORT)
 
     def test_up_twice_stays_up(self, shielded_container: str) -> None:
-        """Calling shield_up() on an already-UP container is safe."""
-        assert shield_state(shielded_container) == ShieldState.UP
+        """Calling shield.up() on an already-UP container is safe."""
+        shield = _shield()
+        assert shield.state(shielded_container) == ShieldState.UP
 
-        shield_up(shielded_container)
-        assert shield_state(shielded_container) == ShieldState.UP
+        shield.up(shielded_container)
+        assert shield.state(shielded_container) == ShieldState.UP
         assert_blocked(shielded_container, BLOCKED_TARGET_HTTP)
 
     def test_up_without_prior_down(self, shielded_container: str) -> None:
-        """shield_up() on a freshly shielded container is a no-op."""
-        shield_up(shielded_container)
-        assert shield_state(shielded_container) == ShieldState.UP
+        """shield.up() on a freshly shielded container is a no-op."""
+        shield = _shield()
+        shield.up(shielded_container)
+        assert shield.state(shielded_container) == ShieldState.UP
         assert_blocked(shielded_container, BLOCKED_TARGET_HTTP)
 
 
@@ -119,26 +116,28 @@ class TestBypassModeSwitch:
 
     def test_down_to_down_all(self, shielded_container: str) -> None:
         """Switch from protected bypass to full bypass."""
-        shield_down(shielded_container)
-        assert shield_state(shielded_container) == ShieldState.DOWN
+        shield = _shield()
+        shield.down(shielded_container)
+        assert shield.state(shielded_container) == ShieldState.DOWN
 
-        shield_down(shielded_container, allow_all=True)
-        assert shield_state(shielded_container) == ShieldState.DOWN_ALL
+        shield.down(shielded_container, allow_all=True)
+        assert shield.state(shielded_container) == ShieldState.DOWN_ALL
 
         # Private-range rules should be gone
-        rules = shield_rules(shielded_container)
+        rules = shield.rules(shielded_container)
         assert "TEROK_SHIELD_PRIVATE" not in rules
 
     def test_down_all_to_down(self, shielded_container: str) -> None:
         """Switch from full bypass back to protected bypass."""
-        shield_down(shielded_container, allow_all=True)
-        assert shield_state(shielded_container) == ShieldState.DOWN_ALL
+        shield = _shield()
+        shield.down(shielded_container, allow_all=True)
+        assert shield.state(shielded_container) == ShieldState.DOWN_ALL
 
-        shield_down(shielded_container)
-        assert shield_state(shielded_container) == ShieldState.DOWN
+        shield.down(shielded_container)
+        assert shield.state(shielded_container) == ShieldState.DOWN
 
         # Private-range rules should be restored
-        rules = shield_rules(shielded_container)
+        rules = shield.rules(shielded_container)
         assert "TEROK_SHIELD_PRIVATE" in rules
 
 
@@ -151,19 +150,20 @@ class TestBypassWithAllowDeny:
     """Verify allow/deny interactions during bypass."""
 
     def test_allow_during_bypass_does_not_persist(self, shielded_container: str) -> None:
-        """IPs added via allow during bypass are lost on shield_up().
+        """IPs added via allow during bypass are lost on shield.up().
 
-        shield_up() atomically replaces the ruleset, so any runtime
-        allow_ip() calls during bypass do not survive the transition.
+        shield.up() atomically replaces the ruleset, so any runtime
+        allow() calls during bypass do not survive the transition.
         Only cached IPs from the .resolved file are re-added.
         """
-        shield_down(shielded_container)
+        shield = _shield()
+        shield.down(shielded_container)
 
         # Add IP to allow set during bypass
-        shield_allow(shielded_container, BLOCKED_TARGET_IP)
+        shield.allow(shielded_container, BLOCKED_TARGET_IP)
 
         # Restore shield — the runtime add is lost
-        shield_up(shielded_container)
+        shield.up(shielded_container)
 
         # Verify the IP is not allowed
         assert_blocked(shielded_container, BLOCKED_TARGET_HTTP)
@@ -174,10 +174,11 @@ class TestBypassWithAllowDeny:
         In bypass mode the output chain policy is accept, so removing
         an IP from the allow set has no effect on traffic flow.
         """
-        shield_down(shielded_container)
+        shield = _shield()
+        shield.down(shielded_container)
 
         # Deny shouldn't affect traffic in bypass mode
-        shield_deny(shielded_container, BLOCKED_TARGET_IP)
+        shield.deny(shielded_container, BLOCKED_TARGET_IP)
         assert_connectable(shielded_container, BLOCKED_TARGET_IP, BLOCKED_TARGET_DNS_PORT)
 
 
@@ -190,24 +191,24 @@ class TestBypassIPRestoration:
     """Verify cached IPs are restored when going back up."""
 
     def test_cached_ips_restored_on_shield_up(self, shield_env: Path, _pull_image: None) -> None:
-        """Pre-resolved IPs from .resolved cache are re-added on shield_up().
+        """Pre-resolved IPs from .resolved cache are re-added on shield.up().
 
         Full lifecycle: setup -> pre_start (populates cache) -> run ->
         allow -> verify reachable -> down -> up -> verify still reachable.
         """
-        cfg = ShieldConfig()
-        shield_setup(config=cfg)
+        shield = Shield(ShieldConfig())
+        shield.setup()
 
         name = f"{CTR_PREFIX}-bypass-cache-{os.getpid()}-{os.urandom(4).hex()}"
         subprocess.run(["podman", "rm", "-f", name], capture_output=True)
 
         try:
-            extra_args = shield_pre_start(name, config=cfg)
+            extra_args = shield.pre_start(name)
             start_shielded_container(name, extra_args, IMAGE)
 
             # Allow Cloudflare IPs and verify reachability
             for ip in ALLOWED_TARGET_IPS:
-                shield_allow(name, ip, config=cfg)
+                shield.allow(name, ip)
             assert_reachable(name, ALLOWED_TARGET_HTTP)
 
             # Write these IPs to the resolved cache (simulating DNS resolution)
@@ -216,12 +217,12 @@ class TestBypassIPRestoration:
             (resolved_dir / f"{name}.resolved").write_text("\n".join(ALLOWED_TARGET_IPS) + "\n")
 
             # Go down (all traffic allowed regardless)
-            shield_down(name)
+            shield.down(name)
             assert_reachable(name, ALLOWED_TARGET_HTTP)
 
             # Come back up — cached IPs should be restored
-            shield_up(name)
-            assert shield_state(name) == ShieldState.UP
+            shield.up(name)
+            assert shield.state(name) == ShieldState.UP
             assert_reachable(name, ALLOWED_TARGET_HTTP)
 
         finally:
@@ -237,11 +238,12 @@ class TestBypassAuditTrail:
     """Verify audit log events for bypass operations."""
 
     def test_down_up_audit_events(self, shielded_container: str) -> None:
-        """shield_down and shield_up produce audit log entries."""
-        shield_down(shielded_container)
-        shield_up(shielded_container)
+        """shield.down and shield.up produce audit log entries."""
+        shield = _shield()
+        shield.down(shielded_container)
+        shield.up(shielded_container)
 
-        events = list(tail_log(shielded_container))
+        events = list(shield.tail_log(shielded_container))
         actions = [e["action"] for e in events]
         assert "shield_down" in actions
         assert "shield_up" in actions
@@ -252,10 +254,11 @@ class TestBypassAuditTrail:
         assert down_idx < up_idx
 
     def test_down_all_logs_detail(self, shielded_container: str) -> None:
-        """shield_down(allow_all=True) logs the allow_all detail."""
-        shield_down(shielded_container, allow_all=True)
+        """shield.down(allow_all=True) logs the allow_all detail."""
+        shield = _shield()
+        shield.down(shielded_container, allow_all=True)
 
-        events = list(tail_log(shielded_container))
+        events = list(shield.tail_log(shielded_container))
         down_events = [e for e in events if e["action"] == "shield_down"]
         assert any(e.get("detail") == "allow_all=True" for e in down_events)
 
@@ -283,24 +286,24 @@ class TestBypassFullE2E:
         5. Verify blocked target is blocked again
         6. Audit trail has the complete story
         """
-        cfg = ShieldConfig()
-        shield_setup(config=cfg)
+        shield = Shield(ShieldConfig())
+        shield.setup()
 
         name = f"{CTR_PREFIX}-bypass-e2e-{os.getpid()}-{os.urandom(4).hex()}"
         subprocess.run(["podman", "rm", "-f", name], capture_output=True)
 
         try:
-            extra_args = shield_pre_start(name, config=cfg)
+            extra_args = shield.pre_start(name)
             start_shielded_container(name, extra_args, IMAGE)
 
             # Step 1: Default deny is in effect
-            assert shield_state(name) == ShieldState.UP
+            assert shield.state(name) == ShieldState.UP
             assert_blocked(name, BLOCKED_TARGET_HTTP)
             assert_blocked(name, ALLOWED_TARGET_HTTP)
 
             # Step 2: Allow Cloudflare, write cache
             for ip in ALLOWED_TARGET_IPS:
-                shield_allow(name, ip, config=cfg)
+                shield.allow(name, ip)
             assert_reachable(name, ALLOWED_TARGET_HTTP)
             assert_blocked(name, BLOCKED_TARGET_HTTP)
 
@@ -310,24 +313,24 @@ class TestBypassFullE2E:
             (resolved_dir / f"{name}.resolved").write_text("\n".join(ALLOWED_TARGET_IPS) + "\n")
 
             # Step 3: Down for discovery
-            shield_down(name)
-            assert shield_state(name) == ShieldState.DOWN
+            shield.down(name)
+            assert shield.state(name) == ShieldState.DOWN
             assert_reachable(name, ALLOWED_TARGET_HTTP)
             assert_connectable(name, BLOCKED_TARGET_IP, BLOCKED_TARGET_DNS_PORT)
 
             # Step 4: Switch to full bypass to also check RFC1918 destinations
-            shield_down(name, allow_all=True)
-            assert shield_state(name) == ShieldState.DOWN_ALL
+            shield.down(name, allow_all=True)
+            assert shield.state(name) == ShieldState.DOWN_ALL
             assert_connectable(name, BLOCKED_TARGET_IP, BLOCKED_TARGET_DNS_PORT)
 
             # Step 5: Back to protected bypass
-            shield_down(name)
-            assert shield_state(name) == ShieldState.DOWN
+            shield.down(name)
+            assert shield.state(name) == ShieldState.DOWN
             assert_connectable(name, BLOCKED_TARGET_IP, BLOCKED_TARGET_DNS_PORT)
 
             # Step 6: Restore the shield
-            shield_up(name)
-            assert shield_state(name) == ShieldState.UP
+            shield.up(name)
+            assert shield.state(name) == ShieldState.UP
 
             # Cached IPs should be restored
             assert_reachable(name, ALLOWED_TARGET_HTTP)
@@ -335,7 +338,7 @@ class TestBypassFullE2E:
             assert_blocked(name, BLOCKED_TARGET_HTTP)
 
             # Step 7: Verify audit trail tells the whole story
-            events = list(tail_log(name))
+            events = list(shield.tail_log(name))
             actions = [e["action"] for e in events]
             assert "setup" in actions
             assert "allowed" in actions
@@ -357,20 +360,21 @@ class TestBypassFullE2E:
         Users might accidentally run down twice, or script rapid toggles.
         The shield must remain consistent throughout.
         """
+        shield = _shield()
         # Rapid toggles
-        shield_down(shielded_container)
-        shield_up(shielded_container)
-        shield_down(shielded_container)
-        shield_down(shielded_container, allow_all=True)
-        shield_up(shielded_container)
-        shield_up(shielded_container)
+        shield.down(shielded_container)
+        shield.up(shielded_container)
+        shield.down(shielded_container)
+        shield.down(shielded_container, allow_all=True)
+        shield.up(shielded_container)
+        shield.up(shielded_container)
 
         # Final state must be UP and enforcing
-        assert shield_state(shielded_container) == ShieldState.UP
+        assert shield.state(shielded_container) == ShieldState.UP
         assert_blocked(shielded_container, BLOCKED_TARGET_HTTP)
 
         # Ruleset must be valid
-        rules = shield_rules(shielded_container)
+        rules = shield.rules(shielded_container)
         assert "policy drop" in rules
         assert "terok_shield" in rules
 
@@ -380,19 +384,20 @@ class TestBypassFullE2E:
         Demonstrates that the state is clean after a bypass cycle:
         the user can re-allow IPs just like on a fresh container.
         """
+        shield = _shield()
         # Allow before bypass
         for ip in ALLOWED_TARGET_IPS:
-            shield_allow(shielded_container, ip)
+            shield.allow(shielded_container, ip)
         assert_reachable(shielded_container, ALLOWED_TARGET_HTTP)
 
         # Bypass cycle
-        shield_down(shielded_container)
-        shield_up(shielded_container)
+        shield.down(shielded_container)
+        shield.up(shielded_container)
 
         # Without cache, the allowed IPs are gone (ruleset was replaced)
         assert_blocked(shielded_container, ALLOWED_TARGET_HTTP)
 
         # But we can re-allow them
         for ip in ALLOWED_TARGET_IPS:
-            shield_allow(shielded_container, ip)
+            shield.allow(shielded_container, ip)
         assert_reachable(shielded_container, ALLOWED_TARGET_HTTP)

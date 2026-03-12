@@ -5,7 +5,7 @@
 
 import pytest
 
-from terok_shield import shield_down, shield_rules, shield_up
+from terok_shield import Shield, ShieldConfig
 from terok_shield.cli import main
 from terok_shield.nft_constants import BYPASS_LOG_PREFIX
 
@@ -20,11 +20,11 @@ from ..conftest import nft_missing, podman_missing
 @nft_missing
 @pytest.mark.usefixtures("nft_in_netns")
 class TestRulesAPI:
-    """Verify ``shield_rules()`` returns the applied ruleset."""
+    """Verify ``Shield.rules()`` returns the applied ruleset."""
 
     def test_shield_rules_returns_ruleset(self, shielded_container: str) -> None:
-        """``shield_rules()`` returns text containing ``terok_shield``."""
-        rules = shield_rules(shielded_container)
+        """``Shield.rules()`` returns text containing ``terok_shield``."""
+        rules = Shield(ShieldConfig()).rules(shielded_container)
         assert "terok_shield" in rules
         assert "allow_v4" in rules
 
@@ -58,7 +58,7 @@ class TestRulesCLI:
         self, shielded_container: str, capsys: pytest.CaptureFixture
     ) -> None:
         """``main(["rules", container])`` shows State: down after bypass."""
-        shield_down(shielded_container)
+        Shield(ShieldConfig()).down(shielded_container)
         main(["rules", shielded_container])
         captured = capsys.readouterr()
         assert "State: down" in captured.out
@@ -73,22 +73,24 @@ class TestRulesCLI:
 @nft_missing
 @pytest.mark.usefixtures("nft_in_netns")
 class TestRulesBypassAPI:
-    """Verify ``shield_rules()`` returns correct bypass ruleset."""
+    """Verify ``Shield.rules()`` returns correct bypass ruleset."""
 
     def test_rules_contain_bypass_prefix(self, shielded_container: str) -> None:
         """Bypass ruleset contains the TEROK_SHIELD_BYPASS log prefix."""
-        shield_down(shielded_container)
-        rules = shield_rules(shielded_container)
+        shield = Shield(ShieldConfig())
+        shield.down(shielded_container)
+        rules = shield.rules(shielded_container)
         assert BYPASS_LOG_PREFIX in rules
         assert "policy accept" in rules
 
     def test_rules_restored_after_up(self, shielded_container: str) -> None:
-        """Rules revert to deny-all after shield_up()."""
-        shield_down(shielded_container)
-        assert "policy accept" in shield_rules(shielded_container)
+        """Rules revert to deny-all after shield.up()."""
+        shield = Shield(ShieldConfig())
+        shield.down(shielded_container)
+        assert "policy accept" in shield.rules(shielded_container)
 
-        shield_up(shielded_container)
-        rules = shield_rules(shielded_container)
+        shield.up(shielded_container)
+        rules = shield.rules(shielded_container)
         assert "policy drop" in rules
         assert BYPASS_LOG_PREFIX not in rules
 
@@ -106,8 +108,8 @@ class TestLogsCLI:
 
     def test_cli_logs(self, shielded_container: str, capsys: pytest.CaptureFixture) -> None:
         """``main(["logs", "--container", container])`` shows log entries."""
-        # The shielded_container fixture logs a "setup" event via shield_pre_start
+        # The shielded_container fixture logs a "setup" event via shield.pre_start
         main(["logs", "--container", shielded_container])
         captured = capsys.readouterr()
-        # Audit log must have the setup entry from shield_pre_start
+        # Audit log must have the setup entry from shield.pre_start
         assert "setup" in captured.out

@@ -43,7 +43,7 @@ def start_shielded_container(
 
     Args:
         name: Container name.
-        extra_args: Extra arguments from ``shield_pre_start()``.
+        extra_args: Extra arguments from ``Shield.pre_start()``.
         image: Container image to run.
         timeout: Podman timeout in seconds.
 
@@ -193,12 +193,12 @@ def assert_reachable(container: str, url: str, timeout: int = 10) -> None:
 def assert_ruleset_applied(container: str) -> None:
     """Assert that the terok_shield nft ruleset is applied to a container.
 
-    Uses ``shield_rules()`` from the public API to check.
+    Uses ``Shield.rules()`` from the public API to check.
 
     Args:
         container: Container name or ID.
     """
-    from terok_shield import shield_rules
+    from terok_shield import Shield, ShieldConfig
 
-    rules = shield_rules(container)
+    rules = Shield(ShieldConfig()).rules(container)
     assert "terok_shield" in rules, f"Expected terok_shield rules applied, got: {rules[:200]}"

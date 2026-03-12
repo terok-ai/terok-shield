@@ -8,9 +8,7 @@ immediately when terok starts depending on terok-shield.
 """
 
 import dataclasses
-import inspect
 import unittest
-from collections.abc import Iterator
 from pathlib import Path
 
 import terok_shield
@@ -29,23 +27,7 @@ EXPECTED_ALL = [
     "ShieldPaths",
     "ShieldState",
     "SubprocessRunner",
-    "configure_audit",
-    "list_log_files",
-    "list_profiles",
     "load_shield_config",
-    "log_event",
-    "shield_allow",
-    "shield_deny",
-    "shield_down",
-    "shield_pre_start",
-    "shield_preview",
-    "shield_resolve",
-    "shield_rules",
-    "shield_setup",
-    "shield_state",
-    "shield_status",
-    "shield_up",
-    "tail_log",
 ]
 
 
@@ -111,173 +93,6 @@ class TestAPISurface(unittest.TestCase):
         self.assertEqual(err.rc, 1)
         self.assertEqual(err.stderr, "err")
         self.assertIsInstance(err, Exception)
-
-    # ── Function signatures ──────────────────────────────
-
-    def _assert_sig(self, fn, expected_params, expected_return):
-        """Assert a function's parameter names/kinds/defaults/annotations and return annotation.
-
-        Args:
-            fn: The callable to inspect.
-            expected_params: List of (name, kind, default, annotation) tuples.
-                Use inspect.Parameter.empty for no default or annotation.
-            expected_return: Expected return annotation.
-        """
-        sig = inspect.signature(fn)
-        params = list(sig.parameters.values())
-        self.assertEqual(len(params), len(expected_params), f"{fn.__name__}: param count mismatch")
-        for param, (exp_name, exp_kind, exp_default, exp_ann) in zip(
-            params, expected_params, strict=True
-        ):
-            self.assertEqual(param.name, exp_name, f"{fn.__name__}.{exp_name}: name")
-            self.assertEqual(param.kind, exp_kind, f"{fn.__name__}.{exp_name}: kind")
-            self.assertEqual(param.default, exp_default, f"{fn.__name__}.{exp_name}: default")
-            self.assertEqual(param.annotation, exp_ann, f"{fn.__name__}.{exp_name}: annotation")
-        self.assertEqual(sig.return_annotation, expected_return, f"{fn.__name__}: return")
-
-    def test_function_signatures(self):
-        """Public function signatures match the expected API contract."""
-        POS = inspect.Parameter.POSITIONAL_OR_KEYWORD
-        KW = inspect.Parameter.KEYWORD_ONLY
-        empty = inspect.Parameter.empty
-
-        cfg_or_none = ShieldConfig | None
-        str_list_or_none = list[str] | None
-        str_or_none = str | None
-
-        cases = [
-            (
-                terok_shield.configure_audit,
-                [("enabled", KW, empty, bool)],
-                None,
-            ),
-            (
-                terok_shield.shield_setup,
-                [("config", KW, None, cfg_or_none)],
-                None,
-            ),
-            (
-                terok_shield.shield_status,
-                [("config", KW, None, cfg_or_none)],
-                dict,
-            ),
-            (
-                terok_shield.shield_pre_start,
-                [
-                    ("container", POS, empty, str),
-                    ("profiles", POS, None, str_list_or_none),
-                    ("config", KW, None, cfg_or_none),
-                ],
-                list[str],
-            ),
-            (
-                terok_shield.shield_allow,
-                [
-                    ("container", POS, empty, str),
-                    ("target", POS, empty, str),
-                    ("config", KW, None, cfg_or_none),
-                ],
-                list[str],
-            ),
-            (
-                terok_shield.shield_deny,
-                [
-                    ("container", POS, empty, str),
-                    ("target", POS, empty, str),
-                    ("config", KW, None, cfg_or_none),
-                ],
-                list[str],
-            ),
-            (
-                terok_shield.shield_rules,
-                [
-                    ("container", POS, empty, str),
-                    ("config", KW, None, cfg_or_none),
-                ],
-                str,
-            ),
-            (
-                terok_shield.shield_resolve,
-                [
-                    ("container", POS, empty, str),
-                    ("profiles", POS, None, str_list_or_none),
-                    ("config", KW, None, cfg_or_none),
-                    ("force", KW, False, bool),
-                ],
-                list[str],
-            ),
-            (
-                terok_shield.shield_down,
-                [
-                    ("container", POS, empty, str),
-                    ("allow_all", KW, False, bool),
-                    ("config", KW, None, cfg_or_none),
-                ],
-                None,
-            ),
-            (
-                terok_shield.shield_up,
-                [
-                    ("container", POS, empty, str),
-                    ("config", KW, None, cfg_or_none),
-                ],
-                None,
-            ),
-            (
-                terok_shield.shield_state,
-                [
-                    ("container", POS, empty, str),
-                    ("config", KW, None, cfg_or_none),
-                ],
-                ShieldState,
-            ),
-            (
-                terok_shield.shield_preview,
-                [
-                    ("down", KW, False, bool),
-                    ("allow_all", KW, False, bool),
-                    ("config", KW, None, cfg_or_none),
-                ],
-                str,
-            ),
-            (
-                terok_shield.list_log_files,
-                [],
-                list[str],
-            ),
-            (
-                terok_shield.list_profiles,
-                [],
-                list[str],
-            ),
-            (
-                terok_shield.load_shield_config,
-                [],
-                ShieldConfig,
-            ),
-            (
-                terok_shield.log_event,
-                [
-                    ("container", POS, empty, str),
-                    ("action", POS, empty, str),
-                    ("dest", KW, None, str_or_none),
-                    ("detail", KW, None, str_or_none),
-                ],
-                None,
-            ),
-            (
-                terok_shield.tail_log,
-                [
-                    ("container", POS, empty, str),
-                    ("n", POS, 50, int),
-                ],
-                Iterator[dict],
-            ),
-        ]
-
-        for fn, expected_params, expected_return in cases:
-            with self.subTest(fn=fn.__name__):
-                self._assert_sig(fn, expected_params, expected_return)
 
     # ── py.typed marker ──────────────────────────────────
 

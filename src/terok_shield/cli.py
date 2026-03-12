@@ -7,22 +7,7 @@ import argparse
 import json
 import sys
 
-from . import (
-    ExecError,
-    ShieldConfig,
-    list_log_files,
-    shield_allow,
-    shield_deny,
-    shield_down,
-    shield_preview,
-    shield_resolve,
-    shield_rules,
-    shield_setup,
-    shield_state,
-    shield_status,
-    shield_up,
-    tail_log,
-)
+from . import ExecError, Shield, ShieldConfig
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -115,38 +100,39 @@ def main(argv: list[str] | None = None) -> None:
 
 def _dispatch(args: argparse.Namespace) -> None:
     """Dispatch to the appropriate subcommand handler."""
+    shield = Shield(ShieldConfig())
     cmd = args.command
     if cmd == "setup":
-        _cmd_setup()
+        _cmd_setup(shield)
     elif cmd == "status":
-        _cmd_status()
+        _cmd_status(shield)
     elif cmd == "resolve":
-        _cmd_resolve(args.container, force=args.force)
+        _cmd_resolve(shield, args.container, force=args.force)
     elif cmd == "allow":
-        _cmd_allow(args.container, args.target)
+        _cmd_allow(shield, args.container, args.target)
     elif cmd == "deny":
-        _cmd_deny(args.container, args.target)
+        _cmd_deny(shield, args.container, args.target)
     elif cmd == "down":
-        _cmd_down(args.container, allow_all=args.allow_all)
+        _cmd_down(shield, args.container, allow_all=args.allow_all)
     elif cmd == "up":
-        _cmd_up(args.container)
+        _cmd_up(shield, args.container)
     elif cmd == "preview":
-        _cmd_preview(down=args.down, allow_all=args.allow_all)
+        _cmd_preview(shield, down=args.down, allow_all=args.allow_all)
     elif cmd == "rules":
-        _cmd_rules(args.container)
+        _cmd_rules(shield, args.container)
     elif cmd == "logs":
-        _cmd_logs(container=args.container, n=args.n)
+        _cmd_logs(shield, container=args.container, n=args.n)
 
 
-def _cmd_setup() -> None:
+def _cmd_setup(shield: Shield) -> None:
     """Run shield setup."""
-    shield_setup(config=ShieldConfig())
+    shield.setup()
     print("Shield setup complete (hook mode).")
 
 
-def _cmd_status() -> None:
+def _cmd_status(shield: Shield) -> None:
     """Show shield status."""
-    status = shield_status()
+    status = shield.status()
     print(f"Mode:     {status['mode']}")
     print(f"Audit:    {'enabled' if status['audit_enabled'] else 'disabled'}")
     print(f"Profiles: {', '.join(status['profiles']) or '(none)'}")
@@ -154,18 +140,18 @@ def _cmd_status() -> None:
         print(f"Logs:     {len(status['log_files'])} container(s)")
 
 
-def _cmd_resolve(container: str, force: bool) -> None:
+def _cmd_resolve(shield: Shield, container: str, force: bool) -> None:
     """Resolve DNS profiles and cache results."""
-    ips = shield_resolve(container, force=force)
+    ips = shield.resolve(container, force=force)
     label = " (forced)" if force else ""
     print(f"Resolved {len(ips)} IPs for {container}{label}")
     for ip in ips:
         print(f"  {ip}")
 
 
-def _cmd_allow(container: str, target: str) -> None:
+def _cmd_allow(shield: Shield, container: str, target: str) -> None:
     """Live-allow a domain or IP."""
-    ips = shield_allow(container, target)
+    ips = shield.allow(container, target)
     if ips:
         print(f"Allowed {target} -> {', '.join(ips)} for {container}")
     else:
@@ -173,9 +159,9 @@ def _cmd_allow(container: str, target: str) -> None:
         sys.exit(1)
 
 
-def _cmd_deny(container: str, target: str) -> None:
+def _cmd_deny(shield: Shield, container: str, target: str) -> None:
     """Live-deny a domain or IP."""
-    ips = shield_deny(container, target)
+    ips = shield.deny(container, target)
     if ips:
         print(f"Denied {target} ({', '.join(ips)}) for {container}")
     else:
@@ -183,24 +169,24 @@ def _cmd_deny(container: str, target: str) -> None:
         sys.exit(1)
 
 
-def _cmd_down(container: str, *, allow_all: bool) -> None:
+def _cmd_down(shield: Shield, container: str, *, allow_all: bool) -> None:
     """Switch container to bypass mode."""
-    shield_down(container, allow_all=allow_all)
+    shield.down(container, allow_all=allow_all)
     label = " (all traffic)" if allow_all else ""
     print(f"Shield down for {container}{label}")
 
 
-def _cmd_up(container: str) -> None:
+def _cmd_up(shield: Shield, container: str) -> None:
     """Restore deny-all mode."""
-    shield_up(container)
+    shield.up(container)
     print(f"Shield up for {container}")
 
 
-def _cmd_preview(*, down: bool, allow_all: bool) -> None:
+def _cmd_preview(shield: Shield, *, down: bool, allow_all: bool) -> None:
     """Show ruleset that would be applied."""
     if allow_all and not down:
         raise ValueError("--all requires --down")
-    ruleset = shield_preview(down=down, allow_all=allow_all)
+    ruleset = shield.preview(down=down, allow_all=allow_all)
     label = "bypass" if down else "enforce"
     if allow_all:
         label += " (all traffic)"
@@ -208,29 +194,29 @@ def _cmd_preview(*, down: bool, allow_all: bool) -> None:
     print(ruleset)
 
 
-def _cmd_rules(container: str) -> None:
+def _cmd_rules(shield: Shield, container: str) -> None:
     """Show nft rules for a container."""
-    state = shield_state(container)
-    print(f"State: {state.value}")
-    rules = shield_rules(container)
+    st = shield.state(container)
+    print(f"State: {st.value}")
+    rules = shield.rules(container)
     if rules.strip():
         print(rules)
     else:
         print(f"No rules found for {container}")
 
 
-def _cmd_logs(container: str | None, n: int) -> None:
+def _cmd_logs(shield: Shield, container: str | None, n: int) -> None:
     """Show audit log entries."""
     if container:
-        for entry in tail_log(container, n):
+        for entry in shield.tail_log(container, n):
             print(json.dumps(entry))
     else:
-        files = list_log_files()
+        files = shield.log_files()
         if not files:
             print("No audit logs found.")
             return
         for ctr in files:
-            for entry in tail_log(ctr, n):
+            for entry in shield.tail_log(ctr, n):
                 print(json.dumps(entry))
 
 

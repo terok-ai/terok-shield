@@ -94,9 +94,7 @@ depends_on = [
 path = "terok_shield.mode_hook"
 depends_on = [
     "terok_shield.config",
-    "terok_shield.dns",
     "terok_shield.nft",
-    "terok_shield.profiles",
     "terok_shield.run",
     "terok_shield.util",
     "terok_shield.validation",

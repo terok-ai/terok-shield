@@ -1,13 +1,13 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""Integration tests: shield_resolve() and CLI resolve."""
+"""Integration tests: Shield.resolve() and CLI resolve."""
 
 from pathlib import Path
 
 import pytest
 
-from terok_shield import shield_resolve
+from terok_shield import Shield, ShieldConfig
 from terok_shield.cli import main
 from tests.testnet import TEST_IP4
 
@@ -16,18 +16,18 @@ from tests.testnet import TEST_IP4
 
 @pytest.mark.needs_internet
 class TestShieldResolve:
-    """Verify ``shield_resolve()`` resolves DNS profiles."""
+    """Verify ``Shield.resolve()`` resolves DNS profiles."""
 
     def test_resolve_returns_ips(self, shield_env: Path) -> None:
-        """``shield_resolve()`` returns a list of IPs."""
-        ips = shield_resolve("resolve-test-ctr")
+        """``Shield.resolve()`` returns a list of IPs."""
+        ips = Shield(ShieldConfig()).resolve("resolve-test-ctr")
         assert len(ips) > 0, "Resolve should return at least one IP"
         for ip in ips:
             assert isinstance(ip, str)
 
     def test_resolve_creates_cache(self, shield_env: Path) -> None:
-        """A cache file exists after ``shield_resolve()``."""
-        shield_resolve("cache-test-ctr")
+        """A cache file exists after ``Shield.resolve()``."""
+        Shield(ShieldConfig()).resolve("cache-test-ctr")
 
         resolved_dir = shield_env / "resolved"
         assert resolved_dir.is_dir()
@@ -42,7 +42,7 @@ class TestShieldResolve:
         cache_file = resolved_dir / "force-test-ctr.resolved"
         cache_file.write_text(f"{TEST_IP4}\n")
 
-        ips = shield_resolve("force-test-ctr", force=True)
+        ips = Shield(ShieldConfig()).resolve("force-test-ctr", force=True)
 
         assert ips, "Force-resolve should return at least one IP"
         assert TEST_IP4 not in ips, "Sentinel IP should be replaced by real resolution"

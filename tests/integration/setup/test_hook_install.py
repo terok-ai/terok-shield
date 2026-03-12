@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from terok_shield import ShieldConfig, shield_setup
+from terok_shield import Shield, ShieldConfig
 from terok_shield.cli import main
 
 from ..conftest import nft_missing, podman_missing
@@ -19,12 +19,11 @@ from ..conftest import nft_missing, podman_missing
 @podman_missing
 @nft_missing
 class TestShieldSetup:
-    """Verify ``shield_setup()`` installs OCI hook files."""
+    """Verify ``Shield.setup()`` installs OCI hook files."""
 
     def test_setup_creates_hook_files(self, shield_env: Path) -> None:
-        """Hook JSON and entrypoint script exist after ``shield_setup()``."""
-        cfg = ShieldConfig()
-        shield_setup(config=cfg)
+        """Hook JSON and entrypoint script exist after ``Shield.setup()``."""
+        Shield(ShieldConfig()).setup()
 
         hooks_dir = shield_env / "hooks"
         assert (hooks_dir / "terok-shield-createRuntime.json").is_file()
@@ -34,10 +33,10 @@ class TestShieldSetup:
         assert entrypoint.stat().st_mode & 0o100, "Entrypoint must be executable"
 
     def test_setup_idempotent(self, shield_env: Path) -> None:
-        """Calling ``shield_setup()`` twice does not break anything."""
-        cfg = ShieldConfig()
-        shield_setup(config=cfg)
-        shield_setup(config=cfg)
+        """Calling ``Shield.setup()`` twice does not break anything."""
+        shield = Shield(ShieldConfig())
+        shield.setup()
+        shield.setup()
 
         hooks_dir = shield_env / "hooks"
         assert (hooks_dir / "terok-shield-createRuntime.json").is_file()

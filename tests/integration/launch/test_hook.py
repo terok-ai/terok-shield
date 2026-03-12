@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""Integration tests: apply_hook and hook_main end-to-end."""
+"""Integration tests: HookExecutor.apply and hook_main end-to-end."""
 
 import json
 import tempfile
@@ -9,8 +9,10 @@ from pathlib import Path
 
 import pytest
 
-from terok_shield.nft import verify_ruleset
-from terok_shield.oci_hook import apply_hook, hook_main
+from terok_shield.audit import AuditLogger
+from terok_shield.nft import RulesetBuilder, verify_ruleset
+from terok_shield.oci_hook import HookExecutor, hook_main
+from terok_shield.run import SubprocessRunner
 from tests.testnet import (
     ALLOWED_TARGET_HTTP,
     ALLOWED_TARGET_IPS,
@@ -21,7 +23,21 @@ from tests.testnet import (
 from ..conftest import nft_missing, nsenter_nft, podman_missing
 from ..helpers import wget as _wget
 
-# ── apply_hook end-to-end ────────────────────────────────
+
+def _make_executor(tmp: str) -> HookExecutor:
+    """Create a HookExecutor wired to a temp directory."""
+    runner = SubprocessRunner()
+    audit = AuditLogger(logs_dir=Path(tmp) / "logs")
+    ruleset = RulesetBuilder()
+    return HookExecutor(
+        runner=runner,
+        audit=audit,
+        ruleset=ruleset,
+        resolved_dir=Path(tmp) / "resolved",
+    )
+
+
+# ── HookExecutor.apply end-to-end ────────────────────────
 
 
 @pytest.mark.needs_podman
@@ -35,10 +51,11 @@ class TestApplyHookE2E:
     def test_apply_hook_creates_firewall(
         self, container: str, container_pid: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """apply_hook applies the ruleset and passes verification."""
+        """HookExecutor.apply applies the ruleset and passes verification."""
         with tempfile.TemporaryDirectory() as tmp:
             monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", tmp)
-            apply_hook(container, container_pid)
+            executor = _make_executor(tmp)
+            executor.apply(container, container_pid)
 
             listed = nsenter_nft(container_pid, "list", "ruleset")
             assert listed.returncode == 0
@@ -49,7 +66,7 @@ class TestApplyHookE2E:
     def test_apply_hook_with_pre_resolved_ips(
         self, container: str, container_pid: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """apply_hook loads pre-resolved IPs from the cache file."""
+        """HookExecutor.apply loads pre-resolved IPs from the cache file."""
         with tempfile.TemporaryDirectory() as tmp:
             monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", tmp)
 
@@ -58,7 +75,8 @@ class TestApplyHookE2E:
             resolved_ips = [*ALLOWED_TARGET_IPS, GOOGLE_DNS_IP]
             (resolved_dir / f"{container}.resolved").write_text("\n".join(resolved_ips) + "\n")
 
-            apply_hook(container, container_pid)
+            executor = _make_executor(tmp)
+            executor.apply(container, container_pid)
 
             listed = nsenter_nft(container_pid, "list", "set", "inet", "terok_shield", "allow_v4")
             assert listed.returncode == 0
@@ -68,18 +86,19 @@ class TestApplyHookE2E:
     def test_apply_hook_blocks_traffic(
         self, container: str, container_pid: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """After apply_hook, outbound traffic is blocked."""
+        """After HookExecutor.apply, outbound traffic is blocked."""
         with tempfile.TemporaryDirectory() as tmp:
             monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", tmp)
-            apply_hook(container, container_pid)
+            executor = _make_executor(tmp)
+            executor.apply(container, container_pid)
 
         post = _wget(container, ALLOWED_TARGET_HTTP, timeout=10)
-        assert post.returncode != 0, "Traffic should be blocked after apply_hook"
+        assert post.returncode != 0, "Traffic should be blocked after apply"
 
     def test_apply_hook_allows_pre_resolved(
         self, container: str, container_pid: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """After apply_hook with pre-resolved IPs, those IPs are reachable."""
+        """After HookExecutor.apply with pre-resolved IPs, those IPs are reachable."""
         with tempfile.TemporaryDirectory() as tmp:
             monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", tmp)
 
@@ -89,7 +108,8 @@ class TestApplyHookE2E:
                 "\n".join(ALLOWED_TARGET_IPS) + "\n"
             )
 
-            apply_hook(container, container_pid)
+            executor = _make_executor(tmp)
+            executor.apply(container, container_pid)
 
         # Allowed IP should be reachable
         allowed = _wget(container, ALLOWED_TARGET_HTTP, timeout=10)
@@ -102,21 +122,23 @@ class TestApplyHookE2E:
     def test_apply_hook_fail_closed_bad_pid(
         self, container: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """apply_hook raises RuntimeError for an invalid PID."""
+        """HookExecutor.apply raises RuntimeError for an invalid PID."""
         with tempfile.TemporaryDirectory() as tmp:
             monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", tmp)
+            executor = _make_executor(tmp)
             with pytest.raises(RuntimeError):
-                apply_hook(container, "999999")
+                executor.apply(container, "999999")
 
     def test_reapply_after_flush(
         self, container: str, container_pid: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Flushing and re-applying the hook produces a valid ruleset."""
+        """Flushing and re-applying produces a valid ruleset."""
         with tempfile.TemporaryDirectory() as tmp:
             monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", tmp)
 
             # First apply
-            apply_hook(container, container_pid)
+            executor = _make_executor(tmp)
+            executor.apply(container, container_pid)
             listed = nsenter_nft(container_pid, "list", "ruleset")
             assert "terok_shield" in listed.stdout
 
@@ -126,7 +148,8 @@ class TestApplyHookE2E:
             assert "terok_shield" not in listed.stdout
 
             # Re-apply
-            apply_hook(container, container_pid)
+            executor2 = _make_executor(tmp)
+            executor2.apply(container, container_pid)
             listed = nsenter_nft(container_pid, "list", "ruleset")
             assert "terok_shield" in listed.stdout
             errors = verify_ruleset(listed.stdout)

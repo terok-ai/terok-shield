@@ -127,99 +127,99 @@ class TestMainHelp(unittest.TestCase):
 class TestMainDispatch(unittest.TestCase):
     """Test CLI subcommand dispatch."""
 
-    @mock.patch("terok_shield.cli.shield_setup")
-    def test_setup_hook(self, mock_setup):
-        """CLI setup calls shield_setup with hook config."""
+    @mock.patch("terok_shield.cli.Shield")
+    def test_setup_hook(self, mock_cls):
+        """CLI setup calls shield.setup()."""
         main(["setup"])
-        mock_setup.assert_called_once()
-        call_kwargs = mock_setup.call_args[1]
-        self.assertEqual(call_kwargs["config"].mode.value, "hook")
+        mock_cls.return_value.setup.assert_called_once()
 
-    @mock.patch("terok_shield.cli.shield_status")
-    def test_status(self, mock_status):
-        """CLI status calls shield_status."""
-        mock_status.return_value = {
+    @mock.patch("terok_shield.cli.Shield")
+    def test_status(self, mock_cls):
+        """CLI status calls shield.status()."""
+        mock_cls.return_value.status.return_value = {
             "mode": "hook",
             "audit_enabled": True,
             "profiles": ["dev-standard"],
             "log_files": [],
         }
         main(["status"])
-        mock_status.assert_called_once()
+        mock_cls.return_value.status.assert_called_once()
 
-    @mock.patch("terok_shield.cli.shield_resolve")
-    def test_resolve(self, mock_resolve):
-        """CLI resolve calls shield_resolve."""
-        mock_resolve.return_value = [TEST_IP1]
+    @mock.patch("terok_shield.cli.Shield")
+    def test_resolve(self, mock_cls):
+        """CLI resolve calls shield.resolve()."""
+        mock_cls.return_value.resolve.return_value = [TEST_IP1]
         main(["resolve", "test"])
-        mock_resolve.assert_called_once_with("test", force=False)
+        mock_cls.return_value.resolve.assert_called_once_with("test", force=False)
 
-    @mock.patch("terok_shield.cli.shield_resolve")
-    def test_resolve_force(self, mock_resolve):
+    @mock.patch("terok_shield.cli.Shield")
+    def test_resolve_force(self, mock_cls):
         """CLI resolve --force passes force=True."""
-        mock_resolve.return_value = []
+        mock_cls.return_value.resolve.return_value = []
         main(["resolve", "test", "--force"])
-        mock_resolve.assert_called_once_with("test", force=True)
+        mock_cls.return_value.resolve.assert_called_once_with("test", force=True)
 
-    @mock.patch("terok_shield.cli.shield_allow")
-    def test_allow(self, mock_allow):
-        """CLI allow calls shield_allow."""
-        mock_allow.return_value = [TEST_IP1]
+    @mock.patch("terok_shield.cli.Shield")
+    def test_allow(self, mock_cls):
+        """CLI allow calls shield.allow()."""
+        mock_cls.return_value.allow.return_value = [TEST_IP1]
         main(["allow", "test", TEST_IP1])
-        mock_allow.assert_called_once_with("test", TEST_IP1)
+        mock_cls.return_value.allow.assert_called_once_with("test", TEST_IP1)
 
-    @mock.patch("terok_shield.cli.shield_deny")
-    def test_deny(self, mock_deny):
-        """CLI deny calls shield_deny."""
-        mock_deny.return_value = [TEST_IP1]
+    @mock.patch("terok_shield.cli.Shield")
+    def test_deny(self, mock_cls):
+        """CLI deny calls shield.deny()."""
+        mock_cls.return_value.deny.return_value = [TEST_IP1]
         main(["deny", "test", TEST_IP1])
-        mock_deny.assert_called_once_with("test", TEST_IP1)
+        mock_cls.return_value.deny.assert_called_once_with("test", TEST_IP1)
 
-    @mock.patch("terok_shield.cli.shield_state")
-    @mock.patch("terok_shield.cli.shield_rules")
-    def test_rules(self, mock_rules, mock_state):
-        """CLI rules calls shield_rules."""
-        mock_state.return_value = ShieldState.UP
-        mock_rules.return_value = "table inet terok_shield {}"
+    @mock.patch("terok_shield.cli.Shield")
+    def test_rules(self, mock_cls):
+        """CLI rules calls shield.state() and shield.rules()."""
+        mock_cls.return_value.state.return_value = ShieldState.UP
+        mock_cls.return_value.rules.return_value = "table inet terok_shield {}"
         main(["rules", "test"])
-        mock_rules.assert_called_once_with("test")
-        mock_state.assert_called_once_with("test")
+        mock_cls.return_value.rules.assert_called_once_with("test")
+        mock_cls.return_value.state.assert_called_once_with("test")
 
-    @mock.patch("terok_shield.cli.shield_down")
-    def test_down(self, mock_down) -> None:
-        """CLI down calls shield_down."""
+    @mock.patch("terok_shield.cli.Shield")
+    def test_down(self, mock_cls) -> None:
+        """CLI down calls shield.down()."""
         main(["down", "test"])
-        mock_down.assert_called_once_with("test", allow_all=False)
+        mock_cls.return_value.down.assert_called_once_with("test", allow_all=False)
 
-    @mock.patch("terok_shield.cli.shield_down")
-    def test_down_all(self, mock_down) -> None:
-        """CLI down --all calls shield_down with allow_all=True."""
+    @mock.patch("terok_shield.cli.Shield")
+    def test_down_all(self, mock_cls) -> None:
+        """CLI down --all calls shield.down(allow_all=True)."""
         main(["down", "test", "--all"])
-        mock_down.assert_called_once_with("test", allow_all=True)
+        mock_cls.return_value.down.assert_called_once_with("test", allow_all=True)
 
-    @mock.patch("terok_shield.cli.shield_up")
-    def test_up(self, mock_up) -> None:
-        """CLI up calls shield_up."""
+    @mock.patch("terok_shield.cli.Shield")
+    def test_up(self, mock_cls) -> None:
+        """CLI up calls shield.up()."""
         main(["up", "test"])
-        mock_up.assert_called_once_with("test")
+        mock_cls.return_value.up.assert_called_once_with("test")
 
-    @mock.patch("terok_shield.cli.shield_preview", return_value="table inet terok_shield {}")
-    def test_preview(self, mock_preview) -> None:
-        """CLI preview calls shield_preview."""
+    @mock.patch("terok_shield.cli.Shield")
+    def test_preview(self, mock_cls) -> None:
+        """CLI preview calls shield.preview()."""
+        mock_cls.return_value.preview.return_value = "table inet terok_shield {}"
         main(["preview"])
-        mock_preview.assert_called_once_with(down=False, allow_all=False)
+        mock_cls.return_value.preview.assert_called_once_with(down=False, allow_all=False)
 
-    @mock.patch("terok_shield.cli.shield_preview", return_value="bypass")
-    def test_preview_down(self, mock_preview) -> None:
-        """CLI preview --down calls shield_preview with down=True."""
+    @mock.patch("terok_shield.cli.Shield")
+    def test_preview_down(self, mock_cls) -> None:
+        """CLI preview --down calls shield.preview(down=True)."""
+        mock_cls.return_value.preview.return_value = "bypass"
         main(["preview", "--down"])
-        mock_preview.assert_called_once_with(down=True, allow_all=False)
+        mock_cls.return_value.preview.assert_called_once_with(down=True, allow_all=False)
 
-    @mock.patch("terok_shield.cli.shield_preview", return_value="bypass")
-    def test_preview_down_all(self, mock_preview) -> None:
-        """CLI preview --down --all calls shield_preview with both flags."""
+    @mock.patch("terok_shield.cli.Shield")
+    def test_preview_down_all(self, mock_cls) -> None:
+        """CLI preview --down --all calls shield.preview with both flags."""
+        mock_cls.return_value.preview.return_value = "bypass"
         main(["preview", "--down", "--all"])
-        mock_preview.assert_called_once_with(down=True, allow_all=True)
+        mock_cls.return_value.preview.assert_called_once_with(down=True, allow_all=True)
 
     def test_preview_all_without_down_exits_1(self) -> None:
         """CLI preview --all without --down exits with code 1."""
@@ -231,10 +231,10 @@ class TestMainDispatch(unittest.TestCase):
 class TestMainOutputFormatting(unittest.TestCase):
     """Test CLI output formatting for various subcommands."""
 
-    @mock.patch("terok_shield.cli.shield_status")
-    def test_status_output_format(self, mock_status) -> None:
+    @mock.patch("terok_shield.cli.Shield")
+    def test_status_output_format(self, mock_cls) -> None:
         """CLI status prints formatted output."""
-        mock_status.return_value = {
+        mock_cls.return_value.status.return_value = {
             "mode": "hook",
             "audit_enabled": True,
             "profiles": ["dev-standard"],
@@ -253,10 +253,10 @@ class TestMainOutputFormatting(unittest.TestCase):
         self.assertIn("enabled", output)
         self.assertIn("Logs:", output)
 
-    @mock.patch("terok_shield.cli.shield_status")
-    def test_status_no_logs(self, mock_status) -> None:
+    @mock.patch("terok_shield.cli.Shield")
+    def test_status_no_logs(self, mock_cls) -> None:
         """CLI status omits Logs line when no log files."""
-        mock_status.return_value = {
+        mock_cls.return_value.status.return_value = {
             "mode": "hook",
             "audit_enabled": False,
             "profiles": [],
@@ -273,25 +273,27 @@ class TestMainOutputFormatting(unittest.TestCase):
         self.assertIn("disabled", output)
         self.assertIn("(none)", output)
 
-    @mock.patch("terok_shield.cli.shield_allow", return_value=[])
-    def test_allow_no_ips_exits_1(self, _allow) -> None:
+    @mock.patch("terok_shield.cli.Shield")
+    def test_allow_no_ips_exits_1(self, mock_cls) -> None:
         """CLI allow exits 1 when no IPs are allowed."""
+        mock_cls.return_value.allow.return_value = []
         with self.assertRaises(SystemExit) as ctx:
             main(["allow", "test", TEST_DOMAIN])
         self.assertEqual(ctx.exception.code, 1)
 
-    @mock.patch("terok_shield.cli.shield_deny", return_value=[])
-    def test_deny_no_ips_exits_1(self, _deny) -> None:
+    @mock.patch("terok_shield.cli.Shield")
+    def test_deny_no_ips_exits_1(self, mock_cls) -> None:
         """CLI deny exits 1 when no IPs are denied."""
+        mock_cls.return_value.deny.return_value = []
         with self.assertRaises(SystemExit) as ctx:
             main(["deny", "test", TEST_DOMAIN])
         self.assertEqual(ctx.exception.code, 1)
 
-    @mock.patch("terok_shield.cli.shield_state")
-    @mock.patch("terok_shield.cli.shield_rules", return_value="")
-    def test_rules_no_rules(self, _rules, mock_state) -> None:
+    @mock.patch("terok_shield.cli.Shield")
+    def test_rules_no_rules(self, mock_cls) -> None:
         """CLI rules prints 'No rules found' for empty output."""
-        mock_state.return_value = ShieldState.INACTIVE
+        mock_cls.return_value.state.return_value = ShieldState.INACTIVE
+        mock_cls.return_value.rules.return_value = ""
         captured = io.StringIO()
         sys.stdout = captured
         try:
@@ -301,10 +303,10 @@ class TestMainOutputFormatting(unittest.TestCase):
         output = captured.getvalue()
         self.assertIn("No rules found", output)
 
-    @mock.patch("terok_shield.cli.tail_log", return_value=iter([]))
-    @mock.patch("terok_shield.cli.list_log_files", return_value=[])
-    def test_logs_no_files(self, _files, _tail) -> None:
+    @mock.patch("terok_shield.cli.Shield")
+    def test_logs_no_files(self, mock_cls) -> None:
         """CLI logs prints 'No audit logs found' when no files."""
+        mock_cls.return_value.log_files.return_value = []
         captured = io.StringIO()
         sys.stdout = captured
         try:
@@ -314,10 +316,10 @@ class TestMainOutputFormatting(unittest.TestCase):
         output = captured.getvalue()
         self.assertIn("No audit logs found", output)
 
-    @mock.patch("terok_shield.cli.tail_log")
-    def test_logs_with_container(self, mock_tail) -> None:
+    @mock.patch("terok_shield.cli.Shield")
+    def test_logs_with_container(self, mock_cls) -> None:
         """CLI logs with --container prints entries as JSON."""
-        mock_tail.return_value = iter([{"action": "setup"}])
+        mock_cls.return_value.tail_log.return_value = iter([{"action": "setup"}])
         captured = io.StringIO()
         sys.stdout = captured
         try:
@@ -332,40 +334,42 @@ class TestMainOutputFormatting(unittest.TestCase):
 class TestMainErrorHandling(unittest.TestCase):
     """Test CLI error handling."""
 
-    @mock.patch("terok_shield.cli.shield_setup", side_effect=RuntimeError("nope"))
-    def test_runtime_error_exits_1(self, _setup):
+    @mock.patch("terok_shield.cli.Shield")
+    def test_runtime_error_exits_1(self, mock_cls):
         """RuntimeError in dispatch exits with code 1."""
+        mock_cls.return_value.setup.side_effect = RuntimeError("nope")
         with self.assertRaises(SystemExit) as ctx:
             main(["setup"])
         self.assertEqual(ctx.exception.code, 1)
 
-    @mock.patch("terok_shield.cli.shield_rules", side_effect=FileNotFoundError("missing"))
-    def test_file_not_found_exits_1(self, _rules):
+    @mock.patch("terok_shield.cli.Shield")
+    def test_file_not_found_exits_1(self, mock_cls):
         """FileNotFoundError in dispatch exits with code 1."""
+        mock_cls.return_value.rules.side_effect = FileNotFoundError("missing")
         with self.assertRaises(SystemExit) as ctx:
             main(["rules", "test"])
         self.assertEqual(ctx.exception.code, 1)
 
-    @mock.patch("terok_shield.cli.shield_allow", side_effect=ValueError("bad ip"))
-    def test_value_error_exits_1(self, _allow):
+    @mock.patch("terok_shield.cli.Shield")
+    def test_value_error_exits_1(self, mock_cls):
         """ValueError in dispatch exits with code 1."""
+        mock_cls.return_value.allow.side_effect = ValueError("bad ip")
         with self.assertRaises(SystemExit) as ctx:
             main(["allow", "test", "bad"])
         self.assertEqual(ctx.exception.code, 1)
 
-    @mock.patch(
-        "terok_shield.cli.shield_setup",
-        side_effect=ExecError(["nft", "list"], 1, "command failed"),
-    )
-    def test_exec_error_exits_1(self, _setup):
+    @mock.patch("terok_shield.cli.Shield")
+    def test_exec_error_exits_1(self, mock_cls):
         """ExecError in dispatch exits with code 1."""
+        mock_cls.return_value.setup.side_effect = ExecError(["nft", "list"], 1, "command failed")
         with self.assertRaises(SystemExit) as ctx:
             main(["setup"])
         self.assertEqual(ctx.exception.code, 1)
 
-    @mock.patch("terok_shield.cli.shield_rules", side_effect=OSError("permission denied"))
-    def test_os_error_exits_1(self, _rules):
+    @mock.patch("terok_shield.cli.Shield")
+    def test_os_error_exits_1(self, mock_cls):
         """OSError in dispatch exits with code 1."""
+        mock_cls.return_value.rules.side_effect = OSError("permission denied")
         with self.assertRaises(SystemExit) as ctx:
             main(["rules", "test"])
         self.assertEqual(ctx.exception.code, 1)

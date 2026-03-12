@@ -11,8 +11,10 @@ import pytest
 
 _NONEXISTENT_PID = "4000000"  # Well above typical PID range
 
-from terok_shield.audit import list_log_files, log_event, tail_log
-from terok_shield.oci_hook import apply_hook
+from terok_shield.audit import AuditLogger
+from terok_shield.nft import RulesetBuilder
+from terok_shield.oci_hook import HookExecutor
+from terok_shield.run import SubprocessRunner
 from tests.testnet import ALLOWED_TARGET_IPS, IPV6_CLOUDFLARE, TEST_IP1, TEST_IP2
 
 from ..conftest import nft_missing, podman_missing
@@ -27,12 +29,13 @@ class TestAuditLive:
     def test_log_and_tail(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Write audit events and read them back."""
         monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", str(tmp_path))
+        audit = AuditLogger(logs_dir=tmp_path / "logs")
 
-        log_event("test-ctr", "setup", detail="integration test")
-        log_event("test-ctr", "allowed", dest=TEST_IP1)
-        log_event("test-ctr", "denied", dest=TEST_IP2)
+        audit.log_event("test-ctr", "setup", detail="integration test")
+        audit.log_event("test-ctr", "allowed", dest=TEST_IP1)
+        audit.log_event("test-ctr", "denied", dest=TEST_IP2)
 
-        events = list(tail_log("test-ctr", n=10))
+        events = list(audit.tail_log("test-ctr", n=10))
         assert len(events) == 3
         assert events[0]["action"] == "setup"
         assert events[1]["dest"] == TEST_IP1
@@ -41,9 +44,10 @@ class TestAuditLive:
     def test_jsonl_format(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Each line must be valid compact JSON."""
         monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", str(tmp_path))
+        audit = AuditLogger(logs_dir=tmp_path / "logs")
 
-        log_event("fmt-test", "setup")
-        log_event("fmt-test", "teardown")
+        audit.log_event("fmt-test", "setup")
+        audit.log_event("fmt-test", "teardown")
 
         log_file = tmp_path / "logs" / "fmt-test.jsonl"
         assert log_file.is_file()
@@ -60,23 +64,38 @@ class TestAuditLive:
     def test_list_log_files(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """list_log_files returns container names with logs."""
         monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", str(tmp_path))
+        audit = AuditLogger(logs_dir=tmp_path / "logs")
 
-        log_event("alpha", "setup")
-        log_event("bravo", "setup")
+        audit.log_event("alpha", "setup")
+        audit.log_event("bravo", "setup")
 
-        names = list_log_files()
+        names = audit.list_log_files()
         assert "alpha" in names
         assert "bravo" in names
 
     def test_tail_empty_container(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Tailing a non-existent container returns no events."""
         monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", str(tmp_path))
+        audit = AuditLogger(logs_dir=tmp_path / "logs")
 
-        events = list(tail_log("nonexistent", n=10))
+        events = list(audit.tail_log("nonexistent", n=10))
         assert events == []
 
 
 # ── Hook audit trail (container needed) ──────────────────
+
+
+def _make_executor(tmp: str) -> HookExecutor:
+    """Create a HookExecutor wired to a temp directory."""
+    runner = SubprocessRunner()
+    audit = AuditLogger(logs_dir=Path(tmp) / "logs")
+    ruleset = RulesetBuilder()
+    return HookExecutor(
+        runner=runner,
+        audit=audit,
+        ruleset=ruleset,
+        resolved_dir=Path(tmp) / "resolved",
+    )
 
 
 @pytest.mark.needs_podman
@@ -85,15 +104,16 @@ class TestAuditLive:
 @nft_missing
 @pytest.mark.usefixtures("nft_in_netns")
 class TestApplyHookAudit:
-    """Verify apply_hook produces JSONL audit entries."""
+    """Verify HookExecutor.apply produces JSONL audit entries."""
 
     def test_apply_hook_produces_audit_trail(
         self, container: str, container_pid: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """apply_hook writes per-step JSONL audit entries."""
+        """HookExecutor.apply writes per-step JSONL audit entries."""
         with tempfile.TemporaryDirectory() as tmp:
             monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", tmp)
-            apply_hook(container, container_pid)
+            executor = _make_executor(tmp)
+            executor.apply(container, container_pid)
 
             log_file = Path(tmp) / "logs" / f"{container}.jsonl"
             assert log_file.is_file(), "Audit log must be created"
@@ -120,7 +140,8 @@ class TestApplyHookAudit:
             resolved_ips = [*ALLOWED_TARGET_IPS, IPV6_CLOUDFLARE]
             (resolved_dir / f"{container}.resolved").write_text("\n".join(resolved_ips) + "\n")
 
-            apply_hook(container, container_pid)
+            executor = _make_executor(tmp)
+            executor.apply(container, container_pid)
 
             log_file = Path(tmp) / "logs" / f"{container}.jsonl"
             entries = [json.loads(line) for line in log_file.read_text().splitlines()]
@@ -135,8 +156,9 @@ class TestApplyHookAudit:
         """Bad PID produces an 'error' audit entry."""
         with tempfile.TemporaryDirectory() as tmp:
             monkeypatch.setenv("TEROK_SHIELD_STATE_DIR", tmp)
+            executor = _make_executor(tmp)
             with pytest.raises(RuntimeError):
-                apply_hook(container, _NONEXISTENT_PID)
+                executor.apply(container, _NONEXISTENT_PID)
 
             log_file = Path(tmp) / "logs" / f"{container}.jsonl"
             assert log_file.is_file(), "Audit log must be created even on failure"

@@ -184,68 +184,6 @@ class ShieldModeBackend(Protocol):
         ...
 
 
-# ── Legacy free-function path helpers (thin wrappers) ────
-# Kept for backwards compatibility during migration.
-# New code should use ShieldPaths directly.
-
-
-def shield_state_root() -> Path:
-    """Return the shield state root directory.
-
-    Resolution order:
-    1. ``TEROK_SHIELD_STATE_DIR`` (explicit override)
-    2. ``XDG_STATE_HOME / "terok-shield"``
-    3. ``~/.local/state/terok-shield`` (XDG default)
-    """
-    return _resolve_state_root()
-
-
-def shield_config_root() -> Path:
-    """Return the shield config root directory.
-
-    Resolution order:
-    1. ``TEROK_SHIELD_CONFIG_DIR`` (explicit override)
-    2. ``XDG_CONFIG_HOME / "terok-shield"``
-    3. ``~/.config/terok-shield`` (XDG default)
-    """
-    return _resolve_config_root()
-
-
-def shield_hooks_dir() -> Path:
-    """Return the OCI hooks directory."""
-    return shield_state_root() / "hooks"
-
-
-def shield_hook_entrypoint() -> Path:
-    """Return the path to the hook entrypoint script."""
-    return shield_state_root() / "terok-shield-hook"
-
-
-def shield_profiles_dir() -> Path:
-    """Return the user profiles directory (overrides bundled)."""
-    return shield_config_root() / "profiles"
-
-
-def shield_logs_dir() -> Path:
-    """Return the audit logs directory."""
-    return shield_state_root() / "logs"
-
-
-def shield_dns_dir() -> Path:
-    """Return the DNS allowlists directory."""
-    return shield_state_root() / "dns"
-
-
-def shield_resolved_dir() -> Path:
-    """Return the directory for pre-resolved IP files."""
-    return shield_state_root() / "resolved"
-
-
-def ensure_shield_dirs() -> None:
-    """Create all shield state and config directories."""
-    ShieldPaths.from_env().ensure_dirs()
-
-
 # ── Private helpers ──────────────────────────────────────
 
 
@@ -275,12 +213,12 @@ def _resolve_config_root() -> Path:
 def load_shield_config() -> ShieldConfig:
     """Load shield configuration from ``config.yml``.
 
-    Reads from ``shield_config_root() / "config.yml"``.
+    Reads from ``config_root / "config.yml"``.
     Returns defaults if the file is missing or unparseable.
     """
     import yaml
 
-    config_file = shield_config_root() / "config.yml"
+    config_file = _resolve_config_root() / "config.yml"
     if not config_file.is_file():
         return ShieldConfig()
 

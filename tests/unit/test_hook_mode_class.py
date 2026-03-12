@@ -69,15 +69,21 @@ class TestHookModeSetup(unittest.TestCase):
     """Test HookMode.setup()."""
 
     def test_installs_hooks(self) -> None:
-        """setup() calls install_hooks with config paths."""
-        config = ShieldConfig()
-        mode = _make_hook_mode(config=config)
-        with mock.patch("terok_shield.mode_hook.install_hooks") as mock_install:
-            mode.setup()
-            mock_install.assert_called_once_with(
-                hook_entrypoint=config.paths.hook_entrypoint,
-                hooks_dir=config.paths.hooks_dir,
-            )
+        """setup() calls ensure_dirs and install_hooks with config paths."""
+        with tempfile.TemporaryDirectory() as tmp:
+            from terok_shield.config import ShieldPaths
+
+            paths = ShieldPaths(state_root=Path(tmp) / "state", config_root=Path(tmp) / "cfg")
+            config = ShieldConfig(paths=paths)
+            mode = _make_hook_mode(config=config)
+            with mock.patch("terok_shield.mode_hook.install_hooks") as mock_install:
+                mode.setup()
+                mock_install.assert_called_once_with(
+                    hook_entrypoint=config.paths.hook_entrypoint,
+                    hooks_dir=config.paths.hooks_dir,
+                )
+            # ensure_dirs was called (directories exist)
+            self.assertTrue(paths.state_root.is_dir())
 
 
 class TestHookModePreStart(unittest.TestCase):

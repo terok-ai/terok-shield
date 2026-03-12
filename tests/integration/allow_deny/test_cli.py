@@ -5,7 +5,7 @@
 
 import pytest
 
-from terok_shield import shield_allow
+from terok_shield import Shield, ShieldConfig
 from terok_shield.cli import main
 from tests.testnet import ALLOWED_TARGET_HTTP, ALLOWED_TARGET_IPS
 
@@ -30,8 +30,9 @@ class TestAllowDenyCLI:
     def test_cli_deny(self, shielded_container: str) -> None:
         """``main(["deny", container, ip])`` blocks the IP."""
         # First allow, then deny
+        shield = Shield(ShieldConfig())
         for ip in ALLOWED_TARGET_IPS:
-            shield_allow(shielded_container, ip)
+            shield.allow(shielded_container, ip)
         assert_reachable(shielded_container, ALLOWED_TARGET_HTTP)
 
         for ip in ALLOWED_TARGET_IPS:

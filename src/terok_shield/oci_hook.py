@@ -23,15 +23,13 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .audit import configure_audit, log_event
-from .config import load_shield_config, shield_resolved_dir
-from .nft import add_elements_dual, hook_ruleset, verify_ruleset
-from .run import ExecError, nft_via_nsenter
+from .audit import AuditLogger
+from .config import load_shield_config
+from .nft import RulesetBuilder
+from .run import ExecError, SubprocessRunner
 from .validation import SAFE_NAME
 
 if TYPE_CHECKING:
-    from .audit import AuditLogger
-    from .nft import RulesetBuilder
     from .run import CommandRunner
 
 _PRIVATE_NETWORKS = (
@@ -94,6 +92,35 @@ def _classify_ips(ips: list[str]) -> tuple[list[str], list[str]]:
         except ValueError:
             continue
     return private, broad
+
+
+# ── OCI state parsing ────────────────────────────────────
+
+
+def _parse_oci_state(stdin_data: str) -> tuple[str, str, dict[str, str]]:
+    """Parse OCI state JSON from stdin.
+
+    Returns:
+        Tuple of (container_id, pid, annotations).  ``pid`` is an empty
+        string when absent or zero (expected for ``poststop`` hooks).
+
+    Raises:
+        ValueError: If the state is missing ``id`` or is not valid JSON.
+    """
+    try:
+        state = json.loads(stdin_data)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid OCI state JSON: {e}") from e
+    if not isinstance(state, dict):
+        raise ValueError(f"OCI state must be a JSON object: {state!r}")
+    cid = state.get("id")
+    if not cid:
+        raise ValueError(f"OCI state missing id: {state!r}")
+    pid = state.get("pid", 0)
+    annotations = state.get("annotations", {})
+    if not isinstance(annotations, dict):
+        annotations = {}
+    return str(cid), str(pid) if pid else "", annotations
 
 
 # ── HookExecutor (Command) ──────────────────────────────
@@ -229,120 +256,7 @@ class HookExecutor:
         return _parse_oci_state(stdin_data)
 
 
-# ── Module-level free functions (backwards compat) ───────
-
-
-def _parse_oci_state(stdin_data: str) -> tuple[str, str, dict[str, str]]:
-    """Parse OCI state JSON from stdin.
-
-    Returns:
-        Tuple of (container_id, pid, annotations).  ``pid`` is an empty
-        string when absent or zero (expected for ``poststop`` hooks).
-
-    Raises:
-        ValueError: If the state is missing ``id`` or is not valid JSON.
-    """
-    try:
-        state = json.loads(stdin_data)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid OCI state JSON: {e}") from e
-    if not isinstance(state, dict):
-        raise ValueError(f"OCI state must be a JSON object: {state!r}")
-    cid = state.get("id")
-    if not cid:
-        raise ValueError(f"OCI state missing id: {state!r}")
-    pid = state.get("pid", 0)
-    annotations = state.get("annotations", {})
-    if not isinstance(annotations, dict):
-        annotations = {}
-    return str(cid), str(pid) if pid else "", annotations
-
-
-def _read_resolved_ips(container: str) -> list[str]:
-    """Read pre-resolved IPs for a container.
-
-    Returns an empty list if no cache file exists or the name is invalid.
-    """
-    if not SAFE_NAME.fullmatch(container):
-        return []
-    path = shield_resolved_dir() / f"{container}.resolved"
-    if not path.is_file():
-        return []
-    return [line.strip() for line in path.read_text().splitlines() if line.strip()]
-
-
-def _nft_exec(
-    container: str, pid: str, *args: str, stdin: str | None = None, action: str = ""
-) -> str:
-    """Run nft in the container netns, logging and raising on failure."""
-    try:
-        return nft_via_nsenter(container, *args, pid=pid, stdin=stdin)
-    except ExecError as e:
-        label = action or (args[0] if args else "apply")
-        log_event(container, "error", detail=f"{label} failed: {e}")
-        raise RuntimeError(f"nft {label} failed: {e}") from e
-
-
-def _load_and_add_ips(container: str, pid: str) -> int:
-    """Read cached IPs, classify, log, and add to the "allow" set.
-
-    Returns the total number of IPs read from the cache.
-    """
-    try:
-        ips = _read_resolved_ips(container)
-    except (OSError, UnicodeError) as e:
-        log_event(container, "error", detail=f"resolved cache read failed: {e}")
-        raise RuntimeError(f"Failed to read resolved cache: {e}") from e
-
-    log_event(container, "setup", detail=f"read {len(ips)} cached IPs")
-    if not ips:
-        return 0
-
-    log_event(container, "setup", detail=f"[ips] cached: {', '.join(ips)}")
-
-    # Classify for logging (IPs are routed to correct set by add_elements_dual)
-    private_ips, broad_cidrs = _classify_ips(ips)
-    if private_ips:
-        log_event(container, "note", detail=f"private range whitelisted: {', '.join(private_ips)}")
-    for cidr in broad_cidrs:
-        log_event(container, "note", detail=f"broad range whitelisted: {cidr}")
-
-    elements_cmd = add_elements_dual(ips)
-    if elements_cmd:
-        _nft_exec(container, pid, stdin=elements_cmd, action="add-elements")
-        log_event(container, "setup", detail=f"[ips] added to allow sets: {', '.join(ips)}")
-
-    return len(ips)
-
-
-def apply_hook(container: str, pid: str, loopback_ports: tuple[int, ...] = ()) -> None:
-    """Apply the hook-mode firewall to a container.
-
-    This is the core hook logic, separated from stdin parsing
-    for testability.
-
-    Args:
-        container: Container ID or name.
-        pid: Host PID of the container's init process.
-        loopback_ports: TCP ports to allow on the loopback interface.
-
-    Raises:
-        RuntimeError: If ruleset application or verification fails.
-    """
-    _nft_exec(container, pid, stdin=hook_ruleset(loopback_ports=loopback_ports))
-    log_event(container, "setup", detail="ruleset applied")
-
-    ip_count = _load_and_add_ips(container, pid)
-
-    output = _nft_exec(container, pid, "list", "ruleset")
-    errors = verify_ruleset(output)
-    if errors:
-        detail = "; ".join(errors)
-        log_event(container, "error", detail=f"verification failed: {detail}")
-        raise RuntimeError(f"Ruleset verification failed: {detail}")
-    log_event(container, "setup", detail="verification passed")
-
-    log_event(container, "setup", detail=f"applied with {ip_count} allowed IPs")
+# ── Entry point ──────────────────────────────────────────
 
 
 def hook_main(stdin_data: str | None = None, stage: str = "createRuntime") -> int:
@@ -376,8 +290,16 @@ def hook_main(stdin_data: str | None = None, stage: str = "createRuntime") -> in
         if not pid:
             raise RuntimeError("Hook mode requires a valid PID in OCI state")
         cfg = load_shield_config()
-        configure_audit(enabled=cfg.audit_enabled)
-        apply_hook(container_id, pid, loopback_ports=cfg.loopback_ports)
+        runner = SubprocessRunner()
+        audit = AuditLogger.from_config(cfg)
+        ruleset = RulesetBuilder(loopback_ports=cfg.loopback_ports)
+        executor = HookExecutor(
+            runner=runner,
+            audit=audit,
+            ruleset=ruleset,
+            resolved_dir=cfg.paths.resolved_dir,
+        )
+        executor.apply(container_id, pid)
     except RuntimeError as e:
         print(f"terok-shield hook: {e}", file=sys.stderr)
         return 1

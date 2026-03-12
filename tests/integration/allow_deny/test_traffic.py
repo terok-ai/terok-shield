@@ -5,7 +5,7 @@
 
 import pytest
 
-from terok_shield import shield_allow, shield_deny
+from terok_shield import Shield, ShieldConfig
 from terok_shield.nft import add_elements, hook_ruleset
 from tests.testnet import (
     ALLOWED_TARGET_HTTP,
@@ -110,23 +110,25 @@ class TestRFC1918Allow:
 @nft_missing
 @pytest.mark.usefixtures("nft_in_netns")
 class TestAllowDenyAPI:
-    """Verify shield_allow/shield_deny via the public API."""
+    """Verify Shield.allow/Shield.deny via the public API."""
 
     def test_shield_allow_ip(self, shielded_container: str) -> None:
-        """``shield_allow()`` with an IP makes it reachable."""
-        allowed = shield_allow(shielded_container, ALLOWED_TARGET_IPS[0])
+        """``Shield.allow()`` with an IP makes it reachable."""
+        shield = Shield(ShieldConfig())
+        allowed = shield.allow(shielded_container, ALLOWED_TARGET_IPS[0])
         assert ALLOWED_TARGET_IPS[0] in allowed
 
         # Allow both Cloudflare IPs (anycast pair)
-        shield_allow(shielded_container, ALLOWED_TARGET_IPS[1])
+        shield.allow(shielded_container, ALLOWED_TARGET_IPS[1])
         assert_reachable(shielded_container, ALLOWED_TARGET_HTTP)
 
     def test_shield_allow_deny_cycle(self, shielded_container: str) -> None:
-        """``shield_allow()`` then ``shield_deny()`` blocks IP again."""
+        """``Shield.allow()`` then ``Shield.deny()`` blocks IP again."""
+        shield = Shield(ShieldConfig())
         for ip in ALLOWED_TARGET_IPS:
-            shield_allow(shielded_container, ip)
+            shield.allow(shielded_container, ip)
         assert_reachable(shielded_container, ALLOWED_TARGET_HTTP)
 
         for ip in ALLOWED_TARGET_IPS:
-            shield_deny(shielded_container, ip)
+            shield.deny(shielded_container, ip)
         assert_blocked(shielded_container, ALLOWED_TARGET_HTTP)

@@ -49,9 +49,9 @@ def test_cli_setup(capsys) -> None:
 
     from terok_shield.cli import main
 
-    with mock.patch("terok_shield.cli.shield_setup") as mock_setup:
+    with mock.patch("terok_shield.cli.Shield") as mock_cls:
         main(["setup"])
-    mock_setup.assert_called_once()
+    mock_cls.return_value.setup.assert_called_once()
     captured = capsys.readouterr()
     assert "setup complete" in captured.out.lower()
 
@@ -62,16 +62,14 @@ def test_cli_status(capsys) -> None:
 
     from terok_shield.cli import main
 
-    with mock.patch(
-        "terok_shield.cli.shield_status",
-        return_value={
+    with mock.patch("terok_shield.cli.Shield") as mock_cls:
+        mock_cls.return_value.status.return_value = {
             "mode": "standard",
             "audit_enabled": True,
             "profiles": [],
             "log_files": [],
-        },
-    ) as mock_status:
+        }
         main(["status"])
-    mock_status.assert_called_once()
+    mock_cls.return_value.status.assert_called_once()
     captured = capsys.readouterr()
     assert "standard" in captured.out.lower()

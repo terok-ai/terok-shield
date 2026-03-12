@@ -174,9 +174,9 @@ def container(_pull_image: None) -> Iterator[str]:
 @pytest.fixture
 def container_pid(container: str) -> str:
     """Return the host PID of a running container."""
-    from terok_shield.run import podman_inspect
+    from terok_shield.run import SubprocessRunner
 
-    return podman_inspect(container, "{{.State.Pid}}")
+    return SubprocessRunner().podman_inspect(container, "{{.State.Pid}}")
 
 
 @pytest.fixture
@@ -237,8 +237,8 @@ def shielded_container(
 ) -> Iterator[str]:
     """Start a container with firewall applied via the public API lifecycle.
 
-    1. ``shield_setup()`` installs OCI hook files.
-    2. ``shield_pre_start()`` resolves DNS and returns podman args.
+    1. ``Shield.setup()`` installs OCI hook files.
+    2. ``Shield.pre_start()`` resolves DNS and returns podman args.
     3. ``podman run`` starts the container with the hook-dir / annotation.
     4. Yields the container name.
     5. Cleanup: ``podman rm -f``.
@@ -246,16 +246,17 @@ def shielded_container(
     Yields:
         Container name with shield firewall applied.
     """
-    from terok_shield import ShieldConfig, shield_pre_start, shield_setup
+    from terok_shield import Shield, ShieldConfig
 
     cfg = ShieldConfig()
-    shield_setup(config=cfg)
+    shield = Shield(cfg)
+    shield.setup()
 
     name = f"{CTR_PREFIX}-api-{os.getpid()}"
     subprocess.run(["podman", "rm", "-f", name], capture_output=True)
 
     try:
-        extra_args = shield_pre_start(name, config=cfg)
+        extra_args = shield.pre_start(name)
         start_shielded_container(name, extra_args, IMAGE)
         yield name
     finally:
