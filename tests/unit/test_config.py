@@ -15,6 +15,15 @@ from terok_shield.config import (
     load_shield_config,
 )
 
+from ..testfs import (
+    FAKE_CONFIG_DIR,
+    FAKE_STATE_DIR,
+    FAKE_XDG_CONFIG_HOME,
+    FAKE_XDG_STATE_HOME,
+    NFT_BINARY,
+    NONEXISTENT_DIR,
+)
+
 
 class TestShieldConfig(unittest.TestCase):
     """Tests for ShieldConfig dataclass."""
@@ -51,9 +60,11 @@ class TestShieldPaths(unittest.TestCase):
 
     def test_state_root_env_override(self) -> None:
         """TEROK_SHIELD_STATE_DIR overrides default."""
-        with unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_STATE_DIR": "/tmp/test-state"}):
+        with unittest.mock.patch.dict(
+            "os.environ", {"TEROK_SHIELD_STATE_DIR": str(FAKE_STATE_DIR)}
+        ):
             paths = ShieldPaths.from_env()
-            self.assertEqual(str(paths.state_root), "/tmp/test-state")
+            self.assertEqual(paths.state_root, FAKE_STATE_DIR)
 
     def test_config_root_default(self) -> None:
         """Default config root is under ~/.config/."""
@@ -64,86 +75,101 @@ class TestShieldPaths(unittest.TestCase):
     def test_config_root_env_override(self) -> None:
         """TEROK_SHIELD_CONFIG_DIR overrides default."""
         with unittest.mock.patch.dict(
-            "os.environ", {"TEROK_SHIELD_CONFIG_DIR": "/tmp/test-config"}
+            "os.environ", {"TEROK_SHIELD_CONFIG_DIR": str(FAKE_CONFIG_DIR)}
         ):
             paths = ShieldPaths.from_env()
-            self.assertEqual(str(paths.config_root), "/tmp/test-config")
+            self.assertEqual(paths.config_root, FAKE_CONFIG_DIR)
 
     def test_state_root_xdg(self) -> None:
         """XDG_STATE_HOME is used when TEROK_SHIELD_STATE_DIR is not set."""
         with unittest.mock.patch.dict(
-            "os.environ", {"XDG_STATE_HOME": "/tmp/xdg-state"}, clear=True
+            "os.environ", {"XDG_STATE_HOME": str(FAKE_XDG_STATE_HOME)}, clear=True
         ):
             paths = ShieldPaths.from_env()
-            self.assertEqual(str(paths.state_root), "/tmp/xdg-state/terok-shield")
+            self.assertEqual(paths.state_root, FAKE_XDG_STATE_HOME / "terok-shield")
 
     def test_config_root_xdg(self) -> None:
         """XDG_CONFIG_HOME is used when TEROK_SHIELD_CONFIG_DIR is not set."""
         with unittest.mock.patch.dict(
-            "os.environ", {"XDG_CONFIG_HOME": "/tmp/xdg-config"}, clear=True
+            "os.environ", {"XDG_CONFIG_HOME": str(FAKE_XDG_CONFIG_HOME)}, clear=True
         ):
             paths = ShieldPaths.from_env()
-            self.assertEqual(str(paths.config_root), "/tmp/xdg-config/terok-shield")
+            self.assertEqual(paths.config_root, FAKE_XDG_CONFIG_HOME / "terok-shield")
 
     def test_state_root_explicit_overrides_xdg(self) -> None:
         """TEROK_SHIELD_STATE_DIR takes priority over XDG_STATE_HOME."""
         with unittest.mock.patch.dict(
             "os.environ",
-            {"TEROK_SHIELD_STATE_DIR": "/tmp/explicit", "XDG_STATE_HOME": "/tmp/xdg"},
+            {
+                "TEROK_SHIELD_STATE_DIR": str(FAKE_STATE_DIR),
+                "XDG_STATE_HOME": str(FAKE_XDG_STATE_HOME),
+            },
         ):
             paths = ShieldPaths.from_env()
-            self.assertEqual(str(paths.state_root), "/tmp/explicit")
+            self.assertEqual(paths.state_root, FAKE_STATE_DIR)
 
     def test_logs_dir_derives_from_state(self) -> None:
         """Logs dir is under the state root."""
-        with unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_STATE_DIR": "/tmp/s"}):
+        with unittest.mock.patch.dict(
+            "os.environ", {"TEROK_SHIELD_STATE_DIR": str(FAKE_STATE_DIR)}
+        ):
             paths = ShieldPaths.from_env()
-            self.assertEqual(str(paths.logs_dir), "/tmp/s/logs")
+            self.assertEqual(paths.logs_dir, FAKE_STATE_DIR / "logs")
 
     def test_hooks_dir(self) -> None:
         """Hooks dir is under the state root."""
-        with unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_STATE_DIR": "/tmp/s"}):
+        with unittest.mock.patch.dict(
+            "os.environ", {"TEROK_SHIELD_STATE_DIR": str(FAKE_STATE_DIR)}
+        ):
             paths = ShieldPaths.from_env()
-            self.assertEqual(str(paths.hooks_dir), "/tmp/s/hooks")
+            self.assertEqual(paths.hooks_dir, FAKE_STATE_DIR / "hooks")
 
     def test_hook_entrypoint(self) -> None:
         """Hook entrypoint is under the state root."""
-        with unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_STATE_DIR": "/tmp/s"}):
+        with unittest.mock.patch.dict(
+            "os.environ", {"TEROK_SHIELD_STATE_DIR": str(FAKE_STATE_DIR)}
+        ):
             paths = ShieldPaths.from_env()
-            self.assertEqual(str(paths.hook_entrypoint), "/tmp/s/terok-shield-hook")
+            self.assertEqual(paths.hook_entrypoint, FAKE_STATE_DIR / "terok-shield-hook")
 
     def test_profiles_dir(self) -> None:
         """Profiles dir is under the config root."""
-        with unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": "/tmp/c"}):
+        with unittest.mock.patch.dict(
+            "os.environ", {"TEROK_SHIELD_CONFIG_DIR": str(FAKE_CONFIG_DIR)}
+        ):
             paths = ShieldPaths.from_env()
-            self.assertEqual(str(paths.profiles_dir), "/tmp/c/profiles")
+            self.assertEqual(paths.profiles_dir, FAKE_CONFIG_DIR / "profiles")
 
     def test_dns_dir(self) -> None:
         """DNS dir is under the state root."""
-        with unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_STATE_DIR": "/tmp/s"}):
+        with unittest.mock.patch.dict(
+            "os.environ", {"TEROK_SHIELD_STATE_DIR": str(FAKE_STATE_DIR)}
+        ):
             paths = ShieldPaths.from_env()
-            self.assertEqual(str(paths.dns_dir), "/tmp/s/dns")
+            self.assertEqual(paths.dns_dir, FAKE_STATE_DIR / "dns")
 
     def test_resolved_dir(self) -> None:
         """Resolved dir is under the state root."""
-        with unittest.mock.patch.dict("os.environ", {"TEROK_SHIELD_STATE_DIR": "/tmp/s"}):
+        with unittest.mock.patch.dict(
+            "os.environ", {"TEROK_SHIELD_STATE_DIR": str(FAKE_STATE_DIR)}
+        ):
             paths = ShieldPaths.from_env()
-            self.assertEqual(str(paths.resolved_dir), "/tmp/s/resolved")
+            self.assertEqual(paths.resolved_dir, FAKE_STATE_DIR / "resolved")
 
     def test_ensure_dirs(self) -> None:
         """ensure_dirs creates all required directories."""
         with tempfile.TemporaryDirectory() as tmp:
             paths = ShieldPaths(
-                state_root=Path(f"{tmp}/state"),
-                config_root=Path(f"{tmp}/cfg"),
+                state_root=Path(tmp) / "state",
+                config_root=Path(tmp) / "cfg",
             )
             paths.ensure_dirs()
-            self.assertTrue(Path(f"{tmp}/state").is_dir())
-            self.assertTrue(Path(f"{tmp}/state/hooks").is_dir())
-            self.assertTrue(Path(f"{tmp}/state/logs").is_dir())
-            self.assertTrue(Path(f"{tmp}/state/dns").is_dir())
-            self.assertTrue(Path(f"{tmp}/state/resolved").is_dir())
-            self.assertTrue(Path(f"{tmp}/cfg/profiles").is_dir())
+            self.assertTrue((Path(tmp) / "state").is_dir())
+            self.assertTrue((Path(tmp) / "state" / "hooks").is_dir())
+            self.assertTrue((Path(tmp) / "state" / "logs").is_dir())
+            self.assertTrue((Path(tmp) / "state" / "dns").is_dir())
+            self.assertTrue((Path(tmp) / "state" / "resolved").is_dir())
+            self.assertTrue((Path(tmp) / "cfg" / "profiles").is_dir())
 
 
 class TestLoadShieldConfig(unittest.TestCase):
@@ -154,7 +180,7 @@ class TestLoadShieldConfig(unittest.TestCase):
     ) -> None:
         """Return defaults when config file does not exist."""
         with unittest.mock.patch.dict(
-            "os.environ", {"TEROK_SHIELD_CONFIG_DIR": "/nonexistent-path"}
+            "os.environ", {"TEROK_SHIELD_CONFIG_DIR": str(NONEXISTENT_DIR / "config")}
         ):
             cfg = load_shield_config()
             self.assertEqual(cfg.mode, ShieldMode.HOOK)
@@ -262,7 +288,7 @@ class TestAutoDetectMode(unittest.TestCase):
             _auto_detect_mode()
 
     @unittest.mock.patch(
-        "shutil.which", side_effect=lambda n: "/usr/sbin/nft" if n == "nft" else None
+        "shutil.which", side_effect=lambda n: NFT_BINARY if n == "nft" else None
     )
     @unittest.mock.patch("subprocess.run", side_effect=FileNotFoundError)
     def test_nft_only_returns_hook(
