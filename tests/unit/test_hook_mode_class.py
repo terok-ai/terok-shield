@@ -15,7 +15,7 @@ from terok_shield.mode_hook import HookMode, install_hooks
 from terok_shield.nft import bypass_ruleset, hook_ruleset
 from terok_shield.run import ExecError
 
-from ..testnet import IPV6_CLOUDFLARE, TEST_DOMAIN, TEST_IP1
+from ..testnet import IPV6_CLOUDFLARE, TEST_DOMAIN, TEST_IP1, TEST_IP2
 
 _DISPOSABLE_DIRS: list[tempfile.TemporaryDirectory] = []
 """Managed temp dirs for mock-only tests (cleaned up at process exit)."""
@@ -235,6 +235,69 @@ class TestHookModeAllowDeny(unittest.TestCase):
 
             mode.deny_ip("test-ctr", TEST_IP1)
             self.assertNotIn(TEST_IP1, live_path.read_text().splitlines())
+
+    def test_deny_profile_ip_writes_deny_list(self) -> None:
+        """deny_ip of a profile-sourced IP persists to deny.list."""
+        with tempfile.TemporaryDirectory() as tmp:
+            state.profile_allowed_path(Path(tmp)).write_text(f"{TEST_IP1}\n")
+
+            runner = mock.MagicMock()
+            ruleset = mock.MagicMock()
+            ruleset.safe_ip.return_value = TEST_IP1
+            mode = _make_hook_mode(tmp_path=Path(tmp), runner=runner, ruleset=ruleset)
+
+            mode.deny_ip("test-ctr", TEST_IP1)
+            deny_file = state.deny_path(Path(tmp))
+            self.assertTrue(deny_file.is_file())
+            self.assertIn(TEST_IP1, deny_file.read_text())
+
+    def test_deny_live_only_ip_no_deny_list(self) -> None:
+        """deny_ip of a live-only IP does NOT write deny.list."""
+        with tempfile.TemporaryDirectory() as tmp:
+            state.live_allowed_path(Path(tmp)).write_text(f"{TEST_IP1}\n")
+
+            runner = mock.MagicMock()
+            ruleset = mock.MagicMock()
+            ruleset.safe_ip.return_value = TEST_IP1
+            mode = _make_hook_mode(tmp_path=Path(tmp), runner=runner, ruleset=ruleset)
+
+            mode.deny_ip("test-ctr", TEST_IP1)
+            deny_file = state.deny_path(Path(tmp))
+            self.assertFalse(deny_file.is_file())
+
+    def test_deny_nft_error_still_persists(self) -> None:
+        """nft delete element ExecError is caught; deny still persists to files."""
+        with tempfile.TemporaryDirectory() as tmp:
+            state.profile_allowed_path(Path(tmp)).write_text(f"{TEST_IP1}\n")
+            state.live_allowed_path(Path(tmp)).write_text(f"{TEST_IP1}\n")
+
+            runner = mock.MagicMock()
+            runner.nft_via_nsenter.side_effect = ExecError(["nft"], 1, "not in set")
+            ruleset = mock.MagicMock()
+            ruleset.safe_ip.return_value = TEST_IP1
+            mode = _make_hook_mode(tmp_path=Path(tmp), runner=runner, ruleset=ruleset)
+
+            mode.deny_ip("test-ctr", TEST_IP1)
+            # live.allowed should still have IP removed
+            live_content = state.live_allowed_path(Path(tmp)).read_text()
+            self.assertNotIn(TEST_IP1, live_content.splitlines())
+            # deny.list should be written
+            self.assertIn(TEST_IP1, state.deny_path(Path(tmp)).read_text())
+
+    def test_allow_after_deny_clears_deny_list(self) -> None:
+        """allow_ip removes IP from deny.list (un-deny)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            state.deny_path(Path(tmp)).write_text(f"{TEST_IP1}\n{TEST_IP2}\n")
+
+            runner = mock.MagicMock()
+            ruleset = mock.MagicMock()
+            ruleset.safe_ip.return_value = TEST_IP1
+            mode = _make_hook_mode(tmp_path=Path(tmp), runner=runner, ruleset=ruleset)
+
+            mode.allow_ip("test-ctr", TEST_IP1)
+            denied = state.read_denied_ips(Path(tmp))
+            self.assertNotIn(TEST_IP1, denied)
+            self.assertIn(TEST_IP2, denied)
 
 
 class TestHookModeListRules(unittest.TestCase):

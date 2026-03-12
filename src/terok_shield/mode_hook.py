@@ -223,6 +223,16 @@ class HookMode:
     def allow_ip(self, container: str, ip: str) -> None:
         """Live-allow an IP for a running container via nsenter."""
         ip = self._ruleset.safe_ip(ip)
+
+        # Un-deny: remove from deny.list if present
+        sd = self._config.state_dir.resolve()
+        dp = state.deny_path(sd)
+        if dp.is_file():
+            denied = state.read_denied_ips(sd)
+            if ip in denied:
+                denied.discard(ip)
+                dp.write_text("".join(f"{d}\n" for d in sorted(denied)))
+
         self._runner.nft_via_nsenter(
             container,
             "add",
@@ -241,23 +251,48 @@ class HookMode:
                 f.write(f"{ip}\n")
 
     def deny_ip(self, container: str, ip: str) -> None:
-        """Live-deny an IP for a running container via nsenter."""
+        """Live-deny an IP for a running container via nsenter.
+
+        Removes from the nft allow set (best-effort) and from live.allowed.
+        If the IP appears in profile.allowed, persists to deny.list so the
+        deny survives ``shield_up`` and container restarts.
+        """
         ip = self._ruleset.safe_ip(ip)
-        self._runner.nft_via_nsenter(
-            container,
-            "delete",
-            "element",
-            "inet",
-            "terok_shield",
-            self._set_for_ip(ip),
-            f"{{ {ip} }}",
-        )
+        sd = self._config.state_dir.resolve()
+
+        # Best-effort nft delete (IP may not be in the set)
+        try:
+            self._runner.nft_via_nsenter(
+                container,
+                "delete",
+                "element",
+                "inet",
+                "terok_shield",
+                self._set_for_ip(ip),
+                f"{{ {ip} }}",
+            )
+        except ExecError:
+            pass
+
         # Remove from live.allowed
         live_path = self._live_path()
         if live_path.is_file():
             lines = live_path.read_text().splitlines()
             lines = [line for line in lines if line.strip() != ip]
             live_path.write_text("\n".join(lines) + "\n" if lines else "")
+
+        # Persist to deny.list if IP is in profile.allowed
+        profile_path = state.profile_allowed_path(sd)
+        if profile_path.is_file():
+            profile_ips = {
+                line.strip() for line in profile_path.read_text().splitlines() if line.strip()
+            }
+            if ip in profile_ips:
+                dp = state.deny_path(sd)
+                existing = state.read_denied_ips(sd)
+                if ip not in existing:
+                    with dp.open("a") as f:
+                        f.write(f"{ip}\n")
 
     def list_rules(self, container: str) -> str:
         """List current nft rules for a running container."""
@@ -289,9 +324,9 @@ class HookMode:
         stdin = f"delete table {NFT_TABLE}\n{rs}"
         self._runner.nft_via_nsenter(container, stdin=stdin)
 
-        # Re-add IPs from both allowlist files
+        # Re-add effective IPs (allowed minus denied)
         sd = self._config.state_dir.resolve()
-        unique_ips = state.read_allowed_ips(sd)
+        unique_ips = state.read_effective_ips(sd)
 
         if unique_ips:
             elements_cmd = self._ruleset.add_elements_dual(unique_ips)

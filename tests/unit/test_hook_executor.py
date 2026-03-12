@@ -175,6 +175,15 @@ class TestHookExecutorReadAllowedIps(unittest.TestCase):
             result = executor._read_allowed_ips()
             self.assertEqual(result, [TEST_IP1])
 
+    def test_subtracts_denied_ips(self) -> None:
+        """Denied IPs from deny.list are excluded from the result."""
+        with tempfile.TemporaryDirectory() as tmp:
+            state.profile_allowed_path(Path(tmp)).write_text(f"{TEST_IP1}\n{TEST_IP2}\n")
+            state.deny_path(Path(tmp)).write_text(f"{TEST_IP1}\n")
+            executor = _make_executor(state_dir=Path(tmp))
+            result = executor._read_allowed_ips()
+            self.assertEqual(result, [TEST_IP2])
+
 
 class TestHookExecutorNftExec(unittest.TestCase):
     """Test HookExecutor._nft_exec()."""

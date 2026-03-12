@@ -17,6 +17,7 @@ Bundle layout::
     ├── terok-shield-hook              # entrypoint script
     ├── profile.allowed                # IPs from DNS resolution
     ├── live.allowed                   # IPs from allow/deny
+    ├── deny.list                      # persistent deny overrides
     └── audit.jsonl                    # per-container audit log
 """
 
@@ -55,6 +56,11 @@ def live_allowed_path(state_dir: Path) -> Path:
     return state_dir / "live.allowed"
 
 
+def deny_path(state_dir: Path) -> Path:
+    """Return the path to the persistent denylist file."""
+    return state_dir / "deny.list"
+
+
 def audit_path(state_dir: Path) -> Path:
     """Return the path to the per-container audit log."""
     return state_dir / "audit.jsonl"
@@ -77,6 +83,27 @@ def read_allowed_ips(state_dir: Path) -> list[str]:
             seen.add(ip)
             unique.append(ip)
     return unique
+
+
+def read_denied_ips(state_dir: Path) -> set[str]:
+    """Read IPs from deny.list.
+
+    Returns an empty set if the file does not exist.
+    """
+    path = deny_path(state_dir)
+    if not path.is_file():
+        return set()
+    return {line.strip() for line in path.read_text().splitlines() if line.strip()}
+
+
+def read_effective_ips(state_dir: Path) -> list[str]:
+    """Compute effective allowed IPs: (profile ∪ live) - deny.
+
+    Returns a stable-order list with denied IPs subtracted.
+    """
+    allowed = read_allowed_ips(state_dir)
+    denied = read_denied_ips(state_dir)
+    return [ip for ip in allowed if ip not in denied]
 
 
 def ensure_state_dirs(state_dir: Path) -> None:

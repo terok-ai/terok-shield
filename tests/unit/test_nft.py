@@ -64,6 +64,14 @@ class TestSafeIp(unittest.TestCase):
         """Accept valid IPv6 CIDR notation."""
         self.assertEqual(safe_ip(IPV6_NET1), IPV6_NET1)
 
+    def test_normalizes_ipv6(self) -> None:
+        """Normalize verbose IPv6 to canonical compressed form."""
+        self.assertEqual(safe_ip("2001:0db8:0000:0000:0000:0000:0000:0001"), "2001:db8::1")
+
+    def test_normalizes_ipv4_cidr_host_bits(self) -> None:
+        """Normalize CIDR with host bits to network address."""
+        self.assertEqual(safe_ip("192.168.1.5/24"), "192.168.1.0/24")
+
 
 class TestHookRuleset(unittest.TestCase):
     """Tests for hook mode ruleset generation."""

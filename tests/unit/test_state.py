@@ -10,15 +10,19 @@ from pathlib import Path
 from terok_shield.state import (
     BUNDLE_VERSION,
     audit_path,
+    deny_path,
     ensure_state_dirs,
     hook_entrypoint,
     hook_json_path,
     hooks_dir,
     live_allowed_path,
     profile_allowed_path,
+    read_denied_ips,
+    read_effective_ips,
 )
 
 from ..testfs import FAKE_STATE_DIR
+from ..testnet import TEST_IP1, TEST_IP2, TEST_IP3
 
 
 class TestBundleVersion(unittest.TestCase):
@@ -63,6 +67,10 @@ class TestPathDerivation(unittest.TestCase):
         """live_allowed_path returns state_dir / live.allowed."""
         self.assertEqual(live_allowed_path(self._sd), self._sd / "live.allowed")
 
+    def test_deny_path(self) -> None:
+        """deny_path returns state_dir / deny.list."""
+        self.assertEqual(deny_path(self._sd), self._sd / "deny.list")
+
     def test_audit_path(self) -> None:
         """audit_path returns state_dir / audit.jsonl."""
         self.assertEqual(audit_path(self._sd), self._sd / "audit.jsonl")
@@ -94,3 +102,58 @@ class TestEnsureStateDirs(unittest.TestCase):
             ensure_state_dirs(sd)
             self.assertTrue(sd.is_dir())
             self.assertTrue(hooks_dir(sd).is_dir())
+
+
+class TestReadDeniedIps(unittest.TestCase):
+    """Test read_denied_ips()."""
+
+    def test_empty_when_no_file(self) -> None:
+        """Return empty set when deny.list does not exist."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(read_denied_ips(Path(tmp)), set())
+
+    def test_reads_populated_file(self) -> None:
+        """Read IPs from deny.list."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sd = Path(tmp)
+            deny_path(sd).write_text(f"{TEST_IP1}\n{TEST_IP2}\n")
+            result = read_denied_ips(sd)
+            self.assertEqual(result, {TEST_IP1, TEST_IP2})
+
+    def test_skips_blank_lines(self) -> None:
+        """Skip blank lines in deny.list."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sd = Path(tmp)
+            deny_path(sd).write_text(f"\n{TEST_IP1}\n\n")
+            self.assertEqual(read_denied_ips(sd), {TEST_IP1})
+
+
+class TestReadEffectiveIps(unittest.TestCase):
+    """Test read_effective_ips()."""
+
+    def test_subtracts_denied(self) -> None:
+        """Denied IPs are removed from the effective list."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sd = Path(tmp)
+            profile_allowed_path(sd).write_text(f"{TEST_IP1}\n{TEST_IP2}\n")
+            deny_path(sd).write_text(f"{TEST_IP1}\n")
+            result = read_effective_ips(sd)
+            self.assertEqual(result, [TEST_IP2])
+
+    def test_no_deny_file_same_as_read_allowed(self) -> None:
+        """Without deny.list, effective IPs equal allowed IPs."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sd = Path(tmp)
+            profile_allowed_path(sd).write_text(f"{TEST_IP1}\n{TEST_IP2}\n")
+            live_allowed_path(sd).write_text(f"{TEST_IP3}\n")
+            result = read_effective_ips(sd)
+            self.assertEqual(result, [TEST_IP1, TEST_IP2, TEST_IP3])
+
+    def test_deny_only_affects_matching_ips(self) -> None:
+        """Deny list entries that are not in allowed have no effect."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sd = Path(tmp)
+            profile_allowed_path(sd).write_text(f"{TEST_IP1}\n")
+            deny_path(sd).write_text(f"{TEST_IP3}\n")
+            result = read_effective_ips(sd)
+            self.assertEqual(result, [TEST_IP1])
