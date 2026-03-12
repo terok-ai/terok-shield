@@ -22,7 +22,7 @@ Verify the installation:
 terok-shield --version
 ```
 
-## Run a shielded container
+## Quick start
 
 ```bash
 terok-shield run my-container -- alpine:latest sh
