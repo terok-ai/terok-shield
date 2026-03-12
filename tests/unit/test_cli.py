@@ -321,6 +321,49 @@ class TestMainDispatch(unittest.TestCase):
             main(["resolve", "test", "--", "junk"])
         self.assertEqual(ctx.exception.code, 2)
 
+    def test_bare_separator_no_command_exits_2(self) -> None:
+        """CLI rejects bare '--' with no subcommand."""
+        with self.assertRaises(SystemExit) as ctx:
+            main(["--", "junk"])
+        self.assertEqual(ctx.exception.code, 2)
+
+    @mock.patch("terok_shield.cli.Shield")
+    @mock.patch("terok_shield.cli._build_config")
+    def test_run_rejects_shield_managed_flags(
+        self, mock_cfg: mock.MagicMock, mock_cls: mock.MagicMock
+    ) -> None:
+        """CLI run rejects flags that conflict with shield configuration."""
+        for flag in (
+            "--name",
+            "--network",
+            "--hooks-dir",
+            "--annotation",
+            "--cap-add",
+            "--cap-drop",
+            "--security-opt",
+        ):
+            with self.assertRaises(SystemExit) as ctx:
+                main(["run", "test", "--", flag, "val", "alpine:latest"])
+            self.assertEqual(ctx.exception.code, 1, f"{flag} should be rejected")
+            mock_cls.return_value.pre_start.assert_not_called()
+
+    @mock.patch("os.execvp")
+    @mock.patch("terok_shield.cli.Shield")
+    @mock.patch("terok_shield.cli._build_config")
+    def test_run_allows_non_managed_flags(
+        self,
+        mock_cfg: mock.MagicMock,
+        mock_cls: mock.MagicMock,
+        mock_exec: mock.MagicMock,
+    ) -> None:
+        """CLI run passes through non-managed podman flags."""
+        mock_cls.return_value.pre_start.return_value = ["--annotation", "a=b"]
+        main(["run", "test", "--", "-d", "-e", "FOO=bar", "alpine:latest"])
+        mock_exec.assert_called_once()
+        argv = mock_exec.call_args[0][1]
+        self.assertIn("-d", argv)
+        self.assertIn("-e", argv)
+
     @mock.patch("terok_shield.cli.Shield")
     @mock.patch("terok_shield.cli._build_config")
     def test_prepare_json_output(self, mock_cfg: mock.MagicMock, mock_cls: mock.MagicMock) -> None:

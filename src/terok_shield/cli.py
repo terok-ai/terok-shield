@@ -291,12 +291,12 @@ def main(argv: list[str] | None = None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
+    if saw_separator and args.command != "run":
+        parser.error("'--' separator is only supported by the 'run' subcommand")
+
     if args.command is None:
         parser.print_help()
         sys.exit(0)
-
-    if saw_separator and args.command != "run":
-        parser.error("'--' separator is only supported by the 'run' subcommand")
 
     if args.command == "run":
         args.podman_args = run_trailing
@@ -373,6 +373,28 @@ def _cmd_prepare(
         print(" ".join(shlex.quote(a) for a in podman_args))
 
 
+_SHIELD_MANAGED_FLAGS = frozenset(
+    {
+        "--name",
+        "--network",
+        "--hooks-dir",
+        "--annotation",
+        "--cap-add",
+        "--cap-drop",
+        "--security-opt",
+    }
+)
+
+
+def _reject_shield_managed_flags(podman_args: list[str]) -> None:
+    """Reject podman flags that conflict with shield-managed configuration."""
+    conflicts = sorted({arg for arg in podman_args if arg in _SHIELD_MANAGED_FLAGS})
+    if conflicts:
+        raise ValueError(
+            f"Flag(s) managed by terok-shield, cannot override: {', '.join(conflicts)}"
+        )
+
+
 def _cmd_run(
     shield: Shield,
     container: str,
@@ -385,6 +407,8 @@ def _cmd_run(
         raise ValueError(
             "No image specified. Usage: terok-shield run <container> -- <image> [cmd...]"
         )
+
+    _reject_shield_managed_flags(podman_args)
 
     shield_args = shield.pre_start(container, profiles)
     argv = ["podman", "run", "--name", container, *shield_args, *podman_args]
