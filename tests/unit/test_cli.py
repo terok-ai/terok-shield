@@ -298,10 +298,11 @@ class TestMainDispatch(unittest.TestCase):
     @mock.patch("terok_shield.cli._build_config")
     def test_run_no_image_exits_1(self, mock_cfg: mock.MagicMock, mock_cls: mock.MagicMock) -> None:
         """CLI run without image after '--' exits with code 1."""
-        mock_cls.return_value.pre_start.return_value = []
         with self.assertRaises(SystemExit) as ctx:
             main(["run", "test", "--"])
         self.assertEqual(ctx.exception.code, 1)
+        # pre_start must NOT be called when image is missing
+        mock_cls.return_value.pre_start.assert_not_called()
 
     @mock.patch("terok_shield.cli.Shield")
     @mock.patch("terok_shield.cli._build_config")
@@ -309,10 +310,10 @@ class TestMainDispatch(unittest.TestCase):
         self, mock_cfg: mock.MagicMock, mock_cls: mock.MagicMock
     ) -> None:
         """CLI run without '--' and no args exits with code 1."""
-        mock_cls.return_value.pre_start.return_value = []
         with self.assertRaises(SystemExit) as ctx:
             main(["run", "test"])
         self.assertEqual(ctx.exception.code, 1)
+        mock_cls.return_value.pre_start.assert_not_called()
 
     def test_separator_on_non_run_exits_2(self) -> None:
         """CLI rejects '--' separator on non-run subcommands."""

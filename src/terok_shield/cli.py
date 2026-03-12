@@ -381,13 +381,12 @@ def _cmd_run(
     podman_args: list[str],
 ) -> None:
     """Launch a shielded container by exec-ing into podman run."""
-    shield_args = shield.pre_start(container, profiles)
-
     if not podman_args:
         raise ValueError(
             "No image specified. Usage: terok-shield run <container> -- <image> [cmd...]"
         )
 
+    shield_args = shield.pre_start(container, profiles)
     argv = ["podman", "run", "--name", container, *shield_args, *podman_args]
     os.execvp("podman", argv)
 
