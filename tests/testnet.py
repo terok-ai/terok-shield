@@ -38,6 +38,8 @@ BROAD_CIDR_8 = "203.0.0.0/8"  # Broad CIDR (prefix <= 16) for classification tes
 # ── RFC 1918 / link-local addresses (used to test blocking rules) ──
 
 RFC1918_HOST = "10.0.0.1"  # Single host in 10.0.0.0/8
+RFC1918_CIDR_10 = "10.0.0.0/8"  # Broad RFC1918 CIDR (prefix <= 16)
+RFC1918_CIDR_192 = "192.168.1.0/24"  # Narrow RFC1918 CIDR (prefix > 16)
 LINK_LOCAL_DNS = "169.254.0.1"  # Link-local DNS forwarder (pasta-style)
 
 # --8<-- [start:outbound-targets]
@@ -53,6 +55,7 @@ ALLOWED_TARGET_HTTPS = f"https://{ALLOWED_TARGET_DOMAIN}/"  # HTTPS (port 443)
 # ── Blocked target: Google DNS (used as a non-allowed destination) ──
 
 BLOCKED_TARGET_IP = "8.8.8.8"  # Google Public DNS
+BLOCKED_TARGET_NET = "8.8.8.0/24"  # Public network CIDR (for classification tests)
 BLOCKED_TARGET_HTTP = (
     f"http://{BLOCKED_TARGET_IP}/"  # No HTTP server on port 80; for assert_blocked only
 )

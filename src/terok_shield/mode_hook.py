@@ -139,7 +139,7 @@ class HookMode:
         domains, writes allowlist, sets annotations, and returns the
         podman CLI arguments needed for shield protection.
         """
-        sd = self._config.state_dir
+        sd = self._config.state_dir.resolve()
 
         # Ensure state dirs and install hooks (idempotent)
         state.ensure_state_dirs(sd)
@@ -150,8 +150,7 @@ class HookMode:
 
         # Resolve DNS and write profile allowlist
         entries = self._profiles.compose_profiles(profiles)
-        cache_path = state.profile_allowed_path(sd).resolve()
-        self._dns.resolve_and_cache(entries, cache_path)
+        self._dns.resolve_and_cache(entries, state.profile_allowed_path(sd))
 
         # Build podman args
         args: list[str] = []
@@ -290,12 +289,12 @@ class HookMode:
         stdin = f"delete table {NFT_TABLE}\n{rs}"
         self._runner.nft_via_nsenter(container, stdin=stdin)
 
-        # Re-add IPs from both allowlist files (resolve to prevent traversal)
-        sd = self._config.state_dir
+        # Re-add IPs from both allowlist files
+        sd = self._config.state_dir.resolve()
         ips: list[str] = []
         for allowlist_path in (
-            state.profile_allowed_path(sd).resolve(),
-            state.live_allowed_path(sd).resolve(),
+            state.profile_allowed_path(sd),
+            state.live_allowed_path(sd),
         ):
             if allowlist_path.is_file():
                 ips.extend(

@@ -97,12 +97,13 @@ depends_on = [
     "terok_shield.util",
 ]
 
-# CLI — depends on package root (public API) + audit for logs scanning
+# CLI — depends on package root (public API) + audit for logs scanning + validation
 [[modules]]
 path = "terok_shield.cli"
 depends_on = [
     "terok_shield",
     "terok_shield.audit",
+    "terok_shield.validation",
 ]
 
 # Package root — public API, dispatches to mode modules

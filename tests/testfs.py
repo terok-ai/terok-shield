@@ -27,7 +27,7 @@ FAKE_XDG_CONFIG_HOME = _BASE / "xdg-config"
 #   NONEXISTENT_DIR / "logs", NONEXISTENT_DIR / "ep", etc.
 
 NONEXISTENT_DIR = Path("/nonexistent")
-NONEXISTENT_SENTINEL: str = "/nonexistent/sentinel"
+NONEXISTENT_SENTINEL: str = str(NONEXISTENT_DIR / "sentinel")
 
 # ── Forbidden path inputs (validation must reject these) ──
 # Values are deliberately harmless — even a catastrophic test failure

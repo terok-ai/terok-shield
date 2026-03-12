@@ -27,6 +27,7 @@ from ..testfs import (
     FAKE_STATE_DIR_STR,
     FAKE_XDG_CONFIG_HOME,
     FAKE_XDG_STATE_HOME,
+    FORBIDDEN_TRAVERSAL,
     NFT_BINARY,
     NONEXISTENT_DIR,
 )
@@ -657,6 +658,26 @@ class TestBuildConfig(unittest.TestCase):
             ):
                 config = _build_config("ctr", state_dir_override=Path(state_dir))
                 self.assertTrue(config.audit_enabled)
+
+    @mock.patch("terok_shield.cli._auto_detect_mode", return_value=ShieldMode.HOOK)
+    def test_traversal_container_name_rejected(self, _mock_mode: mock.Mock) -> None:
+        """Container name with path traversal is rejected."""
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(ValueError, msg="Unsafe container name"):
+                _build_config(FORBIDDEN_TRAVERSAL, state_dir_override=Path(tmp))
+
+    @mock.patch("terok_shield.cli._auto_detect_mode", return_value=ShieldMode.HOOK)
+    def test_non_string_profiles_uses_default(self, _mock_mode: mock.Mock) -> None:
+        """Profile list with non-string entries falls back to default."""
+        with tempfile.TemporaryDirectory() as cfg_dir:
+            config_file = Path(cfg_dir) / "config.yml"
+            config_file.write_text("default_profiles: [1, null]\n")
+            with (
+                mock.patch.dict("os.environ", {"TEROK_SHIELD_CONFIG_DIR": cfg_dir}),
+                tempfile.TemporaryDirectory() as state_dir,
+            ):
+                config = _build_config("ctr", state_dir_override=Path(state_dir))
+                self.assertEqual(config.default_profiles, ("dev-standard",))
 
     @mock.patch("terok_shield.cli._auto_detect_mode", return_value=ShieldMode.HOOK)
     def test_no_state_dir_override_uses_resolve(self, _mock_mode: mock.Mock) -> None:

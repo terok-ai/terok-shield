@@ -19,7 +19,14 @@ from terok_shield.oci_hook import (
     hook_main,
 )
 
-from ..testnet import RFC1918_HOST
+from ..testnet import (
+    BLOCKED_TARGET_IP,
+    BLOCKED_TARGET_NET,
+    IPV6_ULA_CIDR,
+    RFC1918_CIDR_10,
+    RFC1918_CIDR_192,
+    RFC1918_HOST,
+)
 
 
 def _oci_state(
@@ -52,7 +59,7 @@ class TestClassifyCidr(unittest.TestCase):
         """RFC1918 network is classified as private."""
         import ipaddress
 
-        is_private, is_broad = _classify_cidr(ipaddress.ip_network("10.0.0.0/8"))
+        is_private, is_broad = _classify_cidr(ipaddress.ip_network(RFC1918_CIDR_10))
         self.assertTrue(is_private)
         self.assertTrue(is_broad)
 
@@ -60,7 +67,7 @@ class TestClassifyCidr(unittest.TestCase):
         """Public network is not private."""
         import ipaddress
 
-        is_private, is_broad = _classify_cidr(ipaddress.ip_network("8.8.8.0/24"))
+        is_private, is_broad = _classify_cidr(ipaddress.ip_network(BLOCKED_TARGET_NET))
         self.assertFalse(is_private)
         self.assertFalse(is_broad)
 
@@ -68,14 +75,14 @@ class TestClassifyCidr(unittest.TestCase):
         """Narrow CIDR is not classified as broad."""
         import ipaddress
 
-        _, is_broad = _classify_cidr(ipaddress.ip_network("192.168.1.0/24"))
+        _, is_broad = _classify_cidr(ipaddress.ip_network(RFC1918_CIDR_192))
         self.assertFalse(is_broad)
 
     def test_private_v6(self) -> None:
         """ULA IPv6 network is classified as private."""
         import ipaddress
 
-        is_private, _ = _classify_cidr(ipaddress.ip_network("fc00::/7"))
+        is_private, _ = _classify_cidr(ipaddress.ip_network(IPV6_ULA_CIDR))
         self.assertTrue(is_private)
 
 
@@ -92,7 +99,7 @@ class TestIsPrivateAddr(unittest.TestCase):
         """Public address is not private."""
         import ipaddress
 
-        self.assertFalse(_is_private_addr(ipaddress.ip_address("8.8.8.8")))
+        self.assertFalse(_is_private_addr(ipaddress.ip_address(BLOCKED_TARGET_IP)))
 
 
 class TestCheckPrivateRanges(unittest.TestCase):
@@ -100,20 +107,20 @@ class TestCheckPrivateRanges(unittest.TestCase):
 
     def test_mixed_ips(self) -> None:
         """Classifies mix of private and public IPs."""
-        private, broad = _classify_ips([RFC1918_HOST, "8.8.8.8"])
+        private, broad = _classify_ips([RFC1918_HOST, BLOCKED_TARGET_IP])
         self.assertIn(RFC1918_HOST, private)
-        self.assertNotIn("8.8.8.8", private)
+        self.assertNotIn(BLOCKED_TARGET_IP, private)
         self.assertEqual(broad, [])
 
     def test_broad_cidr(self) -> None:
         """Broad CIDR is flagged."""
-        private, broad = _classify_ips(["10.0.0.0/8"])
-        self.assertIn("10.0.0.0/8", broad)
-        self.assertIn("10.0.0.0/8", private)
+        private, broad = _classify_ips([RFC1918_CIDR_10])
+        self.assertIn(RFC1918_CIDR_10, broad)
+        self.assertIn(RFC1918_CIDR_10, private)
 
     def test_invalid_ip_skipped(self) -> None:
         """Invalid IP strings are silently skipped."""
-        private, broad = _classify_ips(["not-an-ip", "8.8.8.8"])
+        private, broad = _classify_ips(["not-an-ip", BLOCKED_TARGET_IP])
         self.assertEqual(private, [])
         self.assertEqual(broad, [])
 
@@ -271,6 +278,18 @@ class TestHookMain(unittest.TestCase):
             rc = hook_main(_oci_state(annotations=ann))
             self.assertEqual(rc, 1)
 
+    def test_relative_state_dir_rejected(self) -> None:
+        """Return 1 when state_dir annotation is a relative path."""
+        ann = {
+            ANNOTATION_KEY: "dev-standard",
+            ANNOTATION_NAME_KEY: "my-ctr",
+            "terok.shield.state_dir": "relative/path",
+            "terok.shield.loopback_ports": "",
+            "terok.shield.version": str(state.BUNDLE_VERSION),
+        }
+        rc = hook_main(_oci_state(annotations=ann))
+        self.assertEqual(rc, 1)
+
     @unittest.mock.patch("terok_shield.oci_hook.HookExecutor")
     @unittest.mock.patch("terok_shield.oci_hook.AuditLogger")
     def test_audit_disabled_annotation(
@@ -285,3 +304,18 @@ class TestHookMain(unittest.TestCase):
             mock_audit_cls.assert_called_once()
             _, kwargs = mock_audit_cls.call_args
             self.assertFalse(kwargs["enabled"])
+
+    @unittest.mock.patch("terok_shield.oci_hook.HookExecutor")
+    @unittest.mock.patch("terok_shield.oci_hook.AuditLogger")
+    def test_malformed_audit_enabled_defaults_to_on(
+        self, mock_audit_cls: unittest.mock.Mock, mock_exec: unittest.mock.Mock
+    ) -> None:
+        """Malformed audit_enabled value defaults to enabled (safe)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            ann = _valid_annotations(tmp)
+            ann["terok.shield.audit_enabled"] = "garbled"
+            rc = hook_main(_oci_state(annotations=ann))
+            self.assertEqual(rc, 0)
+            mock_audit_cls.assert_called_once()
+            _, kwargs = mock_audit_cls.call_args
+            self.assertTrue(kwargs["enabled"])

@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 from . import ExecError, Shield, ShieldConfig, ShieldMode
+from .validation import validate_container_name
 
 # ── Config construction (formerly in config.py) ──────────
 
@@ -111,7 +112,9 @@ def _build_config(
 
     # Profiles
     raw_profiles = section.get("default_profiles", ["dev-standard"])
-    if not isinstance(raw_profiles, list):
+    if not isinstance(raw_profiles, list) or not all(
+        isinstance(p, str) and p for p in raw_profiles
+    ):
         raw_profiles = ["dev-standard"]
     profiles = tuple(raw_profiles)
 
@@ -128,11 +131,12 @@ def _build_config(
 
     # State dir
     if state_dir_override:
-        state_root = state_dir_override
+        state_root = state_dir_override.resolve()
     else:
-        state_root = _resolve_state_root()
+        state_root = _resolve_state_root().resolve()
 
     if container:
+        validate_container_name(container)
         state_dir = state_root / "containers" / container
     else:
         state_dir = state_root / "containers" / "_default"

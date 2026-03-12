@@ -336,6 +336,11 @@ def hook_main(stdin_data: str | None = None, stage: str = "createRuntime") -> in
                 "Container was not started with terok-shield pre_start()."
             )
         sd = Path(state_dir_str)
+        if not sd.is_absolute():
+            raise RuntimeError(
+                f"{ANNOTATION_STATE_DIR_KEY} must be an absolute path: {state_dir_str!r}"
+            )
+        sd = sd.resolve()
 
         version_str = annotations.get(ANNOTATION_VERSION_KEY, "")
         if not version_str:
@@ -353,10 +358,8 @@ def hook_main(stdin_data: str | None = None, stage: str = "createRuntime") -> in
             )
 
         loopback_ports = _parse_loopback_ports(annotations.get(ANNOTATION_LOOPBACK_PORTS_KEY, ""))
-        audit_enabled = annotations.get(ANNOTATION_AUDIT_ENABLED_KEY, "true").lower() in (
-            "true",
-            "1",
-        )
+        raw_audit = annotations.get(ANNOTATION_AUDIT_ENABLED_KEY, "true").strip().lower()
+        audit_enabled = raw_audit not in ("false", "0")
 
         runner = SubprocessRunner()
         audit = AuditLogger(
