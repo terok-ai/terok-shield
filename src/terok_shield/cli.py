@@ -184,9 +184,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Prepare shield and print podman flags",
         description=(
             "Resolve DNS, install hooks, and print the podman flags needed to "
-            "launch a shielded container.  Use with shell substitution:\n\n"
-            "  podman run $(terok-shield prepare my-ctr) "
-            "--name my-ctr alpine:latest sh"
+            "launch a shielded container.  Use with eval:\n\n"
+            '  eval "podman run $(terok-shield prepare my-ctr) alpine:latest sh"'
         ),
     )
     p_prepare.add_argument("container", help="Container name")
@@ -195,6 +194,13 @@ def _build_parser() -> argparse.ArgumentParser:
         nargs="+",
         default=None,
         help="Override default profiles",
+    )
+    p_prepare.add_argument(
+        "--json",
+        action="store_true",
+        default=False,
+        dest="output_json",
+        help="Output podman args as a JSON array (machine-readable)",
     )
 
     p_run = sub.add_parser(
@@ -275,8 +281,9 @@ def main(argv: list[str] | None = None) -> None:
 
     # The 'run' subcommand uses '--' to separate shield args from podman args.
     # Split before argparse to avoid REMAINDER quirks with optional flags.
+    saw_separator = "--" in argv
     run_trailing: list[str] = []
-    if "--" in argv:
+    if saw_separator:
         sep = argv.index("--")
         run_trailing = argv[sep + 1 :]
         argv = argv[:sep]
@@ -287,6 +294,9 @@ def main(argv: list[str] | None = None) -> None:
     if args.command is None:
         parser.print_help()
         sys.exit(0)
+
+    if saw_separator and args.command != "run":
+        parser.error("'--' separator is only supported by the 'run' subcommand")
 
     if args.command == "run":
         args.podman_args = run_trailing
@@ -320,7 +330,7 @@ def _dispatch(args: argparse.Namespace) -> None:
     if cmd == "status":
         _cmd_status(shield)
     elif cmd == "prepare":
-        _cmd_prepare(shield, args.container, profiles=args.profiles)
+        _cmd_prepare(shield, args.container, profiles=args.profiles, output_json=args.output_json)
     elif cmd == "run":
         _cmd_run(shield, args.container, profiles=args.profiles, podman_args=args.podman_args)
     elif cmd == "resolve":
@@ -347,11 +357,20 @@ def _cmd_status(shield: Shield) -> None:
     print(f"Profiles: {', '.join(status['profiles']) or '(none)'}")
 
 
-def _cmd_prepare(shield: Shield, container: str, *, profiles: list[str] | None) -> None:
+def _cmd_prepare(
+    shield: Shield,
+    container: str,
+    *,
+    profiles: list[str] | None,
+    output_json: bool = False,
+) -> None:
     """Print podman flags for a shielded container launch."""
     podman_args = shield.pre_start(container, profiles)
     podman_args += ["--name", container]
-    print(" ".join(shlex.quote(a) for a in podman_args))
+    if output_json:
+        print(json.dumps(podman_args))
+    else:
+        print(" ".join(shlex.quote(a) for a in podman_args))
 
 
 def _cmd_run(
@@ -364,17 +383,12 @@ def _cmd_run(
     """Launch a shielded container by exec-ing into podman run."""
     shield_args = shield.pre_start(container, profiles)
 
-    # Strip the leading '--' separator if present
-    user_args = podman_args
-    if user_args and user_args[0] == "--":
-        user_args = user_args[1:]
-
-    if not user_args:
+    if not podman_args:
         raise ValueError(
             "No image specified. Usage: terok-shield run <container> -- <image> [cmd...]"
         )
 
-    argv = ["podman", "run", "--name", container, *shield_args, *user_args]
+    argv = ["podman", "run", "--name", container, *shield_args, *podman_args]
     os.execvp("podman", argv)
 
 

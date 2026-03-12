@@ -30,6 +30,9 @@ from ..testfs import (
     FORBIDDEN_TRAVERSAL,
     NFT_BINARY,
     NONEXISTENT_DIR,
+    STATE_DIR_WITH_SPACES,
+    VOLUME_MOUNT_DATA,
+    VOLUME_MOUNT_HOST,
 )
 from ..testnet import TEST_DOMAIN, TEST_IP1
 
@@ -284,24 +287,68 @@ class TestMainDispatch(unittest.TestCase):
     ) -> None:
         """CLI run splits argv on '--' and passes trailing args to podman."""
         mock_cls.return_value.pre_start.return_value = ["--annotation", "a=b"]
-        main(["run", "test", "--", "-v", "/host:/ctr", "alpine:latest", "sh"])
+        main(["run", "test", "--", "-v", VOLUME_MOUNT_HOST, "alpine:latest", "sh"])
         argv = mock_exec.call_args[0][1]
         self.assertIn("-v", argv)
-        self.assertIn("/host:/ctr", argv)
+        self.assertIn(VOLUME_MOUNT_HOST, argv)
         self.assertIn("alpine:latest", argv)
         self.assertIn("sh", argv)
 
-    def test_run_no_image_exits_1(self) -> None:
+    @mock.patch("terok_shield.cli.Shield")
+    @mock.patch("terok_shield.cli._build_config")
+    def test_run_no_image_exits_1(self, mock_cfg: mock.MagicMock, mock_cls: mock.MagicMock) -> None:
         """CLI run without image after '--' exits with code 1."""
+        mock_cls.return_value.pre_start.return_value = []
         with self.assertRaises(SystemExit) as ctx:
             main(["run", "test", "--"])
         self.assertEqual(ctx.exception.code, 1)
 
-    def test_run_no_separator_exits_1(self) -> None:
+    @mock.patch("terok_shield.cli.Shield")
+    @mock.patch("terok_shield.cli._build_config")
+    def test_run_no_separator_exits_1(
+        self, mock_cfg: mock.MagicMock, mock_cls: mock.MagicMock
+    ) -> None:
         """CLI run without '--' and no args exits with code 1."""
+        mock_cls.return_value.pre_start.return_value = []
         with self.assertRaises(SystemExit) as ctx:
             main(["run", "test"])
         self.assertEqual(ctx.exception.code, 1)
+
+    def test_separator_on_non_run_exits_2(self) -> None:
+        """CLI rejects '--' separator on non-run subcommands."""
+        with self.assertRaises(SystemExit) as ctx:
+            main(["resolve", "test", "--", "junk"])
+        self.assertEqual(ctx.exception.code, 2)
+
+    @mock.patch("terok_shield.cli.Shield")
+    @mock.patch("terok_shield.cli._build_config")
+    def test_prepare_json_output(self, mock_cfg: mock.MagicMock, mock_cls: mock.MagicMock) -> None:
+        """CLI prepare --json outputs a JSON array."""
+        mock_cls.return_value.pre_start.return_value = ["--annotation", "a=b"]
+        captured = io.StringIO()
+        sys.stdout = captured
+        try:
+            main(["prepare", "test", "--json"])
+        finally:
+            sys.stdout = sys.__stdout__
+        result = json.loads(captured.getvalue())
+        self.assertIsInstance(result, list)
+        self.assertIn("--annotation", result)
+        self.assertIn("--name", result)
+        self.assertIn("test", result)
+
+    @mock.patch("terok_shield.cli.Shield")
+    @mock.patch("terok_shield.cli._build_config")
+    def test_main_none_argv(self, mock_cfg: mock.MagicMock, mock_cls: mock.MagicMock) -> None:
+        """CLI main(None) reads from sys.argv."""
+        mock_cls.return_value.status.return_value = {
+            "mode": "hook",
+            "audit_enabled": True,
+            "profiles": ["dev-standard"],
+        }
+        with mock.patch("sys.argv", ["terok-shield", "status"]):
+            main(None)
+        mock_cls.return_value.status.assert_called_once()
 
     @mock.patch("terok_shield.cli.Shield")
     @mock.patch("terok_shield.cli._build_config")
@@ -406,9 +453,10 @@ class TestMainOutputFormatting(unittest.TestCase):
         self, mock_cfg: mock.MagicMock, mock_cls: mock.MagicMock
     ) -> None:
         """CLI prepare output is shell-safe (values with spaces are quoted)."""
+        annotation_val = f"terok.shield.state_dir={STATE_DIR_WITH_SPACES}"
         mock_cls.return_value.pre_start.return_value = [
             "--annotation",
-            "terok.shield.state_dir=/path/with spaces/dir",
+            annotation_val,
         ]
         captured = io.StringIO()
         sys.stdout = captured
@@ -418,7 +466,7 @@ class TestMainOutputFormatting(unittest.TestCase):
             sys.stdout = sys.__stdout__
         output = captured.getvalue().strip()
         # The path with spaces should be quoted
-        self.assertIn("'terok.shield.state_dir=/path/with spaces/dir'", output)
+        self.assertIn(f"'{annotation_val}'", output)
 
     @mock.patch("os.execvp")
     @mock.patch("terok_shield.cli.Shield")
@@ -431,10 +479,10 @@ class TestMainOutputFormatting(unittest.TestCase):
     ) -> None:
         """CLI run passes user flags (like -v, -p) through to podman."""
         mock_cls.return_value.pre_start.return_value = ["--annotation", "a=b"]
-        main(["run", "test", "--", "-v", "/data:/data", "-p", "8080:80", "alpine:latest"])
+        main(["run", "test", "--", "-v", VOLUME_MOUNT_DATA, "-p", "8080:80", "alpine:latest"])
         argv = mock_exec.call_args[0][1]
         self.assertIn("-v", argv)
-        self.assertIn("/data:/data", argv)
+        self.assertIn(VOLUME_MOUNT_DATA, argv)
         self.assertIn("-p", argv)
         self.assertIn("8080:80", argv)
 
