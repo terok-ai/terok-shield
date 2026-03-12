@@ -36,20 +36,22 @@ def _safe_port(port: int) -> int:
 
 
 def safe_ip(value: str) -> str:
-    """Validate an IPv4 or IPv6 address or CIDR notation.
+    """Validate and normalize an IPv4 or IPv6 address or CIDR notation.
 
     Prevents nft command injection by ensuring the value is a valid
-    IP address or network.  Raises ValueError on invalid input.
+    IP address or network.  Returns the canonical string form so that
+    string comparisons across state files (profile.allowed, live.allowed,
+    deny.list) are reliable regardless of input notation.
+
+    Raises ValueError on invalid input.
     """
     v = value.strip()
     try:
         if "/" in v:
-            ipaddress.ip_network(v, strict=False)
-        else:
-            ipaddress.ip_address(v)
+            return str(ipaddress.ip_network(v, strict=False))
+        return str(ipaddress.ip_address(v))
     except ValueError as e:
         raise ValueError(f"Invalid IP/CIDR: {v!r}") from e
-    return v
 
 
 def _is_v4(value: str) -> bool:

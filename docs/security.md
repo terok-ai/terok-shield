@@ -41,7 +41,7 @@ scan.
 
 **Input validation:** all values are validated before string interpolation:
 
-- `safe_ip()` — validates IPs/CIDRs via `ipaddress.ip_address`/`ip_network` (dual-stack)
+- `safe_ip()` — validates and normalizes IPs/CIDRs via `ipaddress.ip_address`/`ip_network` (dual-stack); returns canonical string form to ensure reliable state-file comparisons
 - `_safe_port()` — validates port range, rejects bools
 
 **Self-verification:** `verify_ruleset()` checks post-apply invariants: drop

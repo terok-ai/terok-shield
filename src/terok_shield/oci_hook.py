@@ -248,8 +248,8 @@ class HookExecutor:
         self._audit.log_event(container, "setup", detail="verification passed")
 
     def _read_allowed_ips(self) -> list[str]:
-        """Read IPs from both profile.allowed and live.allowed, merged and deduplicated."""
-        return state.read_allowed_ips(self._state_dir)
+        """Read effective IPs: (profile ∪ live) minus deny.list."""
+        return state.read_effective_ips(self._state_dir)
 
     def _nft_exec(
         self,

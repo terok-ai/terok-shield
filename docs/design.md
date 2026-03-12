@@ -34,6 +34,104 @@ IPs are cached in `profile.allowed` with `st_mtime`-based freshness (default
 
 Users can add custom profiles in `$XDG_CONFIG_HOME/terok-shield/profiles/`.
 
+## Persistent deny
+
+When a user denies an IP that came from a loaded preset (`profile.allowed`),
+the deny must survive `shield up` and container restarts. The mechanism:
+
+- `deny.list` — a per-container file in `state_dir` listing IPs that override
+  presets
+- On deny: if the IP is in `profile.allowed`, append to `deny.list`
+- On allow: if the IP is in `deny.list`, remove it (un-deny)
+- On reload (`shield_up`, OCI hook apply): compute effective IPs as
+  `(profile.allowed ∪ live.allowed) − deny.list`
+
+`deny.list` stays minimal — only IPs that truly override a preset are stored.
+Denying a live-only IP just removes it from `live.allowed` (no `deny.list`
+entry needed). Deny-list reconciliation happens in `state.py` before ruleset
+generation; `nft.py` receives a flat IP list with denied entries already
+subtracted.
+
+### IP normalization
+
+`safe_ip()` normalizes all IPs to their canonical string form via
+`ipaddress.ip_address()` / `ip_network()`. This ensures string comparisons
+across state files are reliable regardless of input notation (e.g.
+`2001:0db8::1` and `2001:db8::1` both normalize to `2001:db8::1`).
+
+### State bundle layout
+
+```text
+{state_dir}/
+├── hooks/
+│   ├── terok-shield-createRuntime.json
+│   └── terok-shield-poststop.json
+├── terok-shield-hook              # entrypoint script
+├── profile.allowed                # IPs from DNS resolution (preset)
+├── live.allowed                   # IPs from manual allow/deny
+├── deny.list                      # persistent deny overrides
+└── audit.jsonl                    # per-container audit log
+```
+
+### Data flow diagrams
+
+**`deny_ip` flow:**
+
+```text
+deny_ip(container, ip)
+│
+├── safe_ip(ip)                 validate + normalize
+│
+├── nft delete element          remove from kernel set
+│   (best-effort, catch         (IP may not be in set if
+│    ExecError)                  already denied earlier)
+│
+├── remove from live.allowed    always runs regardless
+│                               of nft success
+│
+└── ip in profile.allowed?
+    ├── yes → append to deny.list   (persistent override)
+    └── no  → done                  (live-only, no persist needed)
+```
+
+**`allow_ip` flow:**
+
+```text
+allow_ip(container, ip)
+│
+├── safe_ip(ip)                 validate + normalize
+│
+├── ip in deny.list?
+│   └── yes → remove from deny.list   (un-deny)
+│
+├── nft add element             add to kernel set
+│
+└── append to live.allowed      (deduplicated)
+```
+
+**`shield_up` / OCI hook apply (effective IP merge):**
+
+```text
+read_effective_ips(state_dir)
+│
+├── read_allowed_ips()
+│   ├── profile.allowed ──┐
+│   └── live.allowed ─────┤
+│                         ▼
+│                    union (dedup,
+│                     profile-first)
+│
+├── read_denied_ips()
+│   └── deny.list ──→ deny set
+│
+└── effective = allowed − denied
+         │
+         ▼
+    add_elements_dual()     flat IP list to nft
+    (nft.py boundary)       (deny.list already
+                             subtracted)
+```
+
 ## Audit logging
 
 ### JSON-lines lifecycle logs
@@ -100,7 +198,7 @@ directly — never the CLI.
 | `nft.py` | **Security boundary** — ruleset generation, input validation, self-verification |
 | `nft_constants.py` | Shared literals (`NFT_TABLE`, `RFC1918`) — no logic |
 | `config.py` | `ShieldConfig`, `ShieldMode`, `ShieldState`, `ShieldModeBackend` protocol, annotation constants |
-| `state.py` | Per-container state bundle layout — pure path derivation, zero deps |
+| `state.py` | Per-container state bundle layout — path derivation, effective IP merging |
 | `mode_hook.py` | Hook mode strategy (OCI hooks, per-container netns) |
 | `oci_hook.py` | OCI hook entry point — fail-closed firewall application |
 | `dns.py` | Stateless DNS resolution via `dig`, file-based caching |

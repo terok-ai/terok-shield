@@ -89,7 +89,8 @@ terok-shield deny my-container example.com
 ```
 
 Changes take effect immediately — no container restart needed. Allowed IPs are
-also persisted to `live.allowed`, so they survive `down`/`up` bypass cycles.
+persisted to `live.allowed`, and denying a preset IP persists it to `deny.list`,
+so both survive `down`/`up` bypass cycles and container restarts.
 
 ## Inspect the firewall
 

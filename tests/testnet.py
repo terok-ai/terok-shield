@@ -105,4 +105,11 @@ EXPECTED_PRIVATE_RANGES: tuple[str, ...] = (
     "fc00::/7",
     "fe80::/10",
 )
+# ── Normalization test pairs (non-canonical → canonical) ──
+
+IPV6_VERBOSE = "2001:0db8:0000:0000:0000:0000:0000:0001"  # Verbose IPv6 form
+IPV6_VERBOSE_CANONICAL = "2001:db8::1"  # Expected canonical form after normalization
+IPV4_CIDR_HOST_BITS = "192.168.1.5/24"  # CIDR with host bits set
+IPV4_CIDR_HOST_BITS_CANONICAL = "192.168.1.0/24"  # Expected network address after normalization
+
 # --8<-- [end:outbound-targets]

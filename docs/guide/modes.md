@@ -57,6 +57,7 @@ Each container's hooks and state are isolated in its own directory:
 ├── terok-shield-hook                       # Hook entrypoint script
 ├── profile.allowed                         # IPs from DNS resolution
 ├── live.allowed                            # IPs from allow/deny
+├── deny.list                               # Persistent deny overrides
 └── audit.jsonl                             # Per-container audit log
 ```
 

@@ -54,6 +54,7 @@ Each container gets an isolated state bundle under `containers/`:
         ├── terok-shield-hook       # OCI hook entrypoint script
         ├── profile.allowed         # Pre-resolved IPs from DNS profiles
         ├── live.allowed            # IPs from runtime allow/deny
+        ├── deny.list               # Persistent deny overrides
         └── audit.jsonl             # Per-container audit log
 ```
 
@@ -63,6 +64,7 @@ Each container gets an isolated state bundle under `containers/`:
 | `terok-shield-hook` | `pre_start()` | Hook entrypoint script |
 | `profile.allowed` | `pre_start()` / `resolve()` | Cached IPs from DNS resolution |
 | `live.allowed` | `allow()` / `deny()` | Runtime allow/deny persistence |
+| `deny.list` | `deny()` | IPs denied from presets (survives `up`/`down` cycles) |
 | `audit.jsonl` | Hook + Shield methods | Per-container audit log |
 
 ### Config directory
