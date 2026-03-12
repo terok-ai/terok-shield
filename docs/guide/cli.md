@@ -94,7 +94,8 @@ The IP is also removed from `live.allowed`.
 
 ## down
 
-Switch a container to bypass mode (accept-all traffic with logging).
+Switch a container to bypass mode. Public traffic is accepted with logging;
+RFC1918/link-local ranges remain blocked unless `--all` is used.
 
 ```bash
 terok-shield down <container> [--all]
@@ -121,7 +122,7 @@ and `live.allowed`.
 
 ## preview
 
-Show the ruleset that would be applied to a container.
+Show the nftables ruleset that would be applied.
 
 ```bash
 terok-shield preview [--down] [--all]

@@ -66,6 +66,7 @@ The package exports a `Shield` facade class for integration with
 [terok](https://github.com/terok-ai/terok):
 
 ```python
+from pathlib import Path
 from terok_shield import Shield, ShieldConfig
 shield = Shield(ShieldConfig(state_dir=Path("/path/to/state")))
 ```

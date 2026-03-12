@@ -79,8 +79,9 @@ Tests** workflow (`workflow_dispatch`).
 
 ### Network access
 
-Integration tests in `network/` and `podman/` make outbound connections to
-public DNS services (Cloudflare, Google). All targets are defined in
+Integration tests marked `needs_internet` or `needs_podman` make outbound
+connections to public DNS services (Cloudflare, Google). All targets are
+defined in
 [`tests/testnet.py`](https://github.com/terok-ai/terok-shield/blob/master/tests/testnet.py).
 No private or authenticated endpoints are contacted.
 

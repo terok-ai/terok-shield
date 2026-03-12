@@ -115,8 +115,9 @@ family-specific ICMP errors:
 
 ## Fail-closed guarantees
 
-After `pre_start()` installs hooks, this invariant holds: **no path from
-"firewall setup failed" to "container running unrestricted."**
+After [`pre_start()`](guide/getting_started.md#quick-start) installs hooks, this
+invariant holds: **no path from "firewall setup failed" to "container running
+unrestricted."**
 
 | Failure | Result |
 |---------|--------|
@@ -129,4 +130,5 @@ After `pre_start()` installs hooks, this invariant holds: **no path from
 | Self-verification fails | Hook exits → torn down |
 
 The fail-closed guarantee applies once hooks are installed by `pre_start()`.
-Without hooks, containers start without firewall rules.
+**Callers must invoke `pre_start()` before starting containers** — without hooks,
+containers start without firewall rules and no egress filtering is applied.
