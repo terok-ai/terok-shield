@@ -184,8 +184,13 @@ class Shield:
         return self.profiles.compose_profiles(names)
 
 
+from .registry import COMMANDS, ArgDef, CommandDef  # noqa: E402
+
 __all__ = [
+    "ArgDef",
     "AuditLogger",
+    "COMMANDS",
+    "CommandDef",
     "CommandRunner",
     "DnsResolver",
     "ExecError",

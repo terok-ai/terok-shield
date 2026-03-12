@@ -44,8 +44,8 @@ class TestBuildParser(unittest.TestCase):
         """Parser has all expected subcommands."""
         parser = _build_parser()
         # Parse known subcommands without error
-        for cmd in ["status", "rules", "logs", "down", "up", "preview"]:
-            if cmd in ("status", "logs", "preview"):
+        for cmd in ["status", "rules", "logs", "down", "up", "preview", "profiles", "state"]:
+            if cmd in ("status", "logs", "preview", "profiles"):
                 ns = parser.parse_args([cmd])
             else:
                 ns = parser.parse_args([cmd, "ctr"])
@@ -502,6 +502,22 @@ class TestMainDispatch(unittest.TestCase):
             main(["preview", "--all"])
         self.assertEqual(ctx.exception.code, 1)
 
+    @mock.patch("terok_shield.cli.Shield")
+    @mock.patch("terok_shield.cli._build_config")
+    def test_profiles(self, mock_cfg: mock.MagicMock, mock_cls: mock.MagicMock) -> None:
+        """CLI profiles calls shield.profiles_list()."""
+        mock_cls.return_value.profiles_list.return_value = ["dev-standard", "dev-python"]
+        main(["profiles"])
+        mock_cls.return_value.profiles_list.assert_called_once()
+
+    @mock.patch("terok_shield.cli.Shield")
+    @mock.patch("terok_shield.cli._build_config")
+    def test_state(self, mock_cfg: mock.MagicMock, mock_cls: mock.MagicMock) -> None:
+        """CLI state calls shield.state()."""
+        mock_cls.return_value.state.return_value = ShieldState.UP
+        main(["state", "test"])
+        mock_cls.return_value.state.assert_called_once_with("test")
+
 
 class TestMainOutputFormatting(unittest.TestCase):
     """Test CLI output formatting for various subcommands."""
@@ -646,6 +662,33 @@ class TestMainOutputFormatting(unittest.TestCase):
             output = captured.getvalue().strip()
             entry = json.loads(output)
             self.assertEqual(entry["action"], "setup")
+
+    @mock.patch("terok_shield.cli.Shield")
+    @mock.patch("terok_shield.cli._build_config")
+    def test_profiles_output(self, mock_cfg: mock.MagicMock, mock_cls: mock.MagicMock) -> None:
+        """CLI profiles lists each profile on its own line."""
+        mock_cls.return_value.profiles_list.return_value = ["dev-standard", "dev-python"]
+        captured = io.StringIO()
+        sys.stdout = captured
+        try:
+            main(["profiles"])
+        finally:
+            sys.stdout = sys.__stdout__
+        lines = captured.getvalue().strip().splitlines()
+        self.assertEqual(lines, ["dev-standard", "dev-python"])
+
+    @mock.patch("terok_shield.cli.Shield")
+    @mock.patch("terok_shield.cli._build_config")
+    def test_state_output(self, mock_cfg: mock.MagicMock, mock_cls: mock.MagicMock) -> None:
+        """CLI state prints the state value."""
+        mock_cls.return_value.state.return_value = ShieldState.DOWN
+        captured = io.StringIO()
+        sys.stdout = captured
+        try:
+            main(["state", "test"])
+        finally:
+            sys.stdout = sys.__stdout__
+        self.assertEqual(captured.getvalue().strip(), "down")
 
 
 class TestMainErrorHandling(unittest.TestCase):

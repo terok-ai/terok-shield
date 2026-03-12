@@ -16,7 +16,10 @@ import terok_shield
 from terok_shield import ExecError, ShieldConfig, ShieldMode, ShieldState
 
 EXPECTED_ALL = [
+    "ArgDef",
     "AuditLogger",
+    "COMMANDS",
+    "CommandDef",
     "CommandRunner",
     "DnsResolver",
     "ExecError",
