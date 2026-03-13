@@ -5,7 +5,6 @@
 
 import json
 import struct
-import unittest
 from unittest.mock import MagicMock, patch
 
 from terok_shield.resources.shield_probe import (
@@ -56,17 +55,15 @@ def _mock_probe(poll_returns, recvmsg_result=None, send_side_effect=None) -> dic
     if send_side_effect is not None:
         mock_sock.send.side_effect = send_side_effect
 
-    with (
-        patch("terok_shield.resources.shield_probe.socket.socket", return_value=mock_sock),
-        patch("terok_shield.resources.shield_probe.select.poll", return_value=mock_poller),
-    ):
-        return probe(TEST_IP1, 443, timeout=1.0)
+    with patch("terok_shield.resources.shield_probe.socket.socket", return_value=mock_sock):
+        with patch("terok_shield.resources.shield_probe.select.poll", return_value=mock_poller):
+            return probe(TEST_IP1, 443, timeout=1.0)
 
 
 # ── Mocked tests for core probe paths ─────────────────────────────────
 
 
-class TestProbeMockedPaths(unittest.TestCase):
+class TestProbeMockedPaths:
     """Mocked equivalents of the real-socket tests (work on any platform)."""
 
     def test_port_unreachable(self) -> None:
@@ -76,9 +73,9 @@ class TestProbeMockedPaths(unittest.TestCase):
             poll_returns=[[(0, 8)]],
             recvmsg_result=(b"\x00", ancdata, 0, (TEST_IP1, 443)),
         )
-        self.assertEqual(result["result"], "icmp-error")
-        self.assertEqual(result["icmp_code"], 3)
-        self.assertEqual(result["icmp_code_name"], "port-unreachable")
+        assert result["result"] == "icmp-error"
+        assert result["icmp_code"] == 3
+        assert result["icmp_code_name"] == "port-unreachable"
 
     def test_open_no_error(self) -> None:
         """No poll events; second send succeeds → port is open."""
@@ -86,7 +83,7 @@ class TestProbeMockedPaths(unittest.TestCase):
             poll_returns=[[]],
             send_side_effect=[None, None],  # first send OK, second send OK
         )
-        self.assertEqual(result["result"], "open")
+        assert result["result"] == "open"
 
     def test_timeout_no_response(self) -> None:
         """No poll events; second send raises OSError; second poll empty → timeout."""
@@ -94,13 +91,13 @@ class TestProbeMockedPaths(unittest.TestCase):
             poll_returns=[[], []],
             send_side_effect=[None, OSError("connection refused")],
         )
-        self.assertEqual(result["result"], "timeout")
+        assert result["result"] == "timeout"
 
 
 # ── Mocked tests for edge cases ────────────────────────────────────────
 
 
-class TestProbeEdgeCases(unittest.TestCase):
+class TestProbeEdgeCases:
     """Test probe() branches that cannot be triggered with real sockets."""
 
     def test_icmp_admin_prohibited(self) -> None:
@@ -110,9 +107,9 @@ class TestProbeEdgeCases(unittest.TestCase):
             poll_returns=[[(0, 8)]],
             recvmsg_result=(b"\x00", ancdata, 0, (TEST_IP1, 443)),
         )
-        self.assertEqual(result["result"], "icmp-error")
-        self.assertEqual(result["icmp_code"], 13)
-        self.assertEqual(result["icmp_code_name"], "admin-prohibited")
+        assert result["result"] == "icmp-error"
+        assert result["icmp_code"] == 13
+        assert result["icmp_code_name"] == "admin-prohibited"
 
     def test_icmp_unknown_code(self) -> None:
         """Unknown ICMP code falls back to 'code-N' naming."""
@@ -121,7 +118,7 @@ class TestProbeEdgeCases(unittest.TestCase):
             poll_returns=[[(0, 8)]],
             recvmsg_result=(b"\x00", ancdata, 0, (TEST_IP1, 443)),
         )
-        self.assertEqual(result["icmp_code_name"], "code-99")
+        assert result["icmp_code_name"] == "code-99"
 
     def test_timeout_recvmsg_fails(self) -> None:
         """OSError on recvmsg returns timeout."""
@@ -130,12 +127,10 @@ class TestProbeEdgeCases(unittest.TestCase):
         mock_poller = MagicMock()
         mock_poller.poll = MagicMock(return_value=[(0, 8)])
 
-        with (
-            patch("terok_shield.resources.shield_probe.socket.socket", return_value=mock_sock),
-            patch("terok_shield.resources.shield_probe.select.poll", return_value=mock_poller),
-        ):
-            result = probe(TEST_IP1, 443, timeout=1.0)
-        self.assertEqual(result["result"], "timeout")
+        with patch("terok_shield.resources.shield_probe.socket.socket", return_value=mock_sock):
+            with patch("terok_shield.resources.shield_probe.select.poll", return_value=mock_poller):
+                result = probe(TEST_IP1, 443, timeout=1.0)
+        assert result["result"] == "timeout"
 
     def test_ancdata_too_short(self) -> None:
         """Truncated ancdata is skipped, falls through to timeout."""
@@ -146,7 +141,7 @@ class TestProbeEdgeCases(unittest.TestCase):
             poll_returns=[[(0, 8)]],
             recvmsg_result=(b"\x00", short_ancdata, 0, (TEST_IP1, 443)),
         )
-        self.assertEqual(result["result"], "timeout")
+        assert result["result"] == "timeout"
 
     def test_non_icmp_origin(self) -> None:
         """Non-ICMP origin (e.g. LOCAL) is skipped."""
@@ -155,7 +150,7 @@ class TestProbeEdgeCases(unittest.TestCase):
             poll_returns=[[(0, 8)]],
             recvmsg_result=(b"\x00", ancdata, 0, (TEST_IP1, 443)),
         )
-        self.assertEqual(result["result"], "timeout")
+        assert result["result"] == "timeout"
 
     def test_first_send_oserror_still_detects_icmp(self) -> None:
         """OSError on first send does not prevent ICMP detection."""
@@ -165,91 +160,81 @@ class TestProbeEdgeCases(unittest.TestCase):
             recvmsg_result=(b"\x00", ancdata, 0, (TEST_IP1, 443)),
             send_side_effect=OSError("send failed"),
         )
-        self.assertEqual(result["result"], "icmp-error")
-        self.assertEqual(result["icmp_code"], 3)
+        assert result["result"] == "icmp-error"
+        assert result["icmp_code"] == 3
 
 
 # ── CLI main() tests ──────────────────────────────────────────────────
 
 
-class TestMain(unittest.TestCase):
+class TestMain:
     """Test the main() CLI entry point."""
 
     def test_usage_error(self) -> None:
         """No arguments prints usage and returns 1."""
         with patch("sys.argv", ["shield_probe.py"]):
-            self.assertEqual(main(), 1)
+            assert main() == 1
 
     def test_success_default_port(
         self,
     ) -> None:
         """Valid host uses default port 443."""
-        with (
-            patch("sys.argv", ["shield_probe.py", TEST_IP1]),
-            patch(
+        with patch("sys.argv", ["shield_probe.py", TEST_IP1]):
+            with patch(
                 "terok_shield.resources.shield_probe.probe",
                 return_value={"host": TEST_IP1, "port": 443, "result": "open"},
-            ) as mock_probe,
-        ):
-            self.assertEqual(main(), 0)
-            mock_probe.assert_called_once_with(TEST_IP1, 443)
+            ) as mock_probe:
+                assert main() == 0
+                mock_probe.assert_called_once_with(TEST_IP1, 443)
 
     def test_custom_port(self) -> None:
         """Custom port is parsed from argv."""
-        with (
-            patch("sys.argv", ["shield_probe.py", TEST_IP1, "80"]),
-            patch(
+        with patch("sys.argv", ["shield_probe.py", TEST_IP1, "80"]):
+            with patch(
                 "terok_shield.resources.shield_probe.probe",
                 return_value={"host": TEST_IP1, "port": 80, "result": "open"},
-            ) as mock_probe,
-        ):
-            self.assertEqual(main(), 0)
-            mock_probe.assert_called_once_with(TEST_IP1, 80)
+            ) as mock_probe:
+                assert main() == 0
+                mock_probe.assert_called_once_with(TEST_IP1, 80)
 
     def test_invalid_port(self) -> None:
         """Non-integer port returns 1 with error JSON."""
-        with (
-            patch("sys.argv", ["shield_probe.py", TEST_IP1, "abc"]),
-            patch("builtins.print") as mock_print,
-        ):
-            self.assertEqual(main(), 1)
-            output = json.loads(mock_print.call_args[0][0])
-            self.assertIn("invalid port", output["error"])
+        with patch("sys.argv", ["shield_probe.py", TEST_IP1, "abc"]):
+            with patch("builtins.print") as mock_print:
+                assert main() == 1
+                output = json.loads(mock_print.call_args[0][0])
+                assert "invalid port" in output["error"]
 
     def test_probe_exception(self) -> None:
         """Exception in probe returns 1 with error JSON."""
-        with (
-            patch("sys.argv", ["shield_probe.py", TEST_IP1]),
-            patch(
+        with patch("sys.argv", ["shield_probe.py", TEST_IP1]):
+            with patch(
                 "terok_shield.resources.shield_probe.probe",
                 side_effect=RuntimeError("boom"),
-            ),
-        ):
-            self.assertEqual(main(), 1)
+            ):
+                assert main() == 1
 
     def test_output_is_json(self) -> None:
         """Successful probe outputs valid JSON to stdout."""
         expected = {"host": TEST_IP1, "port": 443, "result": "timeout"}
-        with (
-            patch("sys.argv", ["shield_probe.py", TEST_IP1]),
-            patch("terok_shield.resources.shield_probe.probe", return_value=expected),
-            patch("builtins.print") as mock_print,
-        ):
-            main()
-            output = mock_print.call_args[0][0]
-            self.assertEqual(json.loads(output), expected)
+        with patch("sys.argv", ["shield_probe.py", TEST_IP1]):
+            with patch("terok_shield.resources.shield_probe.probe", return_value=expected):
+                with patch("builtins.print") as mock_print:
+                    main()
+                    output = mock_print.call_args[0][0]
+                    assert json.loads(output) == expected
 
 
 # ── Constants sanity checks ───────────────────────────────────────────
 
 
-class TestConstants(unittest.TestCase):
+class TestConstants:
     """Verify ICMP code table has expected entries."""
 
     def test_admin_prohibited_in_table(self) -> None:
         """Code 13 maps to admin-prohibited."""
-        self.assertEqual(_ICMP_UNREACH_CODES[13], "admin-prohibited")
+        assert _ICMP_UNREACH_CODES[13] == "admin-prohibited"
 
     def test_port_unreachable_in_table(self) -> None:
         """Code 3 maps to port-unreachable."""
-        self.assertEqual(_ICMP_UNREACH_CODES[3], "port-unreachable")
+        assert _ICMP_UNREACH_CODES[3] == "port-unreachable"

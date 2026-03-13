@@ -4,28 +4,29 @@
 """Tests for the Shield facade class (__init__.py)."""
 
 import tempfile
-import unittest
 from collections.abc import Iterator
 from pathlib import Path
 from unittest import mock
+
+import pytest
 
 from terok_shield import Shield, ShieldConfig, ShieldState
 
 from ..testnet import TEST_DOMAIN, TEST_IP1, TEST_IP2
 
 
-class TestShieldInit(unittest.TestCase):
+class TestShieldInit:
     """Test Shield construction and collaborator wiring."""
 
     def test_default_collaborators(self) -> None:
         """Shield creates default collaborators when none are injected."""
         with tempfile.TemporaryDirectory() as tmp:
             shield = Shield(ShieldConfig(state_dir=Path(tmp)))
-            self.assertIsNotNone(shield.runner)
-            self.assertIsNotNone(shield.audit)
-            self.assertIsNotNone(shield.dns)
-            self.assertIsNotNone(shield.profiles)
-            self.assertIsNotNone(shield.ruleset)
+            assert shield.runner is not None
+            assert shield.audit is not None
+            assert shield.dns is not None
+            assert shield.profiles is not None
+            assert shield.ruleset is not None
 
     def test_injected_collaborators(self) -> None:
         """Shield uses injected collaborators when provided."""
@@ -44,11 +45,11 @@ class TestShieldInit(unittest.TestCase):
                 profiles=profiles,
                 ruleset=ruleset,
             )
-            self.assertIs(shield.runner, runner)
-            self.assertIs(shield.audit, audit)
-            self.assertIs(shield.dns, dns)
-            self.assertIs(shield.profiles, profiles)
-            self.assertIs(shield.ruleset, ruleset)
+            assert shield.runner is runner
+            assert shield.audit is audit
+            assert shield.dns is dns
+            assert shield.profiles is profiles
+            assert shield.ruleset is ruleset
 
     def test_unsupported_mode_raises(self) -> None:
         """ValueError for unsupported mode in _create_mode."""
@@ -64,11 +65,11 @@ class TestShieldInit(unittest.TestCase):
 
             fake_mode = mock.MagicMock()
             fake_mode.__eq__ = lambda self, other: False
-            with self.assertRaises(ValueError, msg="Unsupported shield mode"):
+            with pytest.raises(ValueError):
                 shield._create_mode(fake_mode)
 
 
-class TestShieldStatus(unittest.TestCase):
+class TestShieldStatus:
     """Test Shield.status()."""
 
     def test_returns_expected_keys(self) -> None:
@@ -80,12 +81,12 @@ class TestShieldStatus(unittest.TestCase):
         shield = _make_shield(profiles=profiles, audit=audit)
         result = shield.status()
 
-        self.assertEqual(result["mode"], "hook")
-        self.assertEqual(result["profiles"], ["base", "dev-standard"])
-        self.assertTrue(result["audit_enabled"])
+        assert result["mode"] == "hook"
+        assert result["profiles"] == ["base", "dev-standard"]
+        assert result["audit_enabled"]
 
 
-class TestShieldPreStart(unittest.TestCase):
+class TestShieldPreStart:
     """Test Shield.pre_start()."""
 
     def test_dispatches_to_mode(self) -> None:
@@ -97,7 +98,7 @@ class TestShieldPreStart(unittest.TestCase):
 
         result = shield.pre_start("test-ctr", ["dev-standard"])
         mode.pre_start.assert_called_once_with("test-ctr", ["dev-standard"])
-        self.assertEqual(result, ["--network", "pasta:"])
+        assert result == ["--network", "pasta:"]
         audit.log_event.assert_called_once()
 
     def test_uses_default_profiles(self) -> None:
@@ -113,7 +114,7 @@ class TestShieldPreStart(unittest.TestCase):
             mode.pre_start.assert_called_once_with("test-ctr", ["base"])
 
 
-class TestShieldAllow(unittest.TestCase):
+class TestShieldAllow:
     """Test Shield.allow()."""
 
     def test_allows_ip_directly(self) -> None:
@@ -124,7 +125,7 @@ class TestShieldAllow(unittest.TestCase):
 
         result = shield.allow("test-ctr", TEST_IP1)
         mode.allow_ip.assert_called_once_with("test-ctr", TEST_IP1)
-        self.assertEqual(result, [TEST_IP1])
+        assert result == [TEST_IP1]
 
     def test_resolves_domain(self) -> None:
         """allow() resolves domains via dns.resolve_domains."""
@@ -136,8 +137,8 @@ class TestShieldAllow(unittest.TestCase):
 
         result = shield.allow("test-ctr", TEST_DOMAIN)
         dns.resolve_domains.assert_called_once_with([TEST_DOMAIN])
-        self.assertEqual(mode.allow_ip.call_count, 2)
-        self.assertEqual(result, [TEST_IP1, TEST_IP2])
+        assert mode.allow_ip.call_count == 2
+        assert result == [TEST_IP1, TEST_IP2]
 
     def test_swallows_exceptions(self) -> None:
         """allow() swallows exceptions from individual allow_ip calls."""
@@ -147,10 +148,10 @@ class TestShieldAllow(unittest.TestCase):
         shield = _make_shield(mode=mode, audit=audit)
 
         result = shield.allow("test-ctr", TEST_IP1)
-        self.assertEqual(result, [])
+        assert result == []
 
 
-class TestShieldDeny(unittest.TestCase):
+class TestShieldDeny:
     """Test Shield.deny()."""
 
     def test_denies_ip_directly(self) -> None:
@@ -161,7 +162,7 @@ class TestShieldDeny(unittest.TestCase):
 
         result = shield.deny("test-ctr", TEST_IP1)
         mode.deny_ip.assert_called_once_with("test-ctr", TEST_IP1)
-        self.assertEqual(result, [TEST_IP1])
+        assert result == [TEST_IP1]
 
     def test_swallows_exceptions(self) -> None:
         """deny() swallows exceptions from deny_ip (best-effort)."""
@@ -171,10 +172,10 @@ class TestShieldDeny(unittest.TestCase):
         shield = _make_shield(mode=mode, audit=audit)
 
         result = shield.deny("test-ctr", TEST_IP1)
-        self.assertEqual(result, [])
+        assert result == []
 
 
-class TestShieldRules(unittest.TestCase):
+class TestShieldRules:
     """Test Shield.rules()."""
 
     def test_delegates_to_mode(self) -> None:
@@ -185,10 +186,10 @@ class TestShieldRules(unittest.TestCase):
 
         result = shield.rules("test-ctr")
         mode.list_rules.assert_called_once_with("test-ctr")
-        self.assertIn("terok_shield", result)
+        assert "terok_shield" in result
 
 
-class TestShieldDown(unittest.TestCase):
+class TestShieldDown:
     """Test Shield.down()."""
 
     def test_delegates_to_mode(self) -> None:
@@ -212,7 +213,7 @@ class TestShieldDown(unittest.TestCase):
         audit.log_event.assert_called_once_with("test-ctr", "shield_down", detail="allow_all=True")
 
 
-class TestShieldUp(unittest.TestCase):
+class TestShieldUp:
     """Test Shield.up()."""
 
     def test_delegates_to_mode(self) -> None:
@@ -226,7 +227,7 @@ class TestShieldUp(unittest.TestCase):
         audit.log_event.assert_called_once_with("test-ctr", "shield_up")
 
 
-class TestShieldState(unittest.TestCase):
+class TestShieldState:
     """Test Shield.state()."""
 
     def test_delegates_to_mode(self) -> None:
@@ -236,10 +237,10 @@ class TestShieldState(unittest.TestCase):
         shield = _make_shield(mode=mode)
 
         result = shield.state("test-ctr")
-        self.assertEqual(result, ShieldState.UP)
+        assert result == ShieldState.UP
 
 
-class TestShieldPreview(unittest.TestCase):
+class TestShieldPreview:
     """Test Shield.preview()."""
 
     def test_default_preview(self) -> None:
@@ -250,7 +251,7 @@ class TestShieldPreview(unittest.TestCase):
 
         result = shield.preview()
         mode.preview.assert_called_once_with(down=False, allow_all=False)
-        self.assertIn("policy drop", result)
+        assert "policy drop" in result
 
     def test_bypass_preview(self) -> None:
         """preview(down=True) generates bypass ruleset."""
@@ -260,10 +261,10 @@ class TestShieldPreview(unittest.TestCase):
 
         result = shield.preview(down=True, allow_all=True)
         mode.preview.assert_called_once_with(down=True, allow_all=True)
-        self.assertEqual(result, "bypass")
+        assert result == "bypass"
 
 
-class TestShieldResolve(unittest.TestCase):
+class TestShieldResolve:
     """Test Shield.resolve()."""
 
     def test_resolves_profiles(self) -> None:
@@ -277,7 +278,7 @@ class TestShieldResolve(unittest.TestCase):
         result = shield.resolve(["dev-standard"])
         profiles.compose_profiles.assert_called_once_with(["dev-standard"])
         dns.resolve_and_cache.assert_called_once()
-        self.assertEqual(result, [TEST_IP1])
+        assert result == [TEST_IP1]
 
     def test_empty_profiles_returns_empty(self) -> None:
         """resolve() returns empty list for empty profile entries."""
@@ -286,7 +287,7 @@ class TestShieldResolve(unittest.TestCase):
         shield = _make_shield(profiles=profiles)
 
         result = shield.resolve(["empty"])
-        self.assertEqual(result, [])
+        assert result == []
 
     def test_force_sets_max_age_zero(self) -> None:
         """resolve(force=True) passes max_age=0."""
@@ -298,7 +299,7 @@ class TestShieldResolve(unittest.TestCase):
 
         shield.resolve(["dev-standard"], force=True)
         call_kwargs = dns.resolve_and_cache.call_args[1]
-        self.assertEqual(call_kwargs["max_age"], 0)
+        assert call_kwargs["max_age"] == 0
 
     def test_default_profiles(self) -> None:
         """resolve() uses config.default_profiles when None."""
@@ -312,7 +313,7 @@ class TestShieldResolve(unittest.TestCase):
             profiles.compose_profiles.assert_called_once_with(["base"])
 
 
-class TestShieldDelegationMethods(unittest.TestCase):
+class TestShieldDelegationMethods:
     """Test simple delegation methods on Shield."""
 
     def test_profiles_list(self) -> None:
@@ -320,7 +321,7 @@ class TestShieldDelegationMethods(unittest.TestCase):
         profiles = mock.MagicMock()
         profiles.list_profiles.return_value = ["base", "dev"]
         shield = _make_shield(profiles=profiles)
-        self.assertEqual(shield.profiles_list(), ["base", "dev"])
+        assert shield.profiles_list() == ["base", "dev"]
 
     def test_tail_log(self) -> None:
         """tail_log() delegates to audit.tail_log."""
@@ -329,7 +330,7 @@ class TestShieldDelegationMethods(unittest.TestCase):
         shield = _make_shield(audit=audit)
         result = shield.tail_log(10)
         audit.tail_log.assert_called_once_with(10)
-        self.assertIsInstance(result, Iterator)
+        assert isinstance(result, Iterator)
 
     def test_compose_profiles(self) -> None:
         """compose_profiles() delegates to profiles.compose_profiles."""
@@ -338,7 +339,7 @@ class TestShieldDelegationMethods(unittest.TestCase):
         shield = _make_shield(profiles=profiles)
         result = shield.compose_profiles(["dev-standard"])
         profiles.compose_profiles.assert_called_once_with(["dev-standard"])
-        self.assertEqual(result, ["github.com"])
+        assert result == ["github.com"]
 
 
 # ── Helper ──────────────────────────────────────────────

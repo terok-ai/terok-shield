@@ -4,8 +4,9 @@
 """Tests for the ProfileLoader class."""
 
 import tempfile
-import unittest
 from pathlib import Path
+
+import pytest
 
 from terok_shield.profiles import ProfileLoader
 
@@ -13,25 +14,25 @@ from ..testfs import FAKE_PROFILES_DIR, FORBIDDEN_TRAVERSAL, NONEXISTENT_DIR
 from ..testnet import CUSTOM_DOMAIN, TEST_DOMAIN, TEST_IP1
 
 
-class TestProfileLoaderInit(unittest.TestCase):
+class TestProfileLoaderInit:
     """Test ProfileLoader construction."""
 
     def test_direct_init(self) -> None:
         """Construct with explicit dirs."""
         loader = ProfileLoader(user_dir=FAKE_PROFILES_DIR)
-        self.assertEqual(loader._user_dir, FAKE_PROFILES_DIR)
-        self.assertIsNotNone(loader._bundled_dir)
+        assert loader._user_dir == FAKE_PROFILES_DIR
+        assert loader._bundled_dir is not None
 
 
-class TestProfileLoaderFindProfile(unittest.TestCase):
+class TestProfileLoaderFindProfile:
     """Test ProfileLoader._find_profile()."""
 
     def test_finds_bundled(self) -> None:
         """Find a bundled profile by name."""
         loader = ProfileLoader(user_dir=NONEXISTENT_DIR)
         path = loader._find_profile("base")
-        self.assertIsNotNone(path)
-        self.assertEqual(path.stem, "base")
+        assert path is not None
+        assert path.stem == "base"
 
     def test_user_overrides_bundled(self) -> None:
         """User profile overrides bundled when both exist."""
@@ -40,33 +41,33 @@ class TestProfileLoaderFindProfile(unittest.TestCase):
             user_file.write_text(f"{CUSTOM_DOMAIN}\n")
             loader = ProfileLoader(user_dir=Path(tmp))
             path = loader._find_profile("base")
-            self.assertEqual(path, user_file)
+            assert path == user_file
 
     def test_returns_none_for_missing(self) -> None:
         """Return None for nonexistent profile."""
         loader = ProfileLoader(user_dir=NONEXISTENT_DIR)
-        self.assertIsNone(loader._find_profile("nonexistent-profile-xyz"))
+        assert loader._find_profile("nonexistent-profile-xyz") is None
 
     def test_rejects_path_traversal(self) -> None:
         """Raise ValueError for path traversal names."""
         loader = ProfileLoader(user_dir=FAKE_PROFILES_DIR)
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError):
             loader._find_profile(FORBIDDEN_TRAVERSAL)
 
 
-class TestProfileLoaderLoadProfile(unittest.TestCase):
+class TestProfileLoaderLoadProfile:
     """Test ProfileLoader.load_profile()."""
 
     def test_loads_bundled(self) -> None:
         """Load a bundled profile."""
         loader = ProfileLoader(user_dir=NONEXISTENT_DIR)
         entries = loader.load_profile("base")
-        self.assertGreater(len(entries), 0)
+        assert len(entries) > 0
 
     def test_not_found_raises(self) -> None:
         """Raise FileNotFoundError for missing profile."""
         loader = ProfileLoader(user_dir=NONEXISTENT_DIR)
-        with self.assertRaises(FileNotFoundError):
+        with pytest.raises(FileNotFoundError):
             loader.load_profile("nonexistent-xyz")
 
     def test_user_override(self) -> None:
@@ -75,35 +76,35 @@ class TestProfileLoaderLoadProfile(unittest.TestCase):
             (Path(tmp) / "base.txt").write_text(f"{CUSTOM_DOMAIN}\n{TEST_IP1}\n")
             loader = ProfileLoader(user_dir=Path(tmp))
             entries = loader.load_profile("base")
-            self.assertEqual(entries, [CUSTOM_DOMAIN, TEST_IP1])
+            assert entries == [CUSTOM_DOMAIN, TEST_IP1]
 
 
-class TestProfileLoaderComposeProfiles(unittest.TestCase):
+class TestProfileLoaderComposeProfiles:
     """Test ProfileLoader.compose_profiles()."""
 
     def test_merges_and_deduplicates(self) -> None:
         """Merge multiple profiles and deduplicate."""
         loader = ProfileLoader(user_dir=NONEXISTENT_DIR)
         entries = loader.compose_profiles(["base", "dev-standard"])
-        self.assertTrue(any("ntp" in e for e in entries))
-        self.assertIn(TEST_DOMAIN, entries)
-        self.assertEqual(len(entries), len(set(entries)))
+        assert any("ntp" in e for e in entries)
+        assert TEST_DOMAIN in entries
+        assert len(entries) == len(set(entries))
 
     def test_empty_list(self) -> None:
         """Empty profile list returns empty entries."""
         loader = ProfileLoader(user_dir=NONEXISTENT_DIR)
-        self.assertEqual(loader.compose_profiles([]), [])
+        assert loader.compose_profiles([]) == []
 
 
-class TestProfileLoaderListProfiles(unittest.TestCase):
+class TestProfileLoaderListProfiles:
     """Test ProfileLoader.list_profiles()."""
 
     def test_includes_bundled(self) -> None:
         """List includes bundled profiles."""
         loader = ProfileLoader(user_dir=NONEXISTENT_DIR)
         profiles = loader.list_profiles()
-        self.assertIn("base", profiles)
-        self.assertIn("dev-standard", profiles)
+        assert "base" in profiles
+        assert "dev-standard" in profiles
 
     def test_includes_user_profiles(self) -> None:
         """List includes user profiles alongside bundled."""
@@ -111,11 +112,11 @@ class TestProfileLoaderListProfiles(unittest.TestCase):
             (Path(tmp) / "custom.txt").write_text(f"{CUSTOM_DOMAIN}\n")
             loader = ProfileLoader(user_dir=Path(tmp))
             profiles = loader.list_profiles()
-            self.assertIn("custom", profiles)
-            self.assertIn("base", profiles)
+            assert "custom" in profiles
+            assert "base" in profiles
 
     def test_sorted(self) -> None:
         """Profile list is sorted."""
         loader = ProfileLoader(user_dir=NONEXISTENT_DIR)
         profiles = loader.list_profiles()
-        self.assertEqual(profiles, sorted(profiles))
+        assert profiles == sorted(profiles)

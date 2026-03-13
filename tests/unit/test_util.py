@@ -3,7 +3,7 @@
 
 """Tests for shared utility functions."""
 
-import unittest
+import pytest
 
 from terok_shield.util import is_ip, is_ipv4, is_ipv6
 
@@ -17,65 +17,44 @@ from ..testnet import (
 )
 
 
-class TestIsIpv4(unittest.TestCase):
-    """Tests for is_ipv4."""
-
-    def test_ipv4_address(self) -> None:
-        """Detect plain IPv4 address."""
-        self.assertTrue(is_ipv4(TEST_IP1))
-
-    def test_cidr(self) -> None:
-        """Detect CIDR notation."""
-        self.assertTrue(is_ipv4(TEST_NET1))
-
-    def test_domain(self) -> None:
-        """Reject domain names."""
-        self.assertFalse(is_ipv4(TEST_DOMAIN))
-
-    def test_empty(self) -> None:
-        """Reject empty string."""
-        self.assertFalse(is_ipv4(""))
-
-    def test_ipv6_rejected(self) -> None:
-        """Reject IPv6 addresses."""
-        self.assertFalse(is_ipv4(IPV6_LOOPBACK))
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        pytest.param(TEST_IP1, True, id="ipv4-address"),
+        pytest.param(TEST_NET1, True, id="ipv4-cidr"),
+        pytest.param(TEST_DOMAIN, False, id="domain"),
+        pytest.param("", False, id="empty"),
+        pytest.param(IPV6_LOOPBACK, False, id="ipv6"),
+    ],
+)
+def test_is_ipv4(value: str, expected: bool) -> None:
+    """``is_ipv4()`` accepts only IPv4 addresses and CIDRs."""
+    assert is_ipv4(value) is expected
 
 
-class TestIsIpv6(unittest.TestCase):
-    """Tests for is_ipv6."""
-
-    def test_ipv6_address(self) -> None:
-        """Detect plain IPv6 address."""
-        self.assertTrue(is_ipv6(IPV6_CLOUDFLARE))
-
-    def test_cidr(self) -> None:
-        """Detect CIDR notation."""
-        self.assertTrue(is_ipv6(IPV6_ULA_CIDR))
-
-    def test_domain(self) -> None:
-        """Reject domain names."""
-        self.assertFalse(is_ipv6(TEST_DOMAIN))
-
-    def test_empty(self) -> None:
-        """Reject empty string."""
-        self.assertFalse(is_ipv6(""))
-
-    def test_ipv4_rejected(self) -> None:
-        """Reject IPv4 addresses."""
-        self.assertFalse(is_ipv6(TEST_IP1))
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        pytest.param(IPV6_CLOUDFLARE, True, id="ipv6-address"),
+        pytest.param(IPV6_ULA_CIDR, True, id="ipv6-cidr"),
+        pytest.param(TEST_DOMAIN, False, id="domain"),
+        pytest.param("", False, id="empty"),
+        pytest.param(TEST_IP1, False, id="ipv4"),
+    ],
+)
+def test_is_ipv6(value: str, expected: bool) -> None:
+    """``is_ipv6()`` accepts only IPv6 addresses and CIDRs."""
+    assert is_ipv6(value) is expected
 
 
-class TestIsIp(unittest.TestCase):
-    """Tests for is_ip."""
-
-    def test_ipv4(self) -> None:
-        """Accept IPv4 address."""
-        self.assertTrue(is_ip(TEST_IP1))
-
-    def test_ipv6(self) -> None:
-        """Accept IPv6 address."""
-        self.assertTrue(is_ip(IPV6_LOOPBACK))
-
-    def test_domain(self) -> None:
-        """Reject domain names."""
-        self.assertFalse(is_ip(TEST_DOMAIN))
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        pytest.param(TEST_IP1, True, id="ipv4"),
+        pytest.param(IPV6_LOOPBACK, True, id="ipv6"),
+        pytest.param(TEST_DOMAIN, False, id="domain"),
+    ],
+)
+def test_is_ip(value: str, expected: bool) -> None:
+    """``is_ip()`` accepts both IPv4 and IPv6 addresses."""
+    assert is_ip(value) is expected

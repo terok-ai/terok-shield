@@ -5,7 +5,6 @@
 
 import json
 import tempfile
-import unittest
 from pathlib import Path
 from unittest import mock
 
@@ -15,7 +14,7 @@ from ..testfs import NONEXISTENT_DIR
 from ..testnet import TEST_IP1
 
 
-class TestAuditLoggerInit(unittest.TestCase):
+class TestAuditLoggerInit:
     """Test AuditLogger construction."""
 
     def test_direct_init(self) -> None:
@@ -23,30 +22,30 @@ class TestAuditLoggerInit(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "audit.jsonl"
             logger = AuditLogger(audit_path=path, enabled=False)
-            self.assertFalse(logger.enabled)
+            assert not logger.enabled
 
     def test_default_enabled(self) -> None:
         """Default enabled is True."""
         with tempfile.TemporaryDirectory() as tmp:
             logger = AuditLogger(audit_path=Path(tmp) / "audit.jsonl")
-            self.assertTrue(logger.enabled)
+            assert logger.enabled
 
 
-class TestAuditLoggerEnabledToggle(unittest.TestCase):
+class TestAuditLoggerEnabledToggle:
     """Test enabled property and setter."""
 
     def test_toggle_enabled(self) -> None:
         """Can toggle enabled on and off."""
         with tempfile.TemporaryDirectory() as tmp:
             logger = AuditLogger(audit_path=Path(tmp) / "audit.jsonl", enabled=True)
-            self.assertTrue(logger.enabled)
+            assert logger.enabled
             logger.enabled = False
-            self.assertFalse(logger.enabled)
+            assert not logger.enabled
             logger.enabled = True
-            self.assertTrue(logger.enabled)
+            assert logger.enabled
 
 
-class TestAuditLoggerLogEvent(unittest.TestCase):
+class TestAuditLoggerLogEvent:
     """Test AuditLogger.log_event()."""
 
     def test_writes_jsonl(self) -> None:
@@ -56,12 +55,12 @@ class TestAuditLoggerLogEvent(unittest.TestCase):
             logger = AuditLogger(audit_path=path)
             logger.log_event("test-ctr", "setup", detail="test")
 
-            self.assertTrue(path.exists())
+            assert path.exists()
             entry = json.loads(path.read_text().strip())
-            self.assertEqual(entry["container"], "test-ctr")
-            self.assertEqual(entry["action"], "setup")
-            self.assertEqual(entry["detail"], "test")
-            self.assertIn("ts", entry)
+            assert entry["container"] == "test-ctr"
+            assert entry["action"] == "setup"
+            assert entry["detail"] == "test"
+            assert "ts" in entry
 
     def test_optional_fields(self) -> None:
         """Only include optional fields when provided."""
@@ -71,8 +70,8 @@ class TestAuditLoggerLogEvent(unittest.TestCase):
             logger.log_event("test-ctr", "denied", dest=TEST_IP1)
 
             entry = json.loads(path.read_text().strip())
-            self.assertEqual(entry["dest"], TEST_IP1)
-            self.assertNotIn("detail", entry)
+            assert entry["dest"] == TEST_IP1
+            assert "detail" not in entry
 
     def test_skips_when_disabled(self) -> None:
         """No file written when disabled."""
@@ -80,7 +79,7 @@ class TestAuditLoggerLogEvent(unittest.TestCase):
             path = Path(tmp) / "audit.jsonl"
             logger = AuditLogger(audit_path=path, enabled=False)
             logger.log_event("test-ctr", "setup", detail="test")
-            self.assertFalse(path.exists())
+            assert not path.exists()
 
     @mock.patch("pathlib.Path.open", side_effect=OSError("disk full"))
     def test_silently_ignores_write_error(self, _open: mock.Mock) -> None:
@@ -100,7 +99,7 @@ class TestAuditLoggerLogEvent(unittest.TestCase):
             logger.log_event("test-ctr", "allowed", dest=TEST_IP1)
 
             lines = path.read_text().strip().split("\n")
-            self.assertEqual(len(lines), 2)
+            assert len(lines) == 2
 
     def test_creates_parent_dirs(self) -> None:
         """log_event creates parent directories if needed."""
@@ -108,10 +107,10 @@ class TestAuditLoggerLogEvent(unittest.TestCase):
             path = Path(tmp) / "subdir" / "audit.jsonl"
             logger = AuditLogger(audit_path=path)
             logger.log_event("test-ctr", "setup")
-            self.assertTrue(path.exists())
+            assert path.exists()
 
 
-class TestAuditLoggerTailLog(unittest.TestCase):
+class TestAuditLoggerTailLog:
     """Test AuditLogger.tail_log()."""
 
     def test_returns_last_n_entries(self) -> None:
@@ -123,8 +122,8 @@ class TestAuditLoggerTailLog(unittest.TestCase):
             logger = AuditLogger(audit_path=path)
 
             result = list(logger.tail_log(n=3))
-            self.assertEqual(len(result), 3)
-            self.assertEqual(result[0]["action"], "event-2")
+            assert len(result) == 3
+            assert result[0]["action"] == "event-2"
 
     def test_skips_corrupt_lines(self) -> None:
         """Skip corrupt JSON lines and yield valid ones."""
@@ -134,13 +133,13 @@ class TestAuditLoggerTailLog(unittest.TestCase):
             logger = AuditLogger(audit_path=path)
 
             result = list(logger.tail_log())
-            self.assertEqual(len(result), 2)
+            assert len(result) == 2
 
     def test_missing_file(self) -> None:
         """Return empty for missing log files."""
         logger = AuditLogger(audit_path=NONEXISTENT_DIR / "audit.jsonl")
         result = list(logger.tail_log())
-        self.assertEqual(result, [])
+        assert result == []
 
     def test_n_zero_returns_nothing(self) -> None:
         """n=0 yields no events."""
@@ -149,4 +148,4 @@ class TestAuditLoggerTailLog(unittest.TestCase):
             path.write_text('{"action":"a"}\n')
             logger = AuditLogger(audit_path=path)
             result = list(logger.tail_log(n=0))
-            self.assertEqual(result, [])
+            assert result == []

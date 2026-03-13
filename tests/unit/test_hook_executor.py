@@ -5,9 +5,10 @@
 
 import json
 import tempfile
-import unittest
 from pathlib import Path
 from unittest import mock
+
+import pytest
 
 from terok_shield import state
 from terok_shield.oci_hook import HookExecutor
@@ -16,7 +17,7 @@ from terok_shield.run import ExecError
 from ..testnet import RFC1918_HOST, TEST_IP1, TEST_IP2
 
 
-class TestHookExecutorInit(unittest.TestCase):
+class TestHookExecutorInit:
     """Test HookExecutor construction."""
 
     def test_stores_collaborators(self) -> None:
@@ -32,13 +33,13 @@ class TestHookExecutorInit(unittest.TestCase):
                 ruleset=ruleset,
                 state_dir=Path(tmp),
             )
-            self.assertIs(executor._runner, runner)
-            self.assertIs(executor._audit, audit)
-            self.assertIs(executor._ruleset, ruleset)
-            self.assertEqual(executor._state_dir, Path(tmp))
+            assert executor._runner is runner
+            assert executor._audit is audit
+            assert executor._ruleset is ruleset
+            assert executor._state_dir == Path(tmp)
 
 
-class TestHookExecutorApply(unittest.TestCase):
+class TestHookExecutorApply:
     """Test HookExecutor.apply()."""
 
     def test_success_no_ips(self) -> None:
@@ -61,11 +62,11 @@ class TestHookExecutorApply(unittest.TestCase):
             executor.apply("test-ctr", "42")
 
             # verify calls: apply + list for verify
-            self.assertEqual(runner.nft_via_nsenter.call_count, 2)
+            assert runner.nft_via_nsenter.call_count == 2
             # audit trail
             details = [c.kwargs.get("detail", "") for c in audit.log_event.call_args_list]
-            self.assertIn("ruleset applied", details)
-            self.assertIn("verification passed", details)
+            assert "ruleset applied" in details
+            assert "verification passed" in details
 
     def test_success_with_ips(self) -> None:
         """Apply with pre-resolved IPs."""
@@ -86,7 +87,7 @@ class TestHookExecutorApply(unittest.TestCase):
                 state_dir=Path(tmp),
             )
             executor.apply("test-ctr", "42")
-            self.assertEqual(runner.nft_via_nsenter.call_count, 3)
+            assert runner.nft_via_nsenter.call_count == 3
 
     def test_fail_closed_on_apply_error(self) -> None:
         """Raise RuntimeError and short-circuit if ruleset application fails."""
@@ -103,7 +104,7 @@ class TestHookExecutorApply(unittest.TestCase):
                 ruleset=ruleset,
                 state_dir=Path(tmp),
             )
-            with self.assertRaises(RuntimeError):
+            with pytest.raises(RuntimeError):
                 executor.apply("test-ctr", "42")
 
             # Verify short-circuit: nft called once (apply), verify never reached
@@ -126,12 +127,12 @@ class TestHookExecutorApply(unittest.TestCase):
                 ruleset=ruleset,
                 state_dir=Path(tmp),
             )
-            with self.assertRaises(RuntimeError) as ctx:
+            with pytest.raises(RuntimeError) as ctx:
                 executor.apply("test-ctr", "42")
-            self.assertIn("verification failed", str(ctx.exception))
+            assert "verification failed" in str(ctx.value)
 
 
-class TestHookExecutorReadAllowedIps(unittest.TestCase):
+class TestHookExecutorReadAllowedIps:
     """Test HookExecutor._read_allowed_ips()."""
 
     def test_reads_profile_allowed(self) -> None:
@@ -140,7 +141,7 @@ class TestHookExecutorReadAllowedIps(unittest.TestCase):
             state.profile_allowed_path(Path(tmp)).write_text(f"{TEST_IP1}\n{TEST_IP2}\n")
             executor = _make_executor(state_dir=Path(tmp))
             result = executor._read_allowed_ips()
-            self.assertEqual(result, [TEST_IP1, TEST_IP2])
+            assert result == [TEST_IP1, TEST_IP2]
 
     def test_reads_both_files(self) -> None:
         """Read and merge IPs from both profile.allowed and live.allowed."""
@@ -149,7 +150,7 @@ class TestHookExecutorReadAllowedIps(unittest.TestCase):
             state.live_allowed_path(Path(tmp)).write_text(f"{TEST_IP2}\n")
             executor = _make_executor(state_dir=Path(tmp))
             result = executor._read_allowed_ips()
-            self.assertEqual(result, [TEST_IP1, TEST_IP2])
+            assert result == [TEST_IP1, TEST_IP2]
 
     def test_deduplicates(self) -> None:
         """Duplicate IPs across files are deduplicated."""
@@ -158,14 +159,14 @@ class TestHookExecutorReadAllowedIps(unittest.TestCase):
             state.live_allowed_path(Path(tmp)).write_text(f"{TEST_IP1}\n{TEST_IP2}\n")
             executor = _make_executor(state_dir=Path(tmp))
             result = executor._read_allowed_ips()
-            self.assertEqual(result, [TEST_IP1, TEST_IP2])
+            assert result == [TEST_IP1, TEST_IP2]
 
     def test_missing_files(self) -> None:
         """Return empty list when no allowlist files exist."""
         with tempfile.TemporaryDirectory() as tmp:
             executor = _make_executor(state_dir=Path(tmp))
             result = executor._read_allowed_ips()
-            self.assertEqual(result, [])
+            assert result == []
 
     def test_skips_blank_lines(self) -> None:
         """Skip blank lines in allowlist files."""
@@ -173,7 +174,7 @@ class TestHookExecutorReadAllowedIps(unittest.TestCase):
             state.profile_allowed_path(Path(tmp)).write_text(f"\n{TEST_IP1}\n\n")
             executor = _make_executor(state_dir=Path(tmp))
             result = executor._read_allowed_ips()
-            self.assertEqual(result, [TEST_IP1])
+            assert result == [TEST_IP1]
 
     def test_subtracts_denied_ips(self) -> None:
         """Denied IPs from deny.list are excluded from the result."""
@@ -182,10 +183,10 @@ class TestHookExecutorReadAllowedIps(unittest.TestCase):
             state.deny_path(Path(tmp)).write_text(f"{TEST_IP1}\n")
             executor = _make_executor(state_dir=Path(tmp))
             result = executor._read_allowed_ips()
-            self.assertEqual(result, [TEST_IP2])
+            assert result == [TEST_IP2]
 
 
-class TestHookExecutorNftExec(unittest.TestCase):
+class TestHookExecutorNftExec:
     """Test HookExecutor._nft_exec()."""
 
     def test_success(self) -> None:
@@ -195,7 +196,7 @@ class TestHookExecutorNftExec(unittest.TestCase):
         executor = _make_executor(runner=runner)
 
         result = executor._nft_exec("test-ctr", "42", "list", "ruleset")
-        self.assertEqual(result, "output")
+        assert result == "output"
 
     def test_exec_error_raises_runtime(self) -> None:
         """nft_exec converts ExecError to RuntimeError."""
@@ -204,9 +205,9 @@ class TestHookExecutorNftExec(unittest.TestCase):
         audit = mock.MagicMock()
         executor = _make_executor(runner=runner, audit=audit)
 
-        with self.assertRaises(RuntimeError) as ctx:
+        with pytest.raises(RuntimeError) as ctx:
             executor._nft_exec("test-ctr", "42", "list", "ruleset")
-        self.assertIn("list failed", str(ctx.exception))
+        assert "list failed" in str(ctx.value)
         audit.log_event.assert_called()
 
     def test_custom_action_label(self) -> None:
@@ -216,27 +217,27 @@ class TestHookExecutorNftExec(unittest.TestCase):
         audit = mock.MagicMock()
         executor = _make_executor(runner=runner, audit=audit)
 
-        with self.assertRaises(RuntimeError) as ctx:
+        with pytest.raises(RuntimeError) as ctx:
             executor._nft_exec("test-ctr", "42", stdin="rules", action="add-elements")
-        self.assertIn("add-elements failed", str(ctx.exception))
+        assert "add-elements failed" in str(ctx.value)
 
 
-class TestHookExecutorParseOciState(unittest.TestCase):
+class TestHookExecutorParseOciState:
     """Test HookExecutor.parse_oci_state() static method."""
 
     def test_valid_state(self) -> None:
         """Parse valid OCI state via the class method."""
         cid, pid, _ = HookExecutor.parse_oci_state(json.dumps({"id": "abc123", "pid": 42}))
-        self.assertEqual(cid, "abc123")
-        self.assertEqual(pid, "42")
+        assert cid == "abc123"
+        assert pid == "42"
 
     def test_invalid_json_raises(self) -> None:
         """Raise ValueError for invalid JSON."""
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError):
             HookExecutor.parse_oci_state("not json")
 
 
-class TestHookExecutorClassifyLogging(unittest.TestCase):
+class TestHookExecutorClassifyLogging:
     """Test private-range and broad CIDR classification logging in HookExecutor."""
 
     def test_rfc1918_logged_as_note(self) -> None:
@@ -262,12 +263,10 @@ class TestHookExecutorClassifyLogging(unittest.TestCase):
             note_calls = [
                 c for c in audit.log_event.call_args_list if len(c[0]) >= 2 and c[0][1] == "note"
             ]
-            self.assertTrue(
-                any("private range" in c.kwargs.get("detail", "") for c in note_calls),
-            )
+            assert any("private range" in c.kwargs.get("detail", "") for c in note_calls)
 
 
-class TestHookExecutorCacheReadError(unittest.TestCase):
+class TestHookExecutorCacheReadError:
     """Test fail-closed on cache read error."""
 
     def test_oserror_raises_runtime(self) -> None:
@@ -286,7 +285,7 @@ class TestHookExecutorCacheReadError(unittest.TestCase):
                 state_dir=Path(tmp),
             )
             with mock.patch.object(executor, "_read_allowed_ips", side_effect=OSError("disk fail")):
-                with self.assertRaises(RuntimeError):
+                with pytest.raises(RuntimeError):
                     executor.apply("test-ctr", "42")
 
     def test_unicodeerror_raises_runtime(self) -> None:
@@ -307,7 +306,7 @@ class TestHookExecutorCacheReadError(unittest.TestCase):
             with mock.patch.object(
                 executor, "_read_allowed_ips", side_effect=UnicodeError("bad encoding")
             ):
-                with self.assertRaises(RuntimeError):
+                with pytest.raises(RuntimeError):
                     executor.apply("test-ctr", "42")
 
 

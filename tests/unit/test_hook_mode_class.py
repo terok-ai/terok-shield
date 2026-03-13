@@ -5,9 +5,10 @@
 
 import json
 import tempfile
-import unittest
 from pathlib import Path
 from unittest import mock
+
+import pytest
 
 from terok_shield import state
 from terok_shield.config import ANNOTATION_KEY, ShieldConfig, ShieldState
@@ -48,7 +49,7 @@ def _make_hook_mode(
     )
 
 
-class TestHookModeInit(unittest.TestCase):
+class TestHookModeInit:
     """Test HookMode construction."""
 
     def test_stores_collaborators(self) -> None:
@@ -68,15 +69,15 @@ class TestHookModeInit(unittest.TestCase):
                 profiles=profiles,
                 ruleset=ruleset,
             )
-            self.assertIs(mode._config, config)
-            self.assertIs(mode._runner, runner)
-            self.assertIs(mode._audit, audit)
-            self.assertIs(mode._dns, dns)
-            self.assertIs(mode._profiles, profiles)
-            self.assertIs(mode._ruleset, ruleset)
+            assert mode._config is config
+            assert mode._runner is runner
+            assert mode._audit is audit
+            assert mode._dns is dns
+            assert mode._profiles is profiles
+            assert mode._ruleset is ruleset
 
 
-class TestHookModePreStart(unittest.TestCase):
+class TestHookModePreStart:
     """Test HookMode.pre_start()."""
 
     @mock.patch("os.geteuid", return_value=1000)
@@ -96,10 +97,10 @@ class TestHookModePreStart(unittest.TestCase):
                 dns=dns,
             )
             args = mode.pre_start("test", ["dev-standard"])
-            self.assertIn("--network", args)
+            assert "--network" in args
             net_idx = args.index("--network") + 1
-            self.assertIn("pasta:", args[net_idx])
-            self.assertIn("-T,8080", args[net_idx])
+            assert "pasta:" in args[net_idx]
+            assert "-T,8080" in args[net_idx]
 
     def test_installs_hooks(self) -> None:
         """pre_start installs hooks and creates state dirs."""
@@ -112,8 +113,8 @@ class TestHookModePreStart(unittest.TestCase):
             with mock.patch("os.geteuid", return_value=0):
                 mode.pre_start("test", ["dev-standard"])
             # Check hooks were installed
-            self.assertTrue(state.hooks_dir(Path(tmp)).is_dir())
-            self.assertTrue(state.hook_entrypoint(Path(tmp)).is_file())
+            assert state.hooks_dir(Path(tmp)).is_dir()
+            assert state.hook_entrypoint(Path(tmp)).is_file()
 
     def test_annotations_include_state_dir(self) -> None:
         """pre_start includes state_dir annotation."""
@@ -128,10 +129,10 @@ class TestHookModePreStart(unittest.TestCase):
             # Find state_dir annotation
             for i, arg in enumerate(args):
                 if arg == "--annotation" and "terok.shield.state_dir=" in args[i + 1]:
-                    self.assertIn(str(Path(tmp)), args[i + 1])
+                    assert str(Path(tmp)) in args[i + 1]
                     break
             else:
-                self.fail("state_dir annotation not found in args")
+                pytest.fail("state_dir annotation not found in args")
 
     def test_annotations_include_audit_enabled(self) -> None:
         """pre_start includes audit_enabled annotation."""
@@ -146,13 +147,13 @@ class TestHookModePreStart(unittest.TestCase):
             # Find audit_enabled annotation
             for i, arg in enumerate(args):
                 if arg == "--annotation" and "terok.shield.audit_enabled=" in args[i + 1]:
-                    self.assertIn("false", args[i + 1])
+                    assert "false" in args[i + 1]
                     break
             else:
-                self.fail("audit_enabled annotation not found in args")
+                pytest.fail("audit_enabled annotation not found in args")
 
 
-class TestHookModeAllowDeny(unittest.TestCase):
+class TestHookModeAllowDeny:
     """Test HookMode.allow_ip() and deny_ip()."""
 
     def test_allow_ipv4(self) -> None:
@@ -166,8 +167,8 @@ class TestHookModeAllowDeny(unittest.TestCase):
             mode.allow_ip("test-ctr", TEST_IP1)
             runner.nft_via_nsenter.assert_called_once()
             call_args = runner.nft_via_nsenter.call_args[0]
-            self.assertIn("add", call_args)
-            self.assertIn("allow_v4", call_args)
+            assert "add" in call_args
+            assert "allow_v4" in call_args
 
     def test_allow_persists_to_live_allowed(self) -> None:
         """allow_ip persists IP to live.allowed file."""
@@ -179,8 +180,8 @@ class TestHookModeAllowDeny(unittest.TestCase):
 
             mode.allow_ip("test-ctr", TEST_IP1)
             live_path = state.live_allowed_path(Path(tmp))
-            self.assertTrue(live_path.is_file())
-            self.assertIn(TEST_IP1, live_path.read_text())
+            assert live_path.is_file()
+            assert TEST_IP1 in live_path.read_text()
 
     def test_allow_deduplicates_live_allowed(self) -> None:
         """allow_ip does not append duplicate entries to live.allowed."""
@@ -194,7 +195,7 @@ class TestHookModeAllowDeny(unittest.TestCase):
             mode.allow_ip("test-ctr", TEST_IP1)
             live_path = state.live_allowed_path(Path(tmp))
             lines = [line for line in live_path.read_text().splitlines() if line.strip()]
-            self.assertEqual(lines.count(TEST_IP1), 1)
+            assert lines.count(TEST_IP1) == 1
 
     def test_allow_ipv6(self) -> None:
         """allow_ip adds element to allow_v6 set for IPv6."""
@@ -206,7 +207,7 @@ class TestHookModeAllowDeny(unittest.TestCase):
 
             mode.allow_ip("test-ctr", IPV6_CLOUDFLARE)
             call_args = runner.nft_via_nsenter.call_args[0]
-            self.assertIn("allow_v6", call_args)
+            assert "allow_v6" in call_args
 
     def test_deny_ipv4(self) -> None:
         """deny_ip removes element from allow_v4 set."""
@@ -218,8 +219,8 @@ class TestHookModeAllowDeny(unittest.TestCase):
 
             mode.deny_ip("test-ctr", TEST_IP1)
             call_args = runner.nft_via_nsenter.call_args[0]
-            self.assertIn("delete", call_args)
-            self.assertIn("allow_v4", call_args)
+            assert "delete" in call_args
+            assert "allow_v4" in call_args
 
     def test_deny_removes_from_live_allowed(self) -> None:
         """deny_ip removes IP from live.allowed file."""
@@ -234,7 +235,7 @@ class TestHookModeAllowDeny(unittest.TestCase):
             mode = _make_hook_mode(tmp_path=Path(tmp), runner=runner, ruleset=ruleset)
 
             mode.deny_ip("test-ctr", TEST_IP1)
-            self.assertNotIn(TEST_IP1, live_path.read_text().splitlines())
+            assert TEST_IP1 not in live_path.read_text().splitlines()
 
     def test_deny_profile_ip_writes_deny_list(self) -> None:
         """deny_ip of a profile-sourced IP persists to deny.list."""
@@ -248,8 +249,8 @@ class TestHookModeAllowDeny(unittest.TestCase):
 
             mode.deny_ip("test-ctr", TEST_IP1)
             deny_file = state.deny_path(Path(tmp))
-            self.assertTrue(deny_file.is_file())
-            self.assertIn(TEST_IP1, deny_file.read_text())
+            assert deny_file.is_file()
+            assert TEST_IP1 in deny_file.read_text()
 
     def test_deny_live_only_ip_no_deny_list(self) -> None:
         """deny_ip of a live-only IP does NOT write deny.list."""
@@ -263,7 +264,7 @@ class TestHookModeAllowDeny(unittest.TestCase):
 
             mode.deny_ip("test-ctr", TEST_IP1)
             deny_file = state.deny_path(Path(tmp))
-            self.assertFalse(deny_file.is_file())
+            assert not deny_file.is_file()
 
     def test_deny_nft_error_still_persists(self) -> None:
         """nft delete element ExecError is caught; deny still persists to files."""
@@ -280,9 +281,9 @@ class TestHookModeAllowDeny(unittest.TestCase):
             mode.deny_ip("test-ctr", TEST_IP1)
             # live.allowed should still have IP removed
             live_content = state.live_allowed_path(Path(tmp)).read_text()
-            self.assertNotIn(TEST_IP1, live_content.splitlines())
+            assert TEST_IP1 not in live_content.splitlines()
             # deny.list should be written
-            self.assertIn(TEST_IP1, state.deny_path(Path(tmp)).read_text())
+            assert TEST_IP1 in state.deny_path(Path(tmp)).read_text()
 
     def test_allow_after_deny_clears_deny_list(self) -> None:
         """allow_ip removes IP from deny.list (un-deny)."""
@@ -296,11 +297,11 @@ class TestHookModeAllowDeny(unittest.TestCase):
 
             mode.allow_ip("test-ctr", TEST_IP1)
             denied = state.read_denied_ips(Path(tmp))
-            self.assertNotIn(TEST_IP1, denied)
-            self.assertIn(TEST_IP2, denied)
+            assert TEST_IP1 not in denied
+            assert TEST_IP2 in denied
 
 
-class TestHookModeListRules(unittest.TestCase):
+class TestHookModeListRules:
     """Test HookMode.list_rules()."""
 
     def test_returns_output(self) -> None:
@@ -310,7 +311,7 @@ class TestHookModeListRules(unittest.TestCase):
         mode = _make_hook_mode(runner=runner)
 
         result = mode.list_rules("test-ctr")
-        self.assertIn("terok_shield", result)
+        assert "terok_shield" in result
 
     def test_returns_empty_on_exec_error(self) -> None:
         """list_rules returns empty string on ExecError."""
@@ -319,10 +320,10 @@ class TestHookModeListRules(unittest.TestCase):
         mode = _make_hook_mode(runner=runner)
 
         result = mode.list_rules("test-ctr")
-        self.assertEqual(result, "")
+        assert result == ""
 
 
-class TestHookModeShieldDown(unittest.TestCase):
+class TestHookModeShieldDown:
     """Test HookMode.shield_down()."""
 
     def test_applies_bypass_ruleset(self) -> None:
@@ -335,7 +336,7 @@ class TestHookModeShieldDown(unittest.TestCase):
         mode = _make_hook_mode(runner=runner, ruleset=ruleset)
 
         mode.shield_down("test-ctr")
-        self.assertEqual(runner.nft_via_nsenter.call_count, 2)
+        assert runner.nft_via_nsenter.call_count == 2
         ruleset.build_bypass.assert_called_once_with(allow_all=False)
 
     def test_verification_failure_raises(self) -> None:
@@ -347,12 +348,12 @@ class TestHookModeShieldDown(unittest.TestCase):
         ruleset.verify_bypass.return_value = ["error: missing policy"]
         mode = _make_hook_mode(runner=runner, ruleset=ruleset)
 
-        with self.assertRaises(RuntimeError) as ctx:
+        with pytest.raises(RuntimeError) as ctx:
             mode.shield_down("test-ctr")
-        self.assertIn("verification failed", str(ctx.exception))
+        assert "verification failed" in str(ctx.value)
 
 
-class TestHookModeShieldUp(unittest.TestCase):
+class TestHookModeShieldUp:
     """Test HookMode.shield_up()."""
 
     def test_applies_hook_ruleset(self) -> None:
@@ -367,7 +368,7 @@ class TestHookModeShieldUp(unittest.TestCase):
             config = ShieldConfig(state_dir=Path(tmp))
             mode = _make_hook_mode(config=config, runner=runner, ruleset=ruleset)
             mode.shield_up("test-ctr")
-            self.assertEqual(runner.nft_via_nsenter.call_count, 2)
+            assert runner.nft_via_nsenter.call_count == 2
 
     def test_readds_cached_ips(self) -> None:
         """shield_up re-adds cached IPs from allowlist files."""
@@ -385,7 +386,7 @@ class TestHookModeShieldUp(unittest.TestCase):
             config = ShieldConfig(state_dir=Path(tmp))
             mode = _make_hook_mode(config=config, runner=runner, ruleset=ruleset)
             mode.shield_up("test-ctr")
-            self.assertEqual(runner.nft_via_nsenter.call_count, 3)
+            assert runner.nft_via_nsenter.call_count == 3
 
     def test_verification_failure_raises(self) -> None:
         """shield_up raises RuntimeError on verification failure."""
@@ -399,11 +400,11 @@ class TestHookModeShieldUp(unittest.TestCase):
 
             config = ShieldConfig(state_dir=Path(tmp))
             mode = _make_hook_mode(config=config, runner=runner, ruleset=ruleset)
-            with self.assertRaises(RuntimeError):
+            with pytest.raises(RuntimeError):
                 mode.shield_up("test-ctr")
 
 
-class TestHookModeShieldState(unittest.TestCase):
+class TestHookModeShieldState:
     """Test HookMode.shield_state()."""
 
     def test_inactive_on_empty(self) -> None:
@@ -412,7 +413,7 @@ class TestHookModeShieldState(unittest.TestCase):
         runner.nft_via_nsenter.return_value = ""
         ruleset = mock.MagicMock()
         mode = _make_hook_mode(runner=runner, ruleset=ruleset)
-        self.assertEqual(mode.shield_state("test"), ShieldState.INACTIVE)
+        assert mode.shield_state("test") == ShieldState.INACTIVE
 
     def test_up_detected(self) -> None:
         """Hook ruleset detected as UP."""
@@ -422,7 +423,7 @@ class TestHookModeShieldState(unittest.TestCase):
         ruleset.verify_bypass.return_value = ["not bypass"]
         ruleset.verify_hook.return_value = []  # passes hook verification
         mode = _make_hook_mode(runner=runner, ruleset=ruleset)
-        self.assertEqual(mode.shield_state("test"), ShieldState.UP)
+        assert mode.shield_state("test") == ShieldState.UP
 
     def test_down_detected(self) -> None:
         """Bypass ruleset detected as DOWN."""
@@ -431,7 +432,7 @@ class TestHookModeShieldState(unittest.TestCase):
         ruleset = mock.MagicMock()
         ruleset.verify_bypass.return_value = []  # passes bypass verification
         mode = _make_hook_mode(runner=runner, ruleset=ruleset)
-        self.assertEqual(mode.shield_state("test"), ShieldState.DOWN)
+        assert mode.shield_state("test") == ShieldState.DOWN
 
     def test_error_detected(self) -> None:
         """Unrecognised ruleset detected as ERROR."""
@@ -441,10 +442,10 @@ class TestHookModeShieldState(unittest.TestCase):
         ruleset.verify_bypass.return_value = ["not bypass"]
         ruleset.verify_hook.return_value = ["not hook"]
         mode = _make_hook_mode(runner=runner, ruleset=ruleset)
-        self.assertEqual(mode.shield_state("test"), ShieldState.ERROR)
+        assert mode.shield_state("test") == ShieldState.ERROR
 
 
-class TestHookModePreview(unittest.TestCase):
+class TestHookModePreview:
     """Test HookMode.preview()."""
 
     def test_default_returns_hook(self) -> None:
@@ -455,7 +456,7 @@ class TestHookModePreview(unittest.TestCase):
 
         result = mode.preview()
         ruleset.build_hook.assert_called_once()
-        self.assertEqual(result, "hook ruleset")
+        assert result == "hook ruleset"
 
     def test_down_returns_bypass(self) -> None:
         """Preview with down=True returns bypass ruleset."""
@@ -465,10 +466,10 @@ class TestHookModePreview(unittest.TestCase):
 
         result = mode.preview(down=True, allow_all=True)
         ruleset.build_bypass.assert_called_once_with(allow_all=True)
-        self.assertEqual(result, "bypass ruleset")
+        assert result == "bypass ruleset"
 
 
-class TestHookModeDetectNetwork(unittest.TestCase):
+class TestHookModeDetectNetwork:
     """Test HookMode._detect_rootless_network_mode()."""
 
     def test_pasta_from_podman_info(self) -> None:
@@ -476,31 +477,31 @@ class TestHookModeDetectNetwork(unittest.TestCase):
         runner = mock.MagicMock()
         runner.run.return_value = json.dumps({"host": {"rootlessNetworkCmd": "pasta"}})
         mode = _make_hook_mode(runner=runner)
-        self.assertEqual(mode._detect_rootless_network_mode(), "pasta")
+        assert mode._detect_rootless_network_mode() == "pasta"
 
     def test_slirp4netns(self) -> None:
         """Detect slirp4netns from podman info output."""
         runner = mock.MagicMock()
         runner.run.return_value = json.dumps({"host": {"rootlessNetworkCmd": "slirp4netns"}})
         mode = _make_hook_mode(runner=runner)
-        self.assertEqual(mode._detect_rootless_network_mode(), "slirp4netns")
+        assert mode._detect_rootless_network_mode() == "slirp4netns"
 
     def test_fallback_on_empty(self) -> None:
         """Default to pasta on empty output."""
         runner = mock.MagicMock()
         runner.run.return_value = ""
         mode = _make_hook_mode(runner=runner)
-        self.assertEqual(mode._detect_rootless_network_mode(), "pasta")
+        assert mode._detect_rootless_network_mode() == "pasta"
 
     def test_fallback_on_invalid_json(self) -> None:
         """Default to pasta on invalid JSON."""
         runner = mock.MagicMock()
         runner.run.return_value = "not json"
         mode = _make_hook_mode(runner=runner)
-        self.assertEqual(mode._detect_rootless_network_mode(), "pasta")
+        assert mode._detect_rootless_network_mode() == "pasta"
 
 
-class TestInstallHooks(unittest.TestCase):
+class TestInstallHooks:
     """Test install_hooks() writes entrypoint and hook JSON files."""
 
     def test_creates_entrypoint_and_hook_jsons(self) -> None:
@@ -513,18 +514,18 @@ class TestInstallHooks(unittest.TestCase):
             install_hooks(hook_entrypoint=ep, hooks_dir=hooks)
 
             # Entrypoint exists and is executable
-            self.assertTrue(ep.exists())
-            self.assertTrue(ep.stat().st_mode & 0o100)  # owner-execute bit
+            assert ep.exists()
+            assert ep.stat().st_mode & 0o100  # owner-execute bit
             content = ep.read_text()
-            self.assertTrue(content.startswith("#!/bin/sh\n"))
-            self.assertIn("terok_shield.oci_hook", content)
+            assert content.startswith("#!/bin/sh\n")
+            assert "terok_shield.oci_hook" in content
 
             # Both hook JSON files exist with correct structure
             for stage_name in ("createRuntime", "poststop"):
                 hook_file = hooks / f"terok-shield-{stage_name}.json"
-                self.assertTrue(hook_file.exists())
+                assert hook_file.exists()
                 data = json.loads(hook_file.read_text())
-                self.assertEqual(data["version"], "1.0.0")
-                self.assertEqual(data["hook"]["path"], str(ep))
-                self.assertIn(stage_name, data["stages"])
-                self.assertIn(ANNOTATION_KEY, data["when"]["annotations"])
+                assert data["version"] == "1.0.0"
+                assert data["hook"]["path"] == str(ep)
+                assert stage_name in data["stages"]
+                assert ANNOTATION_KEY in data["when"]["annotations"]
