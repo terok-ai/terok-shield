@@ -6,6 +6,7 @@
 import shutil
 import subprocess
 from collections.abc import Iterator
+from pathlib import Path
 from unittest import mock
 
 import pytest
@@ -339,7 +340,11 @@ def test_find_nft_returns_path_from_which(monkeypatch: pytest.MonkeyPatch) -> No
 def test_find_nft_falls_back_to_sbin(monkeypatch: pytest.MonkeyPatch) -> None:
     """find_nft() checks /usr/sbin/nft when PATH lookup fails."""
     monkeypatch.setattr(shutil, "which", lambda _name: None)
-    with mock.patch("terok_shield.run.Path.is_file", return_value=True):
+
+    def _is_file(self: Path) -> bool:
+        return str(self) == NFT_SBIN
+
+    with mock.patch.object(Path, "is_file", _is_file):
         assert find_nft() == NFT_SBIN
 
 

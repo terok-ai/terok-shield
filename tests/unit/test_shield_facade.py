@@ -12,6 +12,7 @@ import pytest
 
 from terok_shield import Shield, ShieldConfig, ShieldState
 
+from ..testfs import NFT_BINARY
 from ..testnet import TEST_DOMAIN, TEST_IP1, TEST_IP2
 
 ConfigFactory = Callable[..., ShieldConfig]
@@ -67,7 +68,7 @@ def make_shield(make_config: ConfigFactory) -> ShieldHarnessFactory:
     return _make_shield
 
 
-@mock.patch("terok_shield.run.find_nft", return_value="/usr/bin/nft")
+@mock.patch("terok_shield.run.find_nft", return_value=NFT_BINARY)
 def test_shield_default_collaborators(_find: mock.Mock, tmp_path: Path) -> None:
     """Shield creates default collaborators when none are injected."""
     shield = Shield(ShieldConfig(state_dir=tmp_path))
