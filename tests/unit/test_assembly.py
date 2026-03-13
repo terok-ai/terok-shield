@@ -31,6 +31,9 @@ from terok_shield.profiles import ProfileLoader
 from ..testfs import FAKE_RESOLVED_DIR
 from ..testnet import TEST_DOMAIN, TEST_IP1, TEST_IP2
 
+_AUDIT_LOG_FILENAME = "audit.jsonl"
+_PROFILE_ALLOWED_FILENAME = "profile.allowed"
+
 
 class TestConstructorContracts:
     """Verify constructor signatures accept the documented parameters.
@@ -64,7 +67,7 @@ class TestConstructorContracts:
     def test_audit_logger_accepts_audit_path(self) -> None:
         """AuditLogger takes audit_path=, not log_dir."""
         with tempfile.TemporaryDirectory() as tmp:
-            logger = AuditLogger(audit_path=Path(tmp) / "audit.jsonl")
+            logger = AuditLogger(audit_path=Path(tmp) / _AUDIT_LOG_FILENAME)
             assert isinstance(logger, AuditLogger)
 
     def test_ruleset_builder_constructor(self) -> None:
@@ -89,7 +92,7 @@ class TestDnsResolverCacheContract:
         resolver = DnsResolver(runner=runner)
 
         with tempfile.TemporaryDirectory() as tmp:
-            cache_path = Path(tmp) / "profile.allowed"
+            cache_path = Path(tmp) / _PROFILE_ALLOWED_FILENAME
             ips = resolver.resolve_and_cache([TEST_DOMAIN], cache_path)
             assert TEST_IP1 in ips
             assert cache_path.is_file()
@@ -102,11 +105,11 @@ class TestDnsResolverCacheContract:
         resolver = DnsResolver(runner=runner)
 
         with tempfile.TemporaryDirectory() as tmp:
-            cache_path = Path(tmp) / "profile.allowed"
+            cache_path = Path(tmp) / _PROFILE_ALLOWED_FILENAME
             resolver.resolve_and_cache([TEST_DOMAIN], cache_path)
             runner.dig_all.reset_mock()
 
-            ips2 = resolver.resolve_and_cache(["example.com"], cache_path, max_age=3600)
+            ips2 = resolver.resolve_and_cache([TEST_DOMAIN], cache_path, max_age=3600)
             runner.dig_all.assert_not_called()
             assert ips2 == [TEST_IP1]
 
