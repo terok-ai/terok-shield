@@ -29,21 +29,21 @@ make format    # Auto-fix lint issues if lint fails
 
 **Before pushing:**
 ```bash
-make test       # Run full test suite with coverage
+make test-unit   # Run unit tests with coverage
 make tach       # Check module boundary rules (tach.toml)
 make docstrings # Check docstring coverage (minimum 95%)
 make reuse      # Check REUSE (SPDX license/copyright) compliance
-make check      # Run lint + test + tach + security + docstrings + deadcode + reuse (equivalent to CI)
+make check      # Run lint + test-unit + tach + security + docstrings + deadcode + reuse
 ```
 
 **Integration tests (filtered by marker):**
 ```bash
 poetry install --with test  # ensure terok-shield is installed in Poetry's venv
-make test-host              # -m "needs_host_features" (no containers, runs in CI)
-make test-network           # -m "needs_internet and not needs_podman" (dig + internet)
-make test-podman            # -m "needs_podman" (podman + nft + internet)
+make test-integration-host    # -m "needs_host_features" (no containers, runs in CI)
+make test-integration-network # -m "needs_internet and not needs_podman" (dig + internet)
+make test-integration-podman  # -m "needs_podman" (podman + nft + internet)
 make test-integration       # all integration tests
-make test-map               # generate integration test map (Markdown)
+make test-integration-map   # generate integration test map (Markdown)
 ```
 
 **Other useful commands:**
@@ -105,7 +105,7 @@ The project uses [tach](https://github.com/gauge-sh/tach) to enforce module boun
 1. Make changes in `src/terok_shield/`
 2. Run `make lint` frequently during development
 3. Add/update tests in `tests/`
-4. Run `make test` to verify changes
+4. Run `make test-unit` to verify changes
 5. If you added or changed cross-module imports, run `make tach` to verify module boundary rules
 6. Run `make check` before pushing
 
@@ -129,11 +129,11 @@ Makefile targets filter by marker (not by directory):
 
 ```bash
 poetry install --with test  # install package + test deps into Poetry's venv
-make test-host              # -m "needs_host_features" (fast, runs in CI)
-make test-network           # -m "needs_internet and not needs_podman" (dig + internet)
-make test-podman            # -m "needs_podman" (podman + nft + internet)
+make test-integration-host    # -m "needs_host_features" (fast, runs in CI)
+make test-integration-network # -m "needs_internet and not needs_podman" (dig + internet)
+make test-integration-podman  # -m "needs_podman" (podman + nft + internet)
 make test-integration       # all integration tests
-make test-map               # generate integration test map (Markdown)
+make test-integration-map   # generate integration test map (Markdown)
 ```
 
 - **Markers**: `needs_host_features`, `needs_internet`, `needs_podman` — for test selection

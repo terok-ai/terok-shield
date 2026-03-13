@@ -5,8 +5,9 @@ __pycache__/
 /dist/
 /src/terok_shield.egg-info/
 .coverage
-coverage.xml
+reports/
 /.idea
 .complexipy_cache/
+docs/ci_map.md
 docs/test_map.md
 site/

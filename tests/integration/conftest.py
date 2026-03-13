@@ -12,9 +12,9 @@ are expressed via pytest markers, not directory placement:
 
 Makefile targets filter by marker:
 
-- ``make test-host``:    ``-m needs_host_features``
-- ``make test-network``: ``-m "needs_internet and not needs_podman"``
-- ``make test-podman``:  ``-m needs_podman``
+- ``make test-integration-host``:    ``-m needs_host_features``
+- ``make test-integration-network``: ``-m "needs_internet and not needs_podman"``
+- ``make test-integration-podman``:  ``-m needs_podman``
 """
 
 import os

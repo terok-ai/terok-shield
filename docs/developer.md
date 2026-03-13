@@ -16,15 +16,16 @@ make lint             # ruff check + format check
 make format           # auto-fix lint issues
 
 # Before pushing
-make test             # unit tests with coverage
-make check            # full CI suite (lint + test + tach + security + docstrings + deadcode + reuse)
+make test-unit        # unit tests with coverage
+make check            # core local suite (lint + test-unit + tach + security + docstrings + deadcode + reuse)
 
 # Integration tests (filtered by marker)
-make test-host        # -m "needs_host_features" — host-only, no containers
-make test-network     # -m "needs_internet and not needs_podman" — needs dig + internet
-make test-podman      # -m "needs_podman" — needs podman + nft + internet
+make test-integration-host    # -m "needs_host_features" — host-only, no containers
+make test-integration-network # -m "needs_internet and not needs_podman" — needs dig + internet
+make test-integration-podman  # -m "needs_podman" — needs podman + nft + internet
 make test-integration # all integration tests
-make test-map         # generate integration test map (Markdown)
+make test-integration-map     # generate integration test map (Markdown)
+make ci-map           # generate CI workflow map (Markdown)
 
 # Other
 make tach             # check module boundary rules
@@ -49,11 +50,12 @@ make docs             # serve documentation locally
 ### Unit tests
 
 ```bash
-make test    # runs tests/unit/ with coverage
+make test-unit    # runs tests/unit/ with coverage
 ```
 
 Unit tests mock all subprocess calls. Filesystem access uses real temp
-directories (`tmp_path`). No network, no containers.
+directories (`tmp_path`). No network, no containers. Generated local reports
+go under `reports/`.
 
 ### Integration tests
 
@@ -68,7 +70,8 @@ Environment requirements are expressed via pytest markers:
 
 Directories group tests by what they test: `setup/`, `launch/`, `blocking/`,
 `allow_deny/`, `dns/`, `bypass/`, `observability/`, `safety/`, `cli/`. See
-the [Integration Test Map](test_map.md) for a full listing.
+the [Integration Test Map](test_map.md) for a full listing. See the
+[CI Workflow Map](ci_map.md) for the generated workflow/job inventory.
 
 Skip guards (`podman_missing`, `nft_missing`, `dig_missing`) handle
 graceful degradation when binaries are absent.

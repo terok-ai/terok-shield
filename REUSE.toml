@@ -6,6 +6,7 @@ path = [
   "**/*.yml",
   "**/*.yaml",
   "**/*.toml",
+  "**/*.properties",
   "**/*.json",
   "**/*.lock",
   "**/*.txt",

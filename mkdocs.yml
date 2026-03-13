@@ -52,6 +52,7 @@ plugins:
       scripts:
         - docs/gen_ref_pages.py
         - docs/gen_quality_report.py
+        - docs/gen_ci_map.py
         - docs/gen_test_map.py
   - literate-nav:
       nav_file: SUMMARY.md
@@ -92,6 +93,7 @@ nav:
     - Architecture: design.md
     - Contributing: developer.md
     - Code Quality: quality_report.md
+    - CI Workflow Map: ci_map.md
     - Integration Test Map: test_map.md
   - API Reference: reference/
 

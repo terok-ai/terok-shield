@@ -101,13 +101,14 @@ jobs:
       - name: Run SAST scan
         run: bandit -r src/terok_shield/ -ll
 
-  test:
+  # Keep host-only integration tests in CI, but outside the Sonar-producing workflow.
+  # That keeps the Sonar path fast while still exercising Linux host features on PRs.
+  integration-tests-host:
+    name: Integration tests (host)
     if: github.repository == 'terok-ai/terok-shield'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
 
       - name: Set up Python
         id: setup-python
@@ -134,21 +135,12 @@ jobs:
       - name: Install dependencies
         run: poetry install --with test --no-interaction
 
-      - name: Run unit tests
-        run: poetry run pytest tests/unit/ --cov=terok_shield --cov-report=xml --cov-report=term-missing --junitxml=junit.xml -o junit_family=legacy
-
       - name: Run host-only integration tests
-        run: poetry run pytest tests/integration/ -m "needs_host_features" -v
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5
-        with:
-          files: ./coverage.xml
-          fail_ci_if_error: false
-          token: ${{ secrets.CODECOV_TOKEN }}
+        run: make test-integration-host
 
       - name: Upload test results to Codecov
         if: ${{ !cancelled() }}
         uses: codecov/test-results-action@0fa95f0e1eeaafde2c782583b36b28ad0d8c77d3 # v1
         with:
+          files: ./reports/integration-host.junit.xml
           token: ${{ secrets.CODECOV_TOKEN }}
