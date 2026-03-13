@@ -3,9 +3,7 @@
 
 """Tests for the command registry module."""
 
-import io
 import json
-import sys
 from unittest import mock
 
 import pytest
@@ -76,49 +74,31 @@ class TestHandlers:
             _handle_deny(shield, "ctr", target="bad")
         assert "No IPs denied" in str(ctx.value)
 
-    def test_handle_logs_prints_json(self) -> None:
+    def test_handle_logs_prints_json(self, capsys: pytest.CaptureFixture[str]) -> None:
         """_handle_logs prints JSONL entries from shield.tail_log."""
         shield = mock.MagicMock()
         shield.tail_log.return_value = [{"action": "setup", "ts": "2026-01-01"}]
-        captured = io.StringIO()
-        old_stdout = sys.stdout
-        sys.stdout = captured
-        try:
-            _handle_logs(shield, "ctr", n=10)
-        finally:
-            sys.stdout = old_stdout
+        _handle_logs(shield, "ctr", n=10)
         shield.tail_log.assert_called_once_with(10)
-        entry = json.loads(captured.getvalue().strip())
+        entry = json.loads(capsys.readouterr().out.strip())
         assert entry["action"] == "setup"
 
-    def test_handle_profiles_prints_names(self) -> None:
+    def test_handle_profiles_prints_names(self, capsys: pytest.CaptureFixture[str]) -> None:
         """_handle_profiles prints each profile name."""
         shield = mock.MagicMock()
         shield.profiles_list.return_value = ["dev-standard", "dev-python"]
-        captured = io.StringIO()
-        old_stdout = sys.stdout
-        sys.stdout = captured
-        try:
-            _handle_profiles(shield)
-        finally:
-            sys.stdout = old_stdout
-        lines = captured.getvalue().strip().splitlines()
+        _handle_profiles(shield)
+        lines = capsys.readouterr().out.strip().splitlines()
         assert lines == ["dev-standard", "dev-python"]
 
-    def test_handle_state_prints_value(self) -> None:
+    def test_handle_state_prints_value(self, capsys: pytest.CaptureFixture[str]) -> None:
         """_handle_state prints the ShieldState value."""
         from terok_shield import ShieldState
 
         shield = mock.MagicMock()
         shield.state.return_value = ShieldState.UP
-        captured = io.StringIO()
-        old_stdout = sys.stdout
-        sys.stdout = captured
-        try:
-            _handle_state(shield, "ctr")
-        finally:
-            sys.stdout = old_stdout
-        assert captured.getvalue().strip() == "up"
+        _handle_state(shield, "ctr")
+        assert capsys.readouterr().out.strip() == "up"
 
     def test_handle_preview_all_without_down_raises(self) -> None:
         """_handle_preview raises ValueError when allow_all without down."""

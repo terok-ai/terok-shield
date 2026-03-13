@@ -8,6 +8,8 @@ import tempfile
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 from terok_shield.dns import DnsResolver
 
 from ..testfs import NONEXISTENT_DIR
@@ -85,7 +87,10 @@ class TestDnsResolverResolveDomains:
         result = resolver.resolve_domains([TEST_DOMAIN, TEST_DOMAIN2])
         assert result == [TEST_IP1, TEST_IP2]
 
-    def test_logs_warning_for_unresolvable(self, caplog) -> None:
+    def test_logs_warning_for_unresolvable(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
         """Log warning when a domain resolves to no IPs."""
         runner = mock.MagicMock()
         runner.dig_all.side_effect = [[TEST_IP1], []]

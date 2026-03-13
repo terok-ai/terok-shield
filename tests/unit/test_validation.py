@@ -3,6 +3,8 @@
 
 """Tests for validation.py shared validators."""
 
+import re
+
 import pytest
 
 from terok_shield.validation import (
@@ -119,7 +121,7 @@ def test_parse_entries(text: str, expected: list[str]) -> None:
         pytest.param(SAFE_NAME, "test\nname", False, id="safe-name-rejects-newline"),
     ],
 )
-def test_regex_patterns(pattern, value: str, matches: bool) -> None:
+def test_regex_patterns(pattern: re.Pattern[str], value: str, matches: bool) -> None:
     """Direct regex checks stay aligned with the validator behavior."""
     result = pattern.fullmatch(value)
     assert (result is not None) is matches
