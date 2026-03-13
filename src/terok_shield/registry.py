@@ -29,11 +29,11 @@ class ArgDef:
 
     name: str
     help: str = ""
-    type: type | None = None
+    type: Callable[[str], Any] | None = None
     default: Any = None
     action: str | None = None
     dest: str | None = None
-    nargs: str | None = None
+    nargs: int | str | None = None
 
 
 @dataclass(frozen=True)

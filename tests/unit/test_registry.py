@@ -80,11 +80,12 @@ class TestHandlers(unittest.TestCase):
         shield = mock.MagicMock()
         shield.tail_log.return_value = [{"action": "setup", "ts": "2026-01-01"}]
         captured = io.StringIO()
+        old_stdout = sys.stdout
         sys.stdout = captured
         try:
             _handle_logs(shield, "ctr", n=10)
         finally:
-            sys.stdout = sys.__stdout__
+            sys.stdout = old_stdout
         shield.tail_log.assert_called_once_with(10)
         entry = json.loads(captured.getvalue().strip())
         self.assertEqual(entry["action"], "setup")
@@ -94,11 +95,12 @@ class TestHandlers(unittest.TestCase):
         shield = mock.MagicMock()
         shield.profiles_list.return_value = ["dev-standard", "dev-python"]
         captured = io.StringIO()
+        old_stdout = sys.stdout
         sys.stdout = captured
         try:
             _handle_profiles(shield)
         finally:
-            sys.stdout = sys.__stdout__
+            sys.stdout = old_stdout
         lines = captured.getvalue().strip().splitlines()
         self.assertEqual(lines, ["dev-standard", "dev-python"])
 
@@ -109,11 +111,12 @@ class TestHandlers(unittest.TestCase):
         shield = mock.MagicMock()
         shield.state.return_value = ShieldState.UP
         captured = io.StringIO()
+        old_stdout = sys.stdout
         sys.stdout = captured
         try:
             _handle_state(shield, "ctr")
         finally:
-            sys.stdout = sys.__stdout__
+            sys.stdout = old_stdout
         self.assertEqual(captured.getvalue().strip(), "up")
 
     def test_handle_preview_all_without_down_raises(self) -> None:
