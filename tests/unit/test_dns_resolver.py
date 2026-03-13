@@ -5,6 +5,7 @@
 
 import os
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from unittest import mock
 
@@ -25,13 +26,24 @@ from ..testnet import (
 )
 
 
+@dataclass
+class ResolverHarness:
+    """A ``DnsResolver`` plus its injected runner mock."""
+
+    resolver: DnsResolver
+    runner: mock.MagicMock
+
+
+ResolverHarnessFactory = Callable[..., ResolverHarness]
+
+
 @pytest.fixture
-def make_resolver() -> Callable[..., tuple[DnsResolver, mock.MagicMock]]:
+def make_resolver() -> ResolverHarnessFactory:
     """Build a resolver plus its injected runner mock."""
 
-    def _make_resolver(**runner_kwargs: object) -> tuple[DnsResolver, mock.MagicMock]:
+    def _make_resolver(**runner_kwargs: object) -> ResolverHarness:
         runner = mock.MagicMock(**runner_kwargs)
-        return DnsResolver(runner=runner), runner
+        return ResolverHarness(resolver=DnsResolver(runner=runner), runner=runner)
 
     return _make_resolver
 
@@ -86,95 +98,93 @@ def test_write_cache_empty_list(tmp_path: Path) -> None:
     ],
 )
 def test_resolve_domains(
-    make_resolver: Callable[..., tuple[DnsResolver, mock.MagicMock]],
+    make_resolver: ResolverHarnessFactory,
     side_effect: list[list[str]],
     domains: list[str],
     expected: list[str],
 ) -> None:
     """resolve_domains() merges results while preserving first-seen order."""
-    resolver, runner = make_resolver()
-    runner.dig_all.side_effect = side_effect
-    assert resolver.resolve_domains(domains) == expected
+    harness = make_resolver()
+    harness.runner.dig_all.side_effect = side_effect
+    assert harness.resolver.resolve_domains(domains) == expected
 
 
 def test_logs_warning_for_unresolvable(
-    make_resolver: Callable[..., tuple[DnsResolver, mock.MagicMock]],
+    make_resolver: ResolverHarnessFactory,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """resolve_domains() logs a warning when a domain resolves to no IPs."""
-    resolver, runner = make_resolver()
-    runner.dig_all.side_effect = [[TEST_IP1], []]
+    harness = make_resolver()
+    harness.runner.dig_all.side_effect = [[TEST_IP1], []]
 
     with caplog.at_level("WARNING", logger="terok_shield.dns"):
-        resolver.resolve_domains([CLOUDFLARE_DOMAIN, NONEXISTENT_DOMAIN])
+        harness.resolver.resolve_domains([CLOUDFLARE_DOMAIN, NONEXISTENT_DOMAIN])
 
     assert len(caplog.messages) == 1
     assert NONEXISTENT_DOMAIN in caplog.messages[0]
 
 
-def test_resolve_domains_empty_input(
-    make_resolver: Callable[..., tuple[DnsResolver, mock.MagicMock]],
-) -> None:
+def test_resolve_domains_empty_input(make_resolver: ResolverHarnessFactory) -> None:
     """resolve_domains() returns an empty list and skips DNS for empty input."""
-    resolver, runner = make_resolver()
-    assert resolver.resolve_domains([]) == []
-    runner.dig_all.assert_not_called()
+    harness = make_resolver()
+    assert harness.resolver.resolve_domains([]) == []
+    harness.runner.dig_all.assert_not_called()
 
 
 def test_resolve_and_cache_writes_cache(
     tmp_path: Path,
-    make_resolver: Callable[..., tuple[DnsResolver, mock.MagicMock]],
+    make_resolver: ResolverHarnessFactory,
 ) -> None:
     """resolve_and_cache() resolves entries and writes the cache file."""
-    resolver, runner = make_resolver()
-    runner.dig_all.return_value = [TEST_IP1]
+    harness = make_resolver()
+    harness.runner.dig_all.return_value = [TEST_IP1]
 
     cache_path = tmp_path / "profile.allowed"
-    assert resolver.resolve_and_cache([TEST_DOMAIN], cache_path) == [TEST_IP1]
+    assert harness.resolver.resolve_and_cache([TEST_DOMAIN], cache_path) == [TEST_IP1]
     assert cache_path.is_file()
 
 
 def test_resolve_and_cache_returns_fresh_cache(
     tmp_path: Path,
-    make_resolver: Callable[..., tuple[DnsResolver, mock.MagicMock]],
+    make_resolver: ResolverHarnessFactory,
 ) -> None:
     """resolve_and_cache() returns fresh cached IPs without re-resolving DNS."""
-    resolver, runner = make_resolver()
+    harness = make_resolver()
     cache_path = tmp_path / "profile.allowed"
     cache_path.write_text(f"{TEST_IP1}\n{TEST_IP2}\n")
 
-    assert resolver.resolve_and_cache([TEST_DOMAIN], cache_path, max_age=3600) == [
+    assert harness.resolver.resolve_and_cache([TEST_DOMAIN], cache_path, max_age=3600) == [
         TEST_IP1,
         TEST_IP2,
     ]
-    runner.dig_all.assert_not_called()
+    harness.runner.dig_all.assert_not_called()
 
 
 def test_resolve_and_cache_re_resolves_stale_cache(
     tmp_path: Path,
-    make_resolver: Callable[..., tuple[DnsResolver, mock.MagicMock]],
+    make_resolver: ResolverHarnessFactory,
 ) -> None:
     """resolve_and_cache() refreshes stale cache files."""
-    resolver, runner = make_resolver()
-    runner.dig_all.return_value = [TEST_IP2]
+    harness = make_resolver()
+    harness.runner.dig_all.return_value = [TEST_IP2]
 
     cache_path = tmp_path / "profile.allowed"
     cache_path.write_text(f"{TEST_IP1}\n")
     os.utime(cache_path, (0, 0))
 
-    assert resolver.resolve_and_cache([TEST_DOMAIN], cache_path, max_age=3600) == [TEST_IP2]
-    runner.dig_all.assert_called_once()
+    assert harness.resolver.resolve_and_cache([TEST_DOMAIN], cache_path, max_age=3600) == [TEST_IP2]
+    harness.runner.dig_all.assert_called_once()
 
 
 def test_resolve_and_cache_mixed_entries(
     tmp_path: Path,
-    make_resolver: Callable[..., tuple[DnsResolver, mock.MagicMock]],
+    make_resolver: ResolverHarnessFactory,
 ) -> None:
     """resolve_and_cache() preserves raw IPs while resolving domain entries."""
-    resolver, runner = make_resolver()
-    runner.dig_all.return_value = [TEST_IP2]
+    harness = make_resolver()
+    harness.runner.dig_all.return_value = [TEST_IP2]
 
     cache_path = tmp_path / "profile.allowed"
-    result = resolver.resolve_and_cache([TEST_IP1, TEST_DOMAIN], cache_path)
+    result = harness.resolver.resolve_and_cache([TEST_IP1, TEST_DOMAIN], cache_path)
     assert TEST_IP1 in result
     assert TEST_IP2 in result

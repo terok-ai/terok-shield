@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
+import sys
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -99,6 +101,25 @@ def cli_run() -> Iterator[CliRunHarness]:
 def _write_audit_entries(state_root: Path, container: str, entries: list[dict[str, str]]) -> Path:
     """Write JSONL audit entries for a specific container."""
     return write_jsonl(state_root / "containers" / container / _AUDIT_FILENAME, entries)
+
+
+def _set_env(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    cleared_keys: tuple[str, ...],
+    env: dict[str, str],
+) -> None:
+    """Clear selected environment keys, then apply test overrides."""
+    for key in cleared_keys:
+        monkeypatch.delenv(key, raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+
+
+@pytest.fixture
+def force_hook_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force CLI config building to use hook mode without autodetection."""
+    monkeypatch.setattr("terok_shield.cli._auto_detect_mode", lambda: ShieldMode.HOOK)
 
 
 @pytest.mark.parametrize(
@@ -392,7 +413,7 @@ def test_main_uses_sys_argv_when_argv_is_none(cli_dispatch: CliDispatchHarness) 
         "audit_enabled": True,
         "profiles": ["dev-standard"],
     }
-    with mock.patch("sys.argv", ["terok-shield", "status"]):
+    with mock.patch.object(sys, "argv", ["terok-shield", "status"]):
         main(None)
     cli_dispatch.shield.status.assert_called_once_with()
 
@@ -704,10 +725,11 @@ def test_resolve_state_root(
     monkeypatch: pytest.MonkeyPatch, env: dict[str, str], expected: Path | None
 ) -> None:
     """_resolve_state_root() honors explicit env vars before XDG defaults."""
-    monkeypatch.delenv("TEROK_SHIELD_STATE_DIR", raising=False)
-    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
-    for key, value in env.items():
-        monkeypatch.setenv(key, value)
+    _set_env(
+        monkeypatch,
+        cleared_keys=("TEROK_SHIELD_STATE_DIR", "XDG_STATE_HOME"),
+        env=env,
+    )
     root = _resolve_state_root()
     if expected is None:
         assert str(root).endswith("terok-shield")
@@ -733,10 +755,11 @@ def test_resolve_config_root(
     monkeypatch: pytest.MonkeyPatch, env: dict[str, str], expected: Path | None
 ) -> None:
     """_resolve_config_root() honors explicit env vars before XDG defaults."""
-    monkeypatch.delenv("TEROK_SHIELD_CONFIG_DIR", raising=False)
-    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
-    for key, value in env.items():
-        monkeypatch.setenv(key, value)
+    _set_env(
+        monkeypatch,
+        cleared_keys=("TEROK_SHIELD_CONFIG_DIR", "XDG_CONFIG_HOME"),
+        env=env,
+    )
     root = _resolve_config_root()
     if expected is None:
         assert str(root).endswith("terok-shield")
@@ -762,16 +785,16 @@ def test_parse_loopback_ports(raw: object, expected: tuple[int, ...]) -> None:
     assert _parse_loopback_ports(raw) == expected
 
 
-@mock.patch("shutil.which", return_value=None)
-def test_auto_detect_mode_raises_without_nft(_which: mock.Mock) -> None:
+def test_auto_detect_mode_raises_without_nft(monkeypatch: pytest.MonkeyPatch) -> None:
     """_auto_detect_mode() fails when nft is unavailable."""
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
     with pytest.raises(RuntimeError):
         _auto_detect_mode()
 
 
-@mock.patch("shutil.which", side_effect=lambda name: NFT_BINARY if name == "nft" else None)
-def test_auto_detect_mode_returns_hook(_which: mock.Mock) -> None:
+def test_auto_detect_mode_returns_hook(monkeypatch: pytest.MonkeyPatch) -> None:
     """_auto_detect_mode() selects hook mode when nft is installed."""
+    monkeypatch.setattr(shutil, "which", lambda name: NFT_BINARY if name == "nft" else None)
     assert _auto_detect_mode() == ShieldMode.HOOK
 
 
@@ -793,9 +816,8 @@ def test_load_config_file_returns_empty_for_invalid_inputs(
     assert _load_config_file() == {}
 
 
-@mock.patch("terok_shield.cli._auto_detect_mode", return_value=ShieldMode.HOOK)
 def test_build_config_uses_defaults_when_config_file_is_missing(
-    _mock_mode: mock.Mock,
+    force_hook_mode: None,
 ) -> None:
     """_build_config() falls back to defaults when config.yml is absent."""
     config = _build_config("test-ctr", state_dir_override=NONEXISTENT_DIR)
@@ -823,9 +845,8 @@ def test_build_config_loads_yaml(
     assert not config.audit_enabled
 
 
-@mock.patch("terok_shield.cli._auto_detect_mode", return_value=ShieldMode.HOOK)
 def test_build_config_state_dir_override_and_default_container(
-    _mock_mode: mock.Mock,
+    force_hook_mode: None,
     state_root: Path,
 ) -> None:
     """_build_config() respects explicit state roots and default container names."""
@@ -850,7 +871,6 @@ def test_build_config_rejects_unknown_mode(
         _build_config("ctr", state_dir_override=state_root)
 
 
-@mock.patch("terok_shield.cli._auto_detect_mode", return_value=ShieldMode.HOOK)
 @pytest.mark.parametrize(
     ("config_text", "expected_profiles", "expected_audit_enabled"),
     [
@@ -867,7 +887,7 @@ def test_build_config_rejects_unknown_mode(
     ],
 )
 def test_build_config_falls_back_for_invalid_sections(
-    _mock_mode: mock.Mock,
+    force_hook_mode: None,
     isolated_roots: tuple[Path, Path],
     write_config: Callable[[str], Path],
     config_text: str,
@@ -882,9 +902,8 @@ def test_build_config_falls_back_for_invalid_sections(
     assert config.audit_enabled is expected_audit_enabled
 
 
-@mock.patch("terok_shield.cli._auto_detect_mode", return_value=ShieldMode.HOOK)
 def test_build_config_rejects_container_path_traversal(
-    _mock_mode: mock.Mock,
+    force_hook_mode: None,
     state_root: Path,
 ) -> None:
     """_build_config() validates container names before constructing state paths."""
@@ -892,9 +911,8 @@ def test_build_config_rejects_container_path_traversal(
         _build_config(FORBIDDEN_TRAVERSAL, state_dir_override=state_root)
 
 
-@mock.patch("terok_shield.cli._auto_detect_mode", return_value=ShieldMode.HOOK)
 def test_build_config_uses_resolved_state_root_when_not_overridden(
-    _mock_mode: mock.Mock,
+    force_hook_mode: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Without --state-dir, _build_config() resolves the state root from the environment."""

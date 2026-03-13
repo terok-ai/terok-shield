@@ -4,6 +4,7 @@
 """Tests for the command registry module."""
 
 import json
+from collections.abc import Callable
 from unittest import mock
 
 import pytest
@@ -58,21 +59,25 @@ class TestArgDef:
 class TestHandlers:
     """Test registry handler functions directly."""
 
-    def test_handle_allow_raises_on_failure(self) -> None:
-        """_handle_allow raises RuntimeError when no IPs allowed."""
+    @pytest.mark.parametrize(
+        ("handler", "method_name", "message"),
+        [
+            pytest.param(_handle_allow, "allow", "No IPs allowed", id="allow"),
+            pytest.param(_handle_deny, "deny", "No IPs denied", id="deny"),
+        ],
+    )
+    def test_handle_allow_and_deny_raise_on_failure(
+        self,
+        handler: Callable[..., None],
+        method_name: str,
+        message: str,
+    ) -> None:
+        """_handle_allow/_handle_deny raise RuntimeError when no IPs change."""
         shield = mock.MagicMock()
-        shield.allow.return_value = []
+        getattr(shield, method_name).return_value = []
         with pytest.raises(RuntimeError) as ctx:
-            _handle_allow(shield, "ctr", target="bad")
-        assert "No IPs allowed" in str(ctx.value)
-
-    def test_handle_deny_raises_on_failure(self) -> None:
-        """_handle_deny raises RuntimeError when no IPs denied."""
-        shield = mock.MagicMock()
-        shield.deny.return_value = []
-        with pytest.raises(RuntimeError) as ctx:
-            _handle_deny(shield, "ctr", target="bad")
-        assert "No IPs denied" in str(ctx.value)
+            handler(shield, "ctr", target="bad")
+        assert message in str(ctx.value)
 
     def test_handle_logs_prints_json(self, capsys: pytest.CaptureFixture[str]) -> None:
         """_handle_logs prints JSONL entries from shield.tail_log."""

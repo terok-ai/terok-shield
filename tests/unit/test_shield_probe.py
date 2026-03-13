@@ -24,6 +24,13 @@ from ..testnet import TEST_IP1
 ProbeResultFactory = Callable[..., dict[str, object]]
 
 
+def _run_probe(mock_sock: MagicMock, mock_poller: MagicMock) -> dict[str, object]:
+    """Run probe() with patched socket and poll collaborators."""
+    with patch("terok_shield.resources.shield_probe.socket.socket", return_value=mock_sock):
+        with patch("terok_shield.resources.shield_probe.select.poll", return_value=mock_poller):
+            return probe(TEST_IP1, 443, timeout=1.0)
+
+
 @pytest.fixture
 def make_probe_result() -> Iterator[ProbeResultFactory]:
     """Return a helper that runs probe() with mocked socket/poll collaborators."""
@@ -42,9 +49,7 @@ def make_probe_result() -> Iterator[ProbeResultFactory]:
         if send_side_effect is not None:
             mock_sock.send.side_effect = send_side_effect
 
-        with patch("terok_shield.resources.shield_probe.socket.socket", return_value=mock_sock):
-            with patch("terok_shield.resources.shield_probe.select.poll", return_value=mock_poller):
-                return probe(TEST_IP1, 443, timeout=1.0)
+        return _run_probe(mock_sock, mock_poller)
 
     yield _make_probe_result
 
@@ -139,9 +144,7 @@ def test_probe_returns_timeout_when_recvmsg_fails() -> None:
     mock_poller = MagicMock()
     mock_poller.poll.return_value = [(0, 8)]
 
-    with patch("terok_shield.resources.shield_probe.socket.socket", return_value=mock_sock):
-        with patch("terok_shield.resources.shield_probe.select.poll", return_value=mock_poller):
-            assert probe(TEST_IP1, 443, timeout=1.0)["result"] == "timeout"
+    assert _run_probe(mock_sock, mock_poller)["result"] == "timeout"
 
 
 def test_probe_skips_truncated_ancdata(make_probe_result: ProbeResultFactory) -> None:

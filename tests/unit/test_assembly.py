@@ -10,6 +10,7 @@ no mocks (unless strictly needed for the runner layer).
 """
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from unittest import mock
 
@@ -27,25 +28,42 @@ from ..testnet import TEST_DOMAIN, TEST_IP1, TEST_IP2
 from .helpers import write_lines
 
 
+@dataclass
+class HookModeHarness:
+    """A real ``HookMode`` with exposed mock runner/ruleset collaborators."""
+
+    mode: HookMode
+    state_dir: Path
+    runner: mock.MagicMock
+    ruleset: mock.MagicMock
+
+
 @pytest.fixture
-def make_hook_mode(tmp_path: Path) -> Callable[..., HookMode]:
-    """Create a HookMode wired with real config and mock collaborators."""
+def make_hook_mode(tmp_path: Path) -> Callable[..., HookModeHarness]:
+    """Create a HookMode harness with real config and selected mock collaborators."""
 
     def _make_hook_mode(
         *,
         state_dir: Path | None = None,
         runner: mock.MagicMock | None = None,
         ruleset: mock.MagicMock | None = None,
-    ) -> HookMode:
-        state_dir = state_dir or tmp_path
-        state.ensure_state_dirs(state_dir)
-        return HookMode(
-            config=ShieldConfig(state_dir=state_dir),
-            runner=runner or mock.MagicMock(),
-            audit=mock.MagicMock(),
-            dns=mock.MagicMock(),
-            profiles=mock.MagicMock(),
-            ruleset=ruleset or mock.MagicMock(),
+    ) -> HookModeHarness:
+        effective_state_dir = state_dir or tmp_path
+        state.ensure_state_dirs(effective_state_dir)
+        runner = runner or mock.MagicMock()
+        ruleset = ruleset or mock.MagicMock()
+        return HookModeHarness(
+            mode=HookMode(
+                config=ShieldConfig(state_dir=effective_state_dir),
+                runner=runner,
+                audit=mock.MagicMock(),
+                dns=mock.MagicMock(),
+                profiles=mock.MagicMock(),
+                ruleset=ruleset,
+            ),
+            state_dir=effective_state_dir,
+            runner=runner,
+            ruleset=ruleset,
         )
 
     return _make_hook_mode
@@ -116,31 +134,27 @@ def test_resolve_and_cache_reuses_fresh_cache(tmp_path: Path) -> None:
 
 
 def test_allow_ip_writes_to_live_allowed(
-    make_hook_mode: Callable[..., HookMode], tmp_path: Path
+    make_hook_mode: Callable[..., HookModeHarness], tmp_path: Path
 ) -> None:
     """allow_ip() persists live allowlist updates to live.allowed."""
-    runner = mock.MagicMock()
-    runner.nft_via_nsenter.return_value = ""
-    ruleset = mock.MagicMock()
-    ruleset.safe_ip.return_value = TEST_IP1
+    harness = make_hook_mode(state_dir=tmp_path)
+    harness.runner.nft_via_nsenter.return_value = ""
+    harness.ruleset.safe_ip.return_value = TEST_IP1
 
-    make_hook_mode(state_dir=tmp_path, runner=runner, ruleset=ruleset).allow_ip(
-        "test-ctr", TEST_IP1
-    )
+    harness.mode.allow_ip("test-ctr", TEST_IP1)
     assert TEST_IP1 in state.live_allowed_path(tmp_path).read_text()
 
 
 def test_deny_ip_removes_from_live_allowed(
-    make_hook_mode: Callable[..., HookMode], tmp_path: Path
+    make_hook_mode: Callable[..., HookModeHarness], tmp_path: Path
 ) -> None:
     """deny_ip() removes the IP from live.allowed."""
     live_path = write_lines(state.live_allowed_path(tmp_path), [TEST_IP1, TEST_IP2])
-    runner = mock.MagicMock()
-    runner.nft_via_nsenter.return_value = ""
-    ruleset = mock.MagicMock()
-    ruleset.safe_ip.return_value = TEST_IP1
+    harness = make_hook_mode(state_dir=tmp_path)
+    harness.runner.nft_via_nsenter.return_value = ""
+    harness.ruleset.safe_ip.return_value = TEST_IP1
 
-    make_hook_mode(state_dir=tmp_path, runner=runner, ruleset=ruleset).deny_ip("test-ctr", TEST_IP1)
+    harness.mode.deny_ip("test-ctr", TEST_IP1)
     content = live_path.read_text()
     assert TEST_IP1 not in content
     assert TEST_IP2 in content
@@ -167,19 +181,18 @@ def test_read_allowed_ips_merges_state_files(
 
 
 def test_shield_up_reads_live_allowed(
-    make_hook_mode: Callable[..., HookMode], tmp_path: Path
+    make_hook_mode: Callable[..., HookModeHarness], tmp_path: Path
 ) -> None:
     """shield_up() re-adds persisted live.allowed IPs."""
     write_lines(state.live_allowed_path(tmp_path), [TEST_IP1, TEST_IP2])
-    runner = mock.MagicMock()
-    runner.nft_via_nsenter.return_value = ""
-    ruleset = mock.MagicMock()
-    ruleset.build_hook.return_value = "table inet terok_shield {}"
-    ruleset.add_elements_dual.return_value = "add element ..."
-    ruleset.verify_hook.return_value = []
+    harness = make_hook_mode(state_dir=tmp_path)
+    harness.runner.nft_via_nsenter.return_value = ""
+    harness.ruleset.build_hook.return_value = "table inet terok_shield {}"
+    harness.ruleset.add_elements_dual.return_value = "add element ..."
+    harness.ruleset.verify_hook.return_value = []
 
-    make_hook_mode(state_dir=tmp_path, runner=runner, ruleset=ruleset).shield_up("test-ctr")
-    ruleset.add_elements_dual.assert_called_once_with([TEST_IP1, TEST_IP2])
+    harness.mode.shield_up("test-ctr")
+    harness.ruleset.add_elements_dual.assert_called_once_with([TEST_IP1, TEST_IP2])
 
 
 def test_shield_constructs_real_collaborators(tmp_path: Path) -> None:
