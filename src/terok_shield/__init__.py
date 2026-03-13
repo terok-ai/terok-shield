@@ -30,7 +30,7 @@ from .config import ShieldConfig, ShieldMode, ShieldState
 from .dns import DnsResolver
 from .nft import RulesetBuilder
 from .profiles import ProfileLoader
-from .run import CommandRunner, ExecError, SubprocessRunner
+from .run import CommandRunner, ExecError, NftNotFoundError, SubprocessRunner
 from .util import is_ip as _is_ip
 
 # ── Shield Facade ────────────────────────────────────────
@@ -201,6 +201,7 @@ __all__ = [
     "CommandRunner",
     "DnsResolver",
     "ExecError",
+    "NftNotFoundError",
     "ProfileLoader",
     "RulesetBuilder",
     "Shield",

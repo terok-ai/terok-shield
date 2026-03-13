@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 import terok_shield
-from terok_shield import ExecError, ShieldConfig, ShieldMode, ShieldState
+from terok_shield import ExecError, NftNotFoundError, ShieldConfig, ShieldMode, ShieldState
 
 EXPECTED_ALL = [
     "ArgDef",
@@ -23,6 +23,7 @@ EXPECTED_ALL = [
     "CommandRunner",
     "DnsResolver",
     "ExecError",
+    "NftNotFoundError",
     "ProfileLoader",
     "RulesetBuilder",
     "Shield",
@@ -86,6 +87,13 @@ class TestAPISurface:
         cfg = make_config()
         with pytest.raises(dataclasses.FrozenInstanceError):
             cfg.mode = ShieldMode.HOOK  # type: ignore[misc]
+
+    # ── NftNotFoundError ──────────────────────────────────
+
+    def test_nft_not_found_error_is_runtime_error(self):
+        """NftNotFoundError is a RuntimeError subclass for backwards compat."""
+        err = NftNotFoundError("nft missing")
+        assert isinstance(err, RuntimeError)
 
     # ── ExecError ────────────────────────────────────────
 

@@ -33,6 +33,10 @@ def find_nft() -> str:
     return ""
 
 
+class NftNotFoundError(RuntimeError):
+    """Raised when the ``nft`` binary is not found on the host."""
+
+
 class ExecError(Exception):
     """Raised when a subprocess fails."""
 
@@ -101,14 +105,14 @@ class SubprocessRunner:
     """Default ``CommandRunner`` implementation using ``subprocess.run``.
 
     Resolves the nft binary path at construction time and raises
-    ``RuntimeError`` immediately if nft is not installed.
+    ``NftNotFoundError`` immediately if nft is not installed.
     """
 
     def __init__(self) -> None:
-        """Resolve the nft binary path, raising RuntimeError if missing."""
+        """Resolve the nft binary path, raising NftNotFoundError if missing."""
         self._nft = find_nft()
         if not self._nft:
-            raise RuntimeError(
+            raise NftNotFoundError(
                 "nft binary not found. Install nftables:\n"
                 "  Debian/Ubuntu: sudo apt install nftables\n"
                 "  Fedora/RHEL:   sudo dnf install nftables\n"
