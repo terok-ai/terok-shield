@@ -97,12 +97,18 @@ depends_on = [
     "terok_shield.util",
 ]
 
-# CLI — depends on package root (public API) + audit for logs scanning + validation
+# Command registry — depends on package root for type hints only
+[[modules]]
+path = "terok_shield.registry"
+depends_on = []
+
+# CLI — depends on package root (public API) + audit for logs scanning + validation + registry
 [[modules]]
 path = "terok_shield.cli"
 depends_on = [
     "terok_shield",
     "terok_shield.audit",
+    "terok_shield.registry",
     "terok_shield.validation",
 ]
 
@@ -116,6 +122,7 @@ depends_on = [
     "terok_shield.mode_hook",
     "terok_shield.nft",
     "terok_shield.profiles",
+    "terok_shield.registry",
     "terok_shield.run",
     "terok_shield.state",
     "terok_shield.util",
