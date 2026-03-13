@@ -15,7 +15,7 @@
 
 ## Repo layout
 
-- `src/terok_shield/`: Python package (CLI in `cli.py`, engine modules at top level)
+- `src/terok_shield/`: Python package (CLI in `cli.py`, command registry in `registry.py`, engine modules at top level)
 - `tests/`: `pytest` test suite
 - `src/terok_shield/resources/dns/`: Bundled DNS domain allowlists
 
@@ -185,7 +185,8 @@ Path functions in `state.py` derive all paths from `state_dir`. `BUNDLE_VERSION`
 ### Configuration layer separation
 
 - **Library** (`config.py`): Pure data definitions — `ShieldConfig`, `ShieldMode`, `ShieldState`, `ShieldModeBackend` protocol, annotation constants
-- **CLI** (`cli.py`): Config construction — reads `config.yml`, env vars, XDG paths; builds `ShieldConfig` for each command
+- **Registry** (`registry.py`): Command definitions (`CommandDef`, `ArgDef`, `COMMANDS`) and reusable handler functions — single source of truth for all CLI subcommands
+- **CLI** (`cli.py`): Config construction — reads `config.yml`, env vars, XDG paths; builds `ShieldConfig` for each command; builds argparse from the registry
 
 ## Key Guidelines
 

@@ -207,6 +207,7 @@ directly — never the CLI.
 | `run.py` | Subprocess wrappers (`nft`, `nsenter`, `dig`, `podman`) |
 | `validation.py` | Input validation (container names, path safety) |
 | `util.py` | Small shared utilities |
+| `registry.py` | Command registry — subcommand definitions, metadata, and reusable handlers |
 | `cli.py` | Standalone CLI entry point + config construction from env/YAML |
 
 Module boundaries are enforced by [tach](https://github.com/gauge-sh/tach)

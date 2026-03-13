@@ -206,6 +206,41 @@ terok-shield rules <container>
 Shows the container's shield state and the full nftables ruleset in its
 network namespace.
 
+## state
+
+Query a container's shield state directly.
+
+```bash
+terok-shield state <container>
+```
+
+Prints the current state as a single value: `up`, `down`, `down_all`,
+`inactive`, or `error`. Useful for scripting and integration.
+
+```bash
+terok-shield state my-container
+# up
+```
+
+## profiles
+
+List available shield profiles.
+
+```bash
+terok-shield profiles
+```
+
+```text
+base
+dev-node
+dev-python
+dev-standard
+nvidia-hpc
+```
+
+Lists both bundled profiles and any user-defined profiles from the
+config profiles directory.
+
 ## logs
 
 Show audit log entries.
