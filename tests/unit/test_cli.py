@@ -132,7 +132,6 @@ def force_hook_mode(monkeypatch: pytest.MonkeyPatch) -> None:
         pytest.param(["up", _CONTAINER], "up", id="up"),
         pytest.param(["preview"], "preview", id="preview"),
         pytest.param(["profiles"], "profiles", id="profiles"),
-        pytest.param(["state", _CONTAINER], "state", id="state"),
     ],
 )
 def test_parser_recognizes_subcommands(
@@ -486,7 +485,6 @@ def test_allow_and_deny_dispatch_to_shield(
             id="preview-down-all",
         ),
         pytest.param(["profiles"], "profiles_list", mock.call(), id="profiles"),
-        pytest.param(["state", _CONTAINER], "state", mock.call(_CONTAINER), id="state"),
     ],
 )
 def test_misc_dispatch_paths(
@@ -498,8 +496,6 @@ def test_misc_dispatch_paths(
     """Simple CLI subcommands dispatch to the expected Shield methods."""
     if method_name == "preview":
         cli_dispatch.shield.preview.return_value = "table inet terok_shield {}"
-    elif method_name == "state":
-        cli_dispatch.shield.state.return_value = ShieldState.UP
     elif method_name == "profiles_list":
         cli_dispatch.shield.profiles_list.return_value = ["dev-standard", "dev-python"]
 
@@ -662,13 +658,20 @@ def test_profiles_output_lists_one_profile_per_line(
     assert capsys.readouterr().out.strip().splitlines() == ["dev-standard", "dev-python"]
 
 
-def test_state_output_prints_state_value(
+def test_status_with_container_dispatches(cli_dispatch: CliDispatchHarness) -> None:
+    """status <container> dispatches to shield.state()."""
+    cli_dispatch.shield.state.return_value = ShieldState.UP
+    main(["status", _CONTAINER])
+    cli_dispatch.shield.state.assert_called_once_with(_CONTAINER)
+
+
+def test_status_container_output(
     cli_dispatch: CliDispatchHarness,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """state prints the enum value, not the enum repr."""
+    """status <container> prints the state value, not the enum repr."""
     cli_dispatch.shield.state.return_value = ShieldState.DOWN
-    main(["state", _CONTAINER])
+    main(["status", _CONTAINER])
     assert capsys.readouterr().out.strip() == "down"
 
 

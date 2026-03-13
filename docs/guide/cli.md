@@ -69,7 +69,17 @@ terok-shield prepare my-container --json
 
 ## status
 
-Show current shield status: active mode, available profiles, audit state.
+Show current shield status, or query a specific container's firewall state.
+
+```bash
+terok-shield status [container]
+```
+
+| Argument | Description |
+|----------|-------------|
+| `container` | Optional — when given, prints the container's firewall state |
+
+Without a container name, shows the global shield configuration:
 
 ```bash
 terok-shield status
@@ -79,6 +89,14 @@ terok-shield status
 Mode:     hook
 Audit:    enabled
 Profiles: base, dev-node, dev-python, dev-standard, nvidia-hpc
+```
+
+With a container name, prints the live firewall state (`up`, `down`, `down_all`,
+`inactive`, or `error`). Useful for scripting and integration:
+
+```bash
+terok-shield status my-container
+# up
 ```
 
 ## resolve
@@ -205,22 +223,6 @@ terok-shield rules <container>
 
 Shows the container's shield state and the full nftables ruleset in its
 network namespace.
-
-## state
-
-Query a container's shield state directly.
-
-```bash
-terok-shield state <container>
-```
-
-Prints the current state as a single value: `up`, `down`, `down_all`,
-`inactive`, or `error`. Useful for scripting and integration.
-
-```bash
-terok-shield state my-container
-# up
-```
 
 ## profiles
 

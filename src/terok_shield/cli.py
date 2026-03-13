@@ -229,6 +229,21 @@ def _build_parser() -> argparse.ArgumentParser:
         for arg in cmd.args:
             _add_argdef(p, arg)
 
+    # Inject "status CONTAINER" as a visible second line in help output
+    _orig_format_help = parser.format_help
+
+    def _format_help() -> str:
+        """Return help text with 'status CONTAINER' hint injected."""
+        text = _orig_format_help()
+        marker = "\n    status "
+        idx = text.find(marker)
+        if idx == -1:
+            return text
+        eol = text.index("\n", idx + 1)
+        hint = "\n    status CONTAINER    Query container firewall state (up/down/down_all/inactive/error)"
+        return text[:eol] + hint + text[eol:]
+
+    parser.format_help = _format_help  # type: ignore[assignment]
     return parser
 
 

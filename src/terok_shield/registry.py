@@ -60,12 +60,16 @@ class CommandDef:
 # ── Handler functions ─────────────────────────────────────
 
 
-def _handle_status(shield: Shield) -> None:
-    """Show shield status."""
-    status = shield.status()
-    print(f"Mode:     {status['mode']}")
-    print(f"Audit:    {'enabled' if status['audit_enabled'] else 'disabled'}")
-    print(f"Profiles: {', '.join(status['profiles']) or '(none)'}")
+def _handle_status(shield: Shield, *, container: str | None = None) -> None:
+    """Show shield status, or query a container's firewall state."""
+    if container:
+        st = shield.state(container)
+        print(st.value)
+    else:
+        status = shield.status()
+        print(f"Mode:     {status['mode']}")
+        print(f"Audit:    {'enabled' if status['audit_enabled'] else 'disabled'}")
+        print(f"Profiles: {', '.join(status['profiles']) or '(none)'}")
 
 
 def _handle_allow(shield: Shield, container: str, *, target: str) -> None:
@@ -134,19 +138,20 @@ def _handle_preview(shield: Shield, *, down: bool = False, allow_all: bool = Fal
     print(ruleset)
 
 
-def _handle_state(shield: Shield, container: str) -> None:
-    """Query a container's shield state."""
-    st = shield.state(container)
-    print(st.value)
-
-
 # ── Command definitions ───────────────────────────────────
 
 COMMANDS: tuple[CommandDef, ...] = (
     CommandDef(
         name="status",
-        help="Show shield status",
+        help="Show shield configuration overview",
         handler=_handle_status,
+        args=(
+            ArgDef(
+                name="container",
+                nargs="?",
+                help="Container name — prints firewall state (up/down/down_all/inactive/error)",
+            ),
+        ),
     ),
     CommandDef(
         name="prepare",
@@ -240,11 +245,5 @@ COMMANDS: tuple[CommandDef, ...] = (
                 help="Omit private-range reject rules (requires --down)",
             ),
         ),
-    ),
-    CommandDef(
-        name="state",
-        help="Query a container's shield state",
-        handler=_handle_state,
-        needs_container=True,
     ),
 )

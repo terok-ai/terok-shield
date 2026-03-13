@@ -17,7 +17,7 @@ from terok_shield.registry import (
     _handle_logs,
     _handle_preview,
     _handle_profiles,
-    _handle_state,
+    _handle_status,
 )
 
 
@@ -96,13 +96,26 @@ class TestHandlers:
         lines = capsys.readouterr().out.strip().splitlines()
         assert lines == ["dev-standard", "dev-python"]
 
-    def test_handle_state_prints_value(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """_handle_state prints the ShieldState value."""
+    def test_handle_status_global(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """_handle_status without container prints config overview."""
+        shield = mock.MagicMock()
+        shield.status.return_value = {
+            "mode": "hook",
+            "audit_enabled": True,
+            "profiles": ["dev-standard"],
+        }
+        _handle_status(shield)
+        output = capsys.readouterr().out
+        assert "Mode:" in output
+        assert "hook" in output
+
+    def test_handle_status_with_container(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """_handle_status with container prints the ShieldState value."""
         from terok_shield import ShieldState
 
         shield = mock.MagicMock()
         shield.state.return_value = ShieldState.UP
-        _handle_state(shield, "ctr")
+        _handle_status(shield, container="ctr")
         assert capsys.readouterr().out.strip() == "up"
 
     def test_handle_preview_all_without_down_raises(self) -> None:
