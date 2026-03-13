@@ -64,14 +64,14 @@ def _auto_detect_mode() -> ShieldMode:
     Currently only hook mode is supported.
 
     Raises:
-        RuntimeError: If no supported shield mode is available.
+        NftNotFoundError: If nft is not installed.
     """
-    from .run import find_nft
+    from .run import NftNotFoundError, find_nft
 
     if find_nft():
         return ShieldMode.HOOK
 
-    raise RuntimeError("No supported shield mode available. Install nft for hook mode.")
+    raise NftNotFoundError("No supported shield mode available. Install nft for hook mode.")
 
 
 def _load_config_file() -> dict:

@@ -16,7 +16,7 @@ from unittest import mock
 
 import pytest
 
-from terok_shield import ExecError, ShieldState
+from terok_shield import ExecError, NftNotFoundError, ShieldState
 from terok_shield.cli import (
     _auto_detect_mode,
     _build_config,
@@ -791,7 +791,7 @@ def test_parse_loopback_ports(raw: object, expected: tuple[int, ...]) -> None:
 def test_auto_detect_mode_raises_without_nft(monkeypatch: pytest.MonkeyPatch) -> None:
     """_auto_detect_mode() fails when nft is unavailable."""
     monkeypatch.setattr("terok_shield.run.find_nft", lambda: "")
-    with pytest.raises(RuntimeError):
+    with pytest.raises(NftNotFoundError):
         _auto_detect_mode()
 
 

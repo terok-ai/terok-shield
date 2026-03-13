@@ -11,7 +11,7 @@ from unittest import mock
 
 import pytest
 
-from terok_shield.run import CommandRunner, ExecError, SubprocessRunner, find_nft
+from terok_shield.run import CommandRunner, ExecError, NftNotFoundError, SubprocessRunner, find_nft
 
 from ..testfs import NFT_BINARY, NFT_SBIN
 from ..testnet import (
@@ -356,9 +356,9 @@ def test_find_nft_returns_empty_when_missing(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_subprocess_runner_raises_when_nft_missing() -> None:
-    """SubprocessRunner raises RuntimeError with install instructions when nft is missing."""
+    """SubprocessRunner raises NftNotFoundError with install instructions when nft is missing."""
     with mock.patch("terok_shield.run.find_nft", return_value=""):
-        with pytest.raises(RuntimeError, match="nft binary not found"):
+        with pytest.raises(NftNotFoundError, match="nft binary not found"):
             SubprocessRunner()
 
 
