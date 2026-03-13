@@ -3,6 +3,10 @@
 
 """Basic smoke tests for terok-shield."""
 
+from unittest import mock
+
+import pytest
+
 
 def test_import() -> None:
     """Package is importable."""
@@ -19,46 +23,41 @@ def test_version_string() -> None:
     assert len(__version__) > 0
 
 
-def test_cli_help(capsys) -> None:
+def test_cli_help(capsys: pytest.CaptureFixture[str]) -> None:
     """CLI prints help without error."""
     from terok_shield.cli import main
 
-    try:
+    with pytest.raises(SystemExit) as exc_info:
         main(["--help"])
-    except SystemExit as e:
-        assert e.code == 0
-    captured = capsys.readouterr()
-    assert "terok-shield" in captured.out
+    assert exc_info.value.code == 0
+    assert "terok-shield" in capsys.readouterr().out
 
 
-def test_cli_no_command(capsys) -> None:
+def test_cli_no_command(capsys: pytest.CaptureFixture[str]) -> None:
     """CLI with no subcommand prints help and exits 0."""
-    import pytest
-
     from terok_shield.cli import main
 
-    with pytest.raises(SystemExit, match="0"):
+    with pytest.raises(SystemExit) as exc_info:
         main([])
-    captured = capsys.readouterr()
-    assert "terok-shield" in captured.out
+    assert exc_info.value.code == 0
+    assert "terok-shield" in capsys.readouterr().out
 
 
-def test_cli_status(capsys) -> None:
+def test_cli_status(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     """CLI status subcommand prints mode info."""
-    from unittest import mock
-
     from terok_shield.cli import main
 
-    with (
-        mock.patch("terok_shield.cli._build_config"),
-        mock.patch("terok_shield.cli.Shield") as mock_cls,
-    ):
-        mock_cls.return_value.status.return_value = {
-            "mode": "standard",
-            "audit_enabled": True,
-            "profiles": [],
-        }
-        main(["status"])
+    mock_cls = mock.MagicMock()
+    monkeypatch.setattr("terok_shield.cli._build_config", mock.Mock())
+    monkeypatch.setattr("terok_shield.cli.Shield", mock_cls)
+    mock_cls.return_value.status.return_value = {
+        "mode": "standard",
+        "audit_enabled": True,
+        "profiles": [],
+    }
+    main(["status"])
     mock_cls.return_value.status.assert_called_once()
-    captured = capsys.readouterr()
-    assert "standard" in captured.out.lower()
+    assert "standard" in capsys.readouterr().out.lower()

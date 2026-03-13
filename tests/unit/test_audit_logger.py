@@ -6,7 +6,6 @@
 import json
 from collections.abc import Callable
 from pathlib import Path
-from unittest import mock
 
 import pytest
 
@@ -78,13 +77,17 @@ def test_log_event_skips_writes_when_disabled(
     assert not path.exists()
 
 
-@mock.patch("pathlib.Path.open", side_effect=OSError("disk full"))
 def test_log_event_ignores_write_errors(
-    _open: mock.Mock,
+    monkeypatch: pytest.MonkeyPatch,
     make_logger: Callable[..., AuditLogger],
     tmp_path: Path,
 ) -> None:
     """Write failures are swallowed to avoid breaking protected workloads."""
+
+    def _fail_open(_self: Path, *args: object, **kwargs: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(Path, "open", _fail_open)
     make_logger(audit_path=tmp_path / "audit.jsonl").log_event("test-ctr", "setup")
 
 

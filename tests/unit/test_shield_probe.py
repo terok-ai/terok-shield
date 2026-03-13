@@ -198,6 +198,7 @@ def test_probe_skips_non_icmp_origin(make_probe_result: ProbeResultFactory) -> N
     ],
 )
 def test_main_outputs_expected_json(
+    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     argv: list[str],
     probe_result: dict[str, object] | None,
@@ -206,15 +207,14 @@ def test_main_outputs_expected_json(
     expected_output: str | dict[str, object],
 ) -> None:
     """main() prints usage or JSON output for success and argument errors."""
-    with patch("sys.argv", argv):
-        if probe_result is None:
-            rc = main()
-        else:
-            with patch(
-                "terok_shield.resources.shield_probe.probe", return_value=probe_result
-            ) as mock_probe:
-                rc = main()
-                mock_probe.assert_called_once_with(*expected_probe_args)
+    monkeypatch.setattr("sys.argv", argv)
+    if probe_result is None:
+        rc = main()
+    else:
+        mock_probe = MagicMock(return_value=probe_result)
+        monkeypatch.setattr("terok_shield.resources.shield_probe.probe", mock_probe)
+        rc = main()
+        mock_probe.assert_called_once_with(*expected_probe_args)
 
     captured = capsys.readouterr()
     assert rc == expected_rc
@@ -224,11 +224,17 @@ def test_main_outputs_expected_json(
         assert json.loads(captured.out) == expected_output
 
 
-def test_main_handles_probe_exceptions(capsys: pytest.CaptureFixture[str]) -> None:
+def test_main_handles_probe_exceptions(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     """Unexpected probe exceptions are reported as JSON errors."""
-    with patch("sys.argv", ["shield_probe.py", TEST_IP1]):
-        with patch("terok_shield.resources.shield_probe.probe", side_effect=RuntimeError("boom")):
-            assert main() == 1
+    monkeypatch.setattr("sys.argv", ["shield_probe.py", TEST_IP1])
+    monkeypatch.setattr(
+        "terok_shield.resources.shield_probe.probe",
+        MagicMock(side_effect=RuntimeError("boom")),
+    )
+    assert main() == 1
     assert json.loads(capsys.readouterr().out)["error"] == "boom"
 
 

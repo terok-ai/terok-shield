@@ -6,6 +6,7 @@
 import ipaddress
 import json
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from unittest import mock
 
@@ -61,6 +62,29 @@ def _valid_annotations(state_dir: Path) -> dict[str, str]:
         ANNOTATION_LOOPBACK_PORTS_KEY: "1234",
         ANNOTATION_VERSION_KEY: str(state.BUNDLE_VERSION),
     }
+
+
+@dataclass
+class HookMainHarness:
+    """Patched collaborators used by hook_main() tests."""
+
+    executor_cls: mock.MagicMock
+    audit_cls: mock.MagicMock
+
+    @property
+    def executor(self) -> mock.MagicMock:
+        """Return the HookExecutor instance created by hook_main()."""
+        return self.executor_cls.return_value
+
+
+@pytest.fixture
+def hook_main_harness(monkeypatch: pytest.MonkeyPatch) -> HookMainHarness:
+    """Patch hook_main() collaborators that would otherwise do real work."""
+    executor_cls = mock.MagicMock()
+    audit_cls = mock.MagicMock()
+    monkeypatch.setattr("terok_shield.oci_hook.HookExecutor", executor_cls)
+    monkeypatch.setattr("terok_shield.oci_hook.AuditLogger", audit_cls)
+    return HookMainHarness(executor_cls=executor_cls, audit_cls=audit_cls)
 
 
 @pytest.mark.parametrize(
@@ -196,12 +220,11 @@ def test_parse_oci_state_normalizes_missing_or_zero_pid(
     assert pid == expected_pid
 
 
-@mock.patch("terok_shield.oci_hook.HookExecutor")
-def test_hook_main_success(mock_exec: mock.Mock, tmp_path: Path) -> None:
+def test_hook_main_success(hook_main_harness: HookMainHarness, tmp_path: Path) -> None:
     """hook_main() returns 0 and applies the ruleset on valid createRuntime input."""
     rc = hook_main(_oci_state("test-ctr", 42, annotations=_valid_annotations(tmp_path)))
     assert rc == 0
-    mock_exec.return_value.apply.assert_called_once_with("test-ctr", "42")
+    hook_main_harness.executor.apply.assert_called_once_with("test-ctr", "42")
 
 
 def test_hook_main_returns_1_for_invalid_json() -> None:
@@ -209,13 +232,12 @@ def test_hook_main_returns_1_for_invalid_json() -> None:
     assert hook_main("not json") == 1
 
 
-@mock.patch("terok_shield.oci_hook.HookExecutor")
 def test_hook_main_returns_1_on_executor_runtime_error(
-    mock_exec: mock.Mock,
+    hook_main_harness: HookMainHarness,
     tmp_path: Path,
 ) -> None:
     """hook_main() returns 1 when executor.apply() fails."""
-    mock_exec.return_value.apply.side_effect = RuntimeError("boom")
+    hook_main_harness.executor.apply.side_effect = RuntimeError("boom")
     assert hook_main(_oci_state(annotations=_valid_annotations(tmp_path))) == 1
 
 
@@ -265,8 +287,6 @@ def test_hook_main_rejects_invalid_annotations(
     assert hook_main(_oci_state(annotations=annotations)) == expected
 
 
-@mock.patch("terok_shield.oci_hook.HookExecutor")
-@mock.patch("terok_shield.oci_hook.AuditLogger")
 @pytest.mark.parametrize(
     ("audit_value", "expected_enabled"),
     [
@@ -275,8 +295,7 @@ def test_hook_main_rejects_invalid_annotations(
     ],
 )
 def test_hook_main_configures_audit_logger_from_annotation(
-    mock_audit_cls: mock.Mock,
-    _mock_exec: mock.Mock,
+    hook_main_harness: HookMainHarness,
     tmp_path: Path,
     audit_value: str,
     expected_enabled: bool,
@@ -285,5 +304,5 @@ def test_hook_main_configures_audit_logger_from_annotation(
     annotations = _valid_annotations(tmp_path)
     annotations[ANNOTATION_AUDIT_ENABLED_KEY] = audit_value
     assert hook_main(_oci_state(annotations=annotations)) == 0
-    _, kwargs = mock_audit_cls.call_args
+    _, kwargs = hook_main_harness.audit_cls.call_args
     assert kwargs["enabled"] is expected_enabled

@@ -3,6 +3,7 @@
 
 """Tests for subprocess helpers."""
 
+import shutil
 import subprocess
 from collections.abc import Iterator
 from unittest import mock
@@ -153,12 +154,13 @@ def test_run_handles_timeout(
 )
 def test_has_uses_shutil_which(
     runner: SubprocessRunner,
+    monkeypatch: pytest.MonkeyPatch,
     which_result: str | None,
     expected: bool,
 ) -> None:
     """has() reflects whether the executable can be found."""
-    with mock.patch("shutil.which", return_value=which_result):
-        assert runner.has("nft") is expected
+    monkeypatch.setattr(shutil, "which", lambda _name: which_result)
+    assert runner.has("nft") is expected
 
 
 @pytest.mark.parametrize(
