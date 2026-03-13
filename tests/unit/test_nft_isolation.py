@@ -1,7 +1,12 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""AST-based test: nft.py must only import stdlib modules."""
+"""AST-based tests for nft.py import isolation.
+
+This file stays intentionally small and explicit because it guards the import
+boundary of the auditable security module. We avoid abstraction here so the
+allowed dependency surface can be reviewed line by line.
+"""
 
 import ast
 from pathlib import Path

@@ -1,7 +1,13 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for nft.py -- the auditable security boundary."""
+"""Tests for nft.py -- the auditable security boundary.
+
+These tests intentionally optimize for explicit security-property checks over
+maximum DRYness. Small helpers and parametrization are used only when they make
+the asserted invariant clearer; they should never hide rule ordering,
+allow-vs-deny semantics, or input-validation guarantees.
+"""
 
 from collections.abc import Callable
 
