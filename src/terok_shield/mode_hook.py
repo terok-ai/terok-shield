@@ -398,10 +398,15 @@ class HookMode:
             return ""
 
     def _read_container_dns(self, container: str) -> str:
-        """Read DNS nameserver from a running container's resolv.conf."""
+        """Read DNS nameserver from a running container's resolv.conf.
+
+        Uses ``/proc/{pid}/root/etc/resolv.conf`` via ``podman unshare``
+        to access the container's rootfs without entering its mount
+        namespace (avoids requiring ``cat`` inside the container).
+        """
         pid = self._runner.podman_inspect(container, "{{.State.Pid}}")
         output = self._runner.run(
-            ["podman", "unshare", "nsenter", "-t", pid, "-m", "cat", "/etc/resolv.conf"],
+            ["podman", "unshare", "cat", f"/proc/{pid}/root/etc/resolv.conf"],
             check=False,
         )
         dns = parse_resolv_conf(output)

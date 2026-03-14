@@ -484,6 +484,9 @@ def _cmd_setup(*, root: bool, user: bool) -> None:
     sys_dir = system_hooks_dir()
     usr_dir = USER_HOOKS_DIR.expanduser()
 
+    if root and user:
+        raise ValueError("--root and --user are mutually exclusive")
+
     if not root and not user:
         # Interactive: present options
         print("terok-shield setup: install global OCI hooks\n")

@@ -149,17 +149,13 @@ class Shield:
         hooks = "per-container"
         health = "ok"
 
-        if not info.hooks_dir_persists:
-            hooks_dirs = find_hooks_dirs()
-            if has_global_hooks(hooks_dirs):
-                # Determine if system or user hooks
-                from .podman_info import _SYSTEM_HOOKS_DIRS
+        hooks_dirs = find_hooks_dirs()
+        global_hooks = has_global_hooks(hooks_dirs)
 
-                hooks = "global-user"
-                for sys_dir in _SYSTEM_HOOKS_DIRS:
-                    if has_global_hooks([sys_dir]):
-                        hooks = "global-system"
-                        break
+        if not info.hooks_dir_persists:
+            if global_hooks:
+                sys_dir = system_hooks_dir()
+                hooks = "global-system" if has_global_hooks([sys_dir]) else "global-user"
                 health = "ok"
             else:
                 hooks = "not-installed"
@@ -169,8 +165,7 @@ class Shield:
                 issues.append(
                     "Global hooks not installed - containers will lose firewall on restart"
                 )
-
-        if info.hooks_dir_persists and has_global_hooks():
+        elif global_hooks:
             health = "stale-hooks"
             issues.append(
                 "Stale global hooks detected - not needed on podman >= 5.6.0. "

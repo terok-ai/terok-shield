@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from . import Shield
+    from . import EnvironmentCheck, Shield
 
 
 @dataclass(frozen=True)
@@ -65,7 +65,7 @@ def _format_version(v: tuple[int, ...]) -> str:
     return ".".join(str(p) for p in v) if v != (0,) else "unknown"
 
 
-def _print_env_hint(env: object) -> None:
+def _print_env_hint(env: EnvironmentCheck) -> None:
     """Print human-readable environment issues and setup hint."""
     if env.issues:
         print()

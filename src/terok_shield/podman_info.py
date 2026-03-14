@@ -188,11 +188,9 @@ def parse_resolv_conf(text: str) -> str:
     Returns an empty string if no valid nameserver line is found.
     """
     for line in text.splitlines():
-        line = line.strip()
-        if line.startswith("nameserver"):
-            parts = line.split()
-            if len(parts) >= 2:
-                return parts[1]
+        parts = line.strip().split()
+        if len(parts) >= 2 and parts[0] == "nameserver":
+            return parts[1]
     return ""
 
 
