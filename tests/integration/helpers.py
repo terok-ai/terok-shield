@@ -199,12 +199,10 @@ def assert_blocked(container: str, url: str, timeout: int = 10) -> None:
 
 
 def assert_reachable(container: str, url: str, timeout: int = 10) -> None:
-    """Assert that a URL/IP is reachable from inside a container.
+    """Assert that a URL is reachable from inside a container.
 
-    For bare-IP HTTP URLs (e.g. ``http://1.1.1.1/``), uses a TCP
-    connection check instead of wget to avoid busybox wget following
-    HTTP redirects to hostnames that can't be resolved in shielded
-    containers.
+    Delegates to :func:`is_reachable` which tolerates busybox wget
+    redirect failures (``bad address``) as proof of TCP connectivity.
 
     Args:
         container: Container name or ID.
@@ -212,16 +210,8 @@ def assert_reachable(container: str, url: str, timeout: int = 10) -> None:
         timeout: wget timeout in seconds.
     """
     _assert_container_running(container)
-
     r = wget(container, url, timeout=timeout)
-    # busybox wget follows HTTP redirects; if the redirect target is a
-    # hostname that can't be resolved (DNS blocked in shielded containers),
-    # wget fails with "bad address". Check stderr for a server response
-    # to distinguish "redirect but TCP worked" from "actually blocked".
-    if r.returncode != 0 and "bad address" in r.stderr:
-        # Got a redirect → TCP connection was established → reachable
-        return
-    assert r.returncode == 0, f"Expected {url} to be reachable, but it was blocked: {r.stderr}"
+    assert is_reachable(r), f"Expected {url} to be reachable, but it was blocked: {r.stderr}"
 
 
 def is_reachable(result: subprocess.CompletedProcess) -> bool:
