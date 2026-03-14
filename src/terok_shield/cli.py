@@ -10,6 +10,7 @@ import shlex
 import shutil
 import sys
 from pathlib import Path
+from typing import Any
 
 from . import ExecError, Shield, ShieldConfig, ShieldMode
 from .registry import COMMANDS, ArgDef, CommandDef
@@ -201,11 +202,18 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="terok-shield",
         description="nftables-based egress firewalling for Podman containers",
     )
-    parser.add_argument(
-        "--version",
-        action="version",
-        version=_version_string(),
-    )
+
+    class _VersionAction(argparse.Action):
+        """Lazy version action — only calls podman/nft when --version is used."""
+
+        def __init__(self, **kwargs: Any) -> None:
+            super().__init__(nargs=0, **kwargs)
+
+        def __call__(self, parser: argparse.ArgumentParser, *_args: Any, **_kw: Any) -> None:
+            print(_version_string())
+            parser.exit()
+
+    parser.add_argument("--version", action=_VersionAction)
     parser.add_argument(
         "--state-dir",
         type=Path,
