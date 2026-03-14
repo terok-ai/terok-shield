@@ -487,12 +487,14 @@ def _cmd_setup(*, root: bool, user: bool) -> None:
     from .mode_hook import setup_global_hooks
     from .podman_info import (
         USER_HOOKS_DIR,
+        _user_containers_conf,
         ensure_containers_conf_hooks_dir,
         system_hooks_dir,
     )
 
     sys_dir = system_hooks_dir()
     usr_dir = USER_HOOKS_DIR.expanduser()
+    conf_path = _user_containers_conf()
 
     if root and user:
         raise ValueError("--root and --user are mutually exclusive")
@@ -502,7 +504,7 @@ def _cmd_setup(*, root: bool, user: bool) -> None:
         print("terok-shield setup: install global OCI hooks\n")
         print(f"  [r] System-wide (sudo) -> {sys_dir}")
         print(f"  [u] User-local         -> {usr_dir}")
-        print("      (+ update ~/.config/containers/containers.conf)")
+        print(f"      (+ update {conf_path})")
         print()
         choice = input("Choose [r/u]: ").strip().lower()
         if choice == "r":
