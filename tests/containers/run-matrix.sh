@@ -48,6 +48,7 @@ usage() {
     echo "  -h, --help     Show this help"
     echo ""
     echo "Available distros: ${!DISTROS[*]}"
+    return 0
 }
 
 build_image() {
@@ -57,6 +58,7 @@ build_image() {
 
     echo "==> Building $image from $file"
     podman build -t "$image" -f "$file" "$REPO_ROOT"
+    return $?
 }
 
 run_tests() {
@@ -111,6 +113,7 @@ run_tests() {
         "
 
     echo "==> $name: done"
+    return 0
 }
 
 # Parse args
@@ -147,7 +150,7 @@ fi
 # Validate targets
 for t in "${TARGETS[@]}"; do
     if [[ -z "${DISTROS[$t]+x}" ]]; then
-        echo "Error: unknown distro '$t'. Available: ${!DISTROS[*]}"
+        echo "Error: unknown distro '$t'. Available: ${!DISTROS[*]}" >&2
         exit 1
     fi
 done
