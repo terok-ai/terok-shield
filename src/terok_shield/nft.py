@@ -54,6 +54,23 @@ def safe_ip(value: str) -> str:
         raise ValueError(f"Invalid IP/CIDR: {v!r}") from e
 
 
+def _safe_host_ip(value: str) -> str:
+    """Validate that *value* is a single host IP (not a CIDR network).
+
+    Used for gateway addresses where a network range would punch an
+    overly broad hole in the private-range firewall rules.
+
+    Raises ValueError on invalid input or CIDR notation.
+    """
+    v = value.strip()
+    if "/" in v:
+        raise ValueError(f"Expected host IP, got network: {v!r}")
+    try:
+        return str(ipaddress.ip_address(v))
+    except ValueError as e:
+        raise ValueError(f"Invalid host IP: {v!r}") from e
+
+
 def _is_v4(value: str) -> bool:
     """Return True if a validated IP string is IPv4."""
     try:
@@ -164,7 +181,7 @@ class RulesetBuilder:
         for p in loopback_ports:
             _safe_port(p)
         if gateway:
-            gateway = safe_ip(gateway)
+            gateway = _safe_host_ip(gateway)
         self._dns = dns
         self._loopback_ports = loopback_ports
         self._gateway = gateway
@@ -227,7 +244,7 @@ def hook_ruleset(
     """
     dns = safe_ip(dns)
     if gateway:
-        gateway = safe_ip(gateway)
+        gateway = _safe_host_ip(gateway)
     for p in loopback_ports:
         _safe_port(p)
     port_rules = _loopback_port_rules(loopback_ports)
@@ -289,7 +306,7 @@ def bypass_ruleset(
     """
     dns = safe_ip(dns)
     if gateway:
-        gateway = safe_ip(gateway)
+        gateway = _safe_host_ip(gateway)
     for p in loopback_ports:
         _safe_port(p)
     port_rules = _loopback_port_rules(loopback_ports)

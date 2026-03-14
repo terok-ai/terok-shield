@@ -625,3 +625,8 @@ class TestGatewayPortRules:
         """Invalid gateway IP is rejected."""
         with pytest.raises(ValueError, match="Invalid"):
             hook_ruleset(dns=SLIRP4NETNS_DNS, loopback_ports=(9418,), gateway="not-an-ip")
+
+    def test_gateway_rejects_cidr(self) -> None:
+        """CIDR network as gateway is rejected (must be a single host)."""
+        with pytest.raises(ValueError, match="network"):
+            hook_ruleset(dns=SLIRP4NETNS_DNS, loopback_ports=(9418,), gateway="10.0.2.0/24")
