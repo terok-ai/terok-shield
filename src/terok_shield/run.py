@@ -37,6 +37,15 @@ class NftNotFoundError(RuntimeError):
     """Raised when the ``nft`` binary is not found on the host."""
 
 
+class ShieldNeedsSetup(RuntimeError):
+    """Raised when the podman environment requires one-time setup.
+
+    Typically raised on podman < 5.6.0 when global hooks are not
+    installed and ``--hooks-dir`` would not persist across container
+    restarts.  The message includes system-specific setup hints.
+    """
+
+
 class ExecError(Exception):
     """Raised when a subprocess fails."""
 

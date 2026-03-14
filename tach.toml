@@ -35,6 +35,11 @@ depends_on = [
 path = "terok_shield.state"
 depends_on = []
 
+# Podman environment detection — standalone, no internal deps
+[[modules]]
+path = "terok_shield.podman_info"
+depends_on = []
+
 # Shared utilities — standalone, no internal deps
 [[modules]]
 path = "terok_shield.util"
@@ -82,6 +87,7 @@ depends_on = [
     "terok_shield.audit",
     "terok_shield.config",
     "terok_shield.nft",
+    "terok_shield.podman_info",
     "terok_shield.run",
     "terok_shield.state",
 ]
@@ -92,6 +98,7 @@ path = "terok_shield.mode_hook"
 depends_on = [
     "terok_shield.config",
     "terok_shield.nft",
+    "terok_shield.podman_info",
     "terok_shield.run",
     "terok_shield.state",
     "terok_shield.util",
@@ -108,6 +115,8 @@ path = "terok_shield.cli"
 depends_on = [
     "terok_shield",
     "terok_shield.audit",
+    "terok_shield.mode_hook",
+    "terok_shield.podman_info",
     "terok_shield.registry",
     "terok_shield.run",
     "terok_shield.validation",
@@ -122,6 +131,7 @@ depends_on = [
     "terok_shield.dns",
     "terok_shield.mode_hook",
     "terok_shield.nft",
+    "terok_shield.podman_info",
     "terok_shield.profiles",
     "terok_shield.registry",
     "terok_shield.run",

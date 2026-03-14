@@ -186,6 +186,8 @@ def test_shield_up_reads_live_allowed(
     """shield_up() re-adds persisted live.allowed IPs."""
     write_lines(state.live_allowed_path(tmp_path), [TEST_IP1, TEST_IP2])
     harness = make_hook_mode(state_dir=tmp_path)
+    # Mock DNS reading so _container_ruleset returns the mock ruleset
+    harness.mode._container_ruleset = lambda _c: harness.ruleset
     harness.runner.nft_via_nsenter.return_value = ""
     harness.ruleset.build_hook.return_value = "table inet terok_shield {}"
     harness.ruleset.add_elements_dual.return_value = "add element ..."

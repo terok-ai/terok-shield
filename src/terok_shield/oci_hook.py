@@ -32,6 +32,7 @@ from .config import (
     ANNOTATION_VERSION_KEY,
 )
 from .nft import RulesetBuilder
+from .podman_info import parse_resolv_conf
 from .run import ExecError, SubprocessRunner
 
 if TYPE_CHECKING:
@@ -281,6 +282,36 @@ class HookExecutor:
         return _parse_oci_state(stdin_data)
 
 
+# ── DNS detection ─────────────────────────────────────────
+
+
+def _read_container_dns(pid: str) -> str:
+    """Read the DNS nameserver from a container's resolv.conf.
+
+    At ``createRuntime`` hook time, the mount namespace is set up and
+    ``/proc/{pid}/root/etc/resolv.conf`` is accessible (OCI spec
+    guarantees mounts are performed before ``createRuntime`` hooks).
+
+    Raises:
+        RuntimeError: If resolv.conf is missing or contains no nameserver.
+    """
+    resolv_path = Path(f"/proc/{pid}/root/etc/resolv.conf")
+    try:
+        text = resolv_path.read_text()
+    except OSError as e:
+        raise RuntimeError(
+            f"Cannot read container resolv.conf at {resolv_path}: {e}. "
+            "The container's network may not be configured correctly."
+        ) from e
+    dns = parse_resolv_conf(text)
+    if not dns:
+        raise RuntimeError(
+            f"No nameserver found in {resolv_path}. "
+            "The container's network may not be configured correctly."
+        )
+    return dns
+
+
 # ── Entry point ──────────────────────────────────────────
 
 
@@ -347,12 +378,16 @@ def hook_main(stdin_data: str | None = None, stage: str = "createRuntime") -> in
         raw_audit = annotations.get(ANNOTATION_AUDIT_ENABLED_KEY, "true").strip().lower()
         audit_enabled = raw_audit not in ("false", "0")
 
+        # Read DNS from the container's resolv.conf (mounts are done
+        # at createRuntime per OCI spec).
+        dns = _read_container_dns(pid)
+
         runner = SubprocessRunner()
         audit = AuditLogger(
             audit_path=state.audit_path(sd),
             enabled=audit_enabled,
         )
-        ruleset = RulesetBuilder(loopback_ports=loopback_ports)
+        ruleset = RulesetBuilder(dns=dns, loopback_ports=loopback_ports)
         executor = HookExecutor(
             runner=runner,
             audit=audit,

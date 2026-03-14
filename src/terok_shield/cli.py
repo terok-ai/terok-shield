@@ -10,6 +10,7 @@ import shlex
 import shutil
 import sys
 from pathlib import Path
+from typing import Any
 
 from . import ExecError, Shield, ShieldConfig, ShieldMode
 from .registry import COMMANDS, ArgDef, CommandDef
@@ -201,11 +202,20 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="terok-shield",
         description="nftables-based egress firewalling for Podman containers",
     )
-    parser.add_argument(
-        "--version",
-        action="version",
-        version=f"%(prog)s {_get_version()}",
-    )
+
+    class _VersionAction(argparse.Action):
+        """Lazy version action — only calls podman/nft when --version is used."""
+
+        def __init__(self, **kwargs: Any) -> None:
+            """Accept standard argparse Action kwargs."""
+            super().__init__(nargs=0, **kwargs)
+
+        def __call__(self, parser: argparse.ArgumentParser, *_args: Any, **_kw: Any) -> None:
+            """Print version info and exit."""
+            print(_version_string())
+            parser.exit()
+
+    parser.add_argument("--version", action=_VersionAction)
     parser.add_argument(
         "--state-dir",
         type=Path,
@@ -296,6 +306,11 @@ def _dispatch(args: argparse.Namespace) -> None:
     """Dispatch to the appropriate subcommand handler."""
     cmd_name = args.command
     state_dir_override = getattr(args, "state_dir", None)
+
+    # CLI-only: setup doesn't need Shield
+    if cmd_name == "setup":
+        _cmd_setup(root=getattr(args, "root", False), user=getattr(args, "user", False))
+        return
 
     # CLI-only: logs with aggregated mode (no container -> scan all)
     if cmd_name == "logs":
@@ -467,8 +482,77 @@ def _cmd_logs_cli(
             print(json.dumps(entry))
 
 
+def _cmd_setup(*, root: bool, user: bool) -> None:
+    """Install global OCI hooks for podman < 5.6.0 restart persistence."""
+    from .mode_hook import setup_global_hooks
+    from .podman_info import (
+        USER_HOOKS_DIR,
+        _user_containers_conf,
+        ensure_containers_conf_hooks_dir,
+        system_hooks_dir,
+    )
+
+    sys_dir = system_hooks_dir()
+    usr_dir = USER_HOOKS_DIR.expanduser()
+    conf_path = _user_containers_conf()
+
+    if root and user:
+        raise ValueError("--root and --user are mutually exclusive")
+
+    if not root and not user:
+        # Interactive: present options
+        print("terok-shield setup: install global OCI hooks\n")
+        print(f"  [r] System-wide (sudo) -> {sys_dir}")
+        print(f"  [u] User-local         -> {usr_dir}")
+        print(f"      (+ update {conf_path})")
+        print()
+        choice = input("Choose [r/u]: ").strip().lower()
+        if choice == "r":
+            root = True
+        elif choice == "u":
+            user = True
+        else:
+            print("Cancelled.")
+            return
+
+    if root:
+        print(f"Installing hooks to {sys_dir} (sudo)...")
+        setup_global_hooks(sys_dir, use_sudo=True)
+        print("Done. Global hooks installed.")
+    elif user:
+        print(f"Installing hooks to {usr_dir}...")
+        setup_global_hooks(usr_dir)
+        ensure_containers_conf_hooks_dir(usr_dir)
+        print("Done. Global hooks installed.")
+
+
 def _get_version() -> str:
     """Return the package version."""
     from . import __version__
 
     return __version__
+
+
+def _version_string() -> str:
+    """Return version string with terok-shield and podman versions."""
+    from .run import find_nft
+
+    version = _get_version()
+    lines = [f"terok-shield {version}"]
+    # Best-effort podman version (don't fail if podman is missing)
+    try:
+        import subprocess
+
+        r = subprocess.run(  # noqa: S603, S607
+            ["podman", "version", "--format", "{{.Client.Version}}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        podman_v = r.stdout.strip() if r.returncode == 0 else "not found"
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        podman_v = "not found"
+    lines.append(f"podman {podman_v}")
+    nft = find_nft()
+    lines.append(f"nft {'found' if nft else 'not found'}")
+    return "\n".join(lines)

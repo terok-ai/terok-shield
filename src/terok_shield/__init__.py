@@ -24,14 +24,54 @@ try:
 except PackageNotFoundError:
     pass  # editable install or running from source without metadata
 
+from dataclasses import dataclass, field
+
 from . import state
 from .audit import AuditLogger
 from .config import ShieldConfig, ShieldMode, ShieldState
 from .dns import DnsResolver
+from .mode_hook import setup_global_hooks
 from .nft import RulesetBuilder
+from .podman_info import (
+    USER_HOOKS_DIR,
+    ensure_containers_conf_hooks_dir,
+    find_hooks_dirs,
+    global_hooks_hint,
+    has_global_hooks,
+    parse_podman_info,
+    system_hooks_dir,
+)
 from .profiles import ProfileLoader
-from .run import CommandRunner, ExecError, NftNotFoundError, SubprocessRunner
+from .run import CommandRunner, ExecError, NftNotFoundError, ShieldNeedsSetup, SubprocessRunner
 from .util import is_ip as _is_ip
+
+
+@dataclass(frozen=True)
+class EnvironmentCheck:
+    """Result of :meth:`Shield.check_environment`.
+
+    Machine-readable fields for programmatic consumers (terok TUI, scripts).
+    Human-readable ``issues`` and ``setup_hint`` for CLI display.
+
+    Attributes:
+        ok: True if no issues found.
+        podman_version: Detected podman version tuple.
+        hooks: Hook installation type (``per-container``, ``global-system``,
+            ``global-user``, ``not-installed``).
+        health: Environment health (``ok``, ``setup-needed``, ``stale-hooks``).
+        issues: List of human-readable issue descriptions.
+        needs_setup: True if one-time setup is required.
+        setup_hint: Setup instructions (empty if not needed).
+    """
+
+    ok: bool = True
+    podman_version: tuple[int, ...] = (0,)
+    hooks: str = "per-container"
+    health: str = "ok"
+    issues: list[str] = field(default_factory=list)
+    needs_setup: bool = False
+    setup_hint: str = ""
+
 
 # ── Shield Facade ────────────────────────────────────────
 
@@ -93,6 +133,54 @@ class Shield:
                 ruleset=self.ruleset,
             )
         raise ValueError(f"Unsupported shield mode: {mode!r}")
+
+    def check_environment(self) -> EnvironmentCheck:
+        """Check the podman environment for compatibility issues.
+
+        Proactive check for API consumers (e.g. terok).  Returns an
+        :class:`EnvironmentCheck` with detected issues and setup hints.
+        Does not raise — the caller decides how to handle issues.
+        """
+        output = self.runner.run(["podman", "info", "-f", "json"], check=False)
+        info = parse_podman_info(output)
+        issues: list[str] = []
+        needs_setup = False
+        setup_hint = ""
+        hooks = "per-container"
+        health = "ok"
+
+        hooks_dirs = find_hooks_dirs()
+        global_hooks = has_global_hooks(hooks_dirs)
+
+        if not info.hooks_dir_persists:
+            if global_hooks:
+                sys_dir = system_hooks_dir()
+                hooks = "global-system" if has_global_hooks([sys_dir]) else "global-user"
+                health = "ok"
+            else:
+                hooks = "not-installed"
+                health = "setup-needed"
+                needs_setup = True
+                setup_hint = global_hooks_hint()
+                issues.append(
+                    "Global hooks not installed - containers will lose firewall on restart"
+                )
+        elif global_hooks:
+            health = "stale-hooks"
+            issues.append(
+                "Stale global hooks detected - not needed on podman >= 5.6.0. "
+                "Consider removing them."
+            )
+
+        return EnvironmentCheck(
+            ok=not issues,
+            podman_version=info.version,
+            hooks=hooks,
+            health=health,
+            issues=issues,
+            needs_setup=needs_setup,
+            setup_hint=setup_hint,
+        )
 
     def status(self) -> dict:
         """Return current shield status information."""
@@ -200,6 +288,7 @@ __all__ = [
     "CommandDef",
     "CommandRunner",
     "DnsResolver",
+    "EnvironmentCheck",
     "ExecError",
     "NftNotFoundError",
     "ProfileLoader",
@@ -207,6 +296,11 @@ __all__ = [
     "Shield",
     "ShieldConfig",
     "ShieldMode",
+    "ShieldNeedsSetup",
     "ShieldState",
     "SubprocessRunner",
+    "USER_HOOKS_DIR",
+    "ensure_containers_conf_hooks_dir",
+    "setup_global_hooks",
+    "system_hooks_dir",
 ]

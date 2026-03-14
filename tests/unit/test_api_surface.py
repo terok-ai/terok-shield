@@ -22,6 +22,7 @@ EXPECTED_ALL = [
     "CommandDef",
     "CommandRunner",
     "DnsResolver",
+    "EnvironmentCheck",
     "ExecError",
     "NftNotFoundError",
     "ProfileLoader",
@@ -29,8 +30,13 @@ EXPECTED_ALL = [
     "Shield",
     "ShieldConfig",
     "ShieldMode",
+    "ShieldNeedsSetup",
     "ShieldState",
     "SubprocessRunner",
+    "USER_HOOKS_DIR",
+    "ensure_containers_conf_hooks_dir",
+    "setup_global_hooks",
+    "system_hooks_dir",
 ]
 
 

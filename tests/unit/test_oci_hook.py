@@ -88,6 +88,7 @@ def hook_main_harness(monkeypatch: pytest.MonkeyPatch) -> HookMainHarness:
     monkeypatch.setattr("terok_shield.oci_hook.AuditLogger", audit_cls)
     monkeypatch.setattr("terok_shield.oci_hook.RulesetBuilder", ruleset_builder_cls)
     monkeypatch.setattr("terok_shield.oci_hook.SubprocessRunner", mock.MagicMock)
+    monkeypatch.setattr("terok_shield.oci_hook._read_container_dns", lambda pid: "169.254.1.1")
     return HookMainHarness(
         executor_cls=executor_cls,
         audit_cls=audit_cls,
@@ -232,7 +233,9 @@ def test_hook_main_success(hook_main_harness: HookMainHarness, tmp_path: Path) -
     """hook_main() returns 0 and applies the ruleset on valid createRuntime input."""
     rc = hook_main(_oci_state("test-ctr", 42, annotations=_valid_annotations(tmp_path)))
     assert rc == 0
-    hook_main_harness.ruleset_builder_cls.assert_called_once_with(loopback_ports=(1234,))
+    hook_main_harness.ruleset_builder_cls.assert_called_once_with(
+        dns="169.254.1.1", loopback_ports=(1234,)
+    )
     hook_main_harness.executor.apply.assert_called_once_with("test-ctr", "42")
 
 
@@ -262,6 +265,54 @@ def test_hook_main_returns_1_on_executor_runtime_error(
 def test_hook_main_handles_pid_requirements(stdin_data: str, stage: str, expected: int) -> None:
     """hook_main() requires a PID only for createRuntime hooks."""
     assert hook_main(stdin_data, stage=stage) == expected
+
+
+class TestReadContainerDns:
+    """Tests for _read_container_dns() in oci_hook."""
+
+    def test_reads_nameserver_from_proc(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Reads DNS from /proc/{pid}/root/etc/resolv.conf."""
+        from terok_shield.oci_hook import _read_container_dns
+
+        fake_resolv = tmp_path / "resolv.conf"
+        fake_resolv.write_text("nameserver 10.0.2.3\n")
+
+        monkeypatch.setattr(
+            "terok_shield.oci_hook.Path",
+            lambda _s: fake_resolv,
+        )
+        assert _read_container_dns("42") == "10.0.2.3"
+
+    def test_missing_resolv_conf_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Missing resolv.conf raises RuntimeError."""
+        from terok_shield.oci_hook import _read_container_dns
+
+        monkeypatch.setattr(
+            "terok_shield.oci_hook.Path",
+            lambda _s: tmp_path / "nonexistent",
+        )
+        with pytest.raises(RuntimeError, match="Cannot read container resolv.conf"):
+            _read_container_dns("42")
+
+    def test_empty_resolv_conf_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """resolv.conf without nameserver raises RuntimeError."""
+        from terok_shield.oci_hook import _read_container_dns
+
+        fake_resolv = tmp_path / "resolv.conf"
+        fake_resolv.write_text("# no nameserver\nsearch example.com\n")
+
+        monkeypatch.setattr(
+            "terok_shield.oci_hook.Path",
+            lambda _s: fake_resolv,
+        )
+        with pytest.raises(RuntimeError, match="No nameserver found"):
+            _read_container_dns("42")
 
 
 @pytest.mark.parametrize(
