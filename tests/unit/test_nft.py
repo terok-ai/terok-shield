@@ -26,6 +26,7 @@ from terok_shield.nft_constants import (
     BYPASS_LOG_PREFIX,
     IPV6_PRIVATE,
     NFT_TABLE,
+    PASTA_DNS,
     PRIVATE_RANGES,
     RFC1918,
 )
@@ -593,12 +594,12 @@ class TestGatewayPortRules:
         rs = hook_ruleset(dns=SLIRP4NETNS_DNS, loopback_ports=(9418,), gateway=SLIRP4NETNS_GATEWAY)
         # Gateway rule must appear before the private-range reject
         gw_pos = rs.index(f"daddr {SLIRP4NETNS_GATEWAY} accept")
-        private_pos = rs.index("10.0.0.0/8")
+        private_pos = rs.index(RFC1918[0])
         assert gw_pos < private_pos
 
     def test_hook_ruleset_no_gateway_no_rule(self) -> None:
         """hook_ruleset() without gateway has no gateway rule."""
-        rs = hook_ruleset(dns="169.254.1.1", loopback_ports=(9418,))
+        rs = hook_ruleset(dns=PASTA_DNS, loopback_ports=(9418,))
         assert f"daddr {SLIRP4NETNS_GATEWAY}" not in rs
 
     def test_bypass_ruleset_includes_gateway_rule(self) -> None:
