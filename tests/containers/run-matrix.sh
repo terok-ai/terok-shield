@@ -88,11 +88,17 @@ run_tests() {
             cp -a /src /workspace
             cd /workspace
 
-            # Install in a venv
-            python3 -m venv .venv
-            . .venv/bin/activate
-            pip install --quiet pip --upgrade
-            pip install --quiet poetry
+            # Install in a venv (use uv if available, else poetry)
+            if command -v uv &>/dev/null; then
+                uv venv --python 3.12 .venv
+                . .venv/bin/activate
+                uv pip install poetry
+            else
+                python3 -m venv .venv
+                . .venv/bin/activate
+                pip install --quiet pip --upgrade
+                pip install --quiet poetry
+            fi
             poetry install --with test --quiet 2>&1 | tail -3
 
             # Run integration tests
