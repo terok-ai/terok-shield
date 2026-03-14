@@ -163,13 +163,13 @@ class Shield:
                 needs_setup = True
                 setup_hint = global_hooks_hint()
                 issues.append(
-                    "Global hooks not installed — containers will lose firewall on restart"
+                    "Global hooks not installed - containers will lose firewall on restart"
                 )
 
         if info.hooks_dir_persists and has_global_hooks():
             health = "stale-hooks"
             issues.append(
-                "Stale global hooks detected — not needed on podman >= 5.6.0. "
+                "Stale global hooks detected - not needed on podman >= 5.6.0. "
                 "Consider removing them."
             )
 

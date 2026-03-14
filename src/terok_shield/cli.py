@@ -487,8 +487,8 @@ def _cmd_setup(*, root: bool, user: bool) -> None:
     if not root and not user:
         # Interactive: present options
         print("terok-shield setup: install global OCI hooks\n")
-        print(f"  [r] System-wide (sudo) → {sys_dir}")
-        print(f"  [u] User-local         → {usr_dir}")
+        print(f"  [r] System-wide (sudo) -> {sys_dir}")
+        print(f"  [u] User-local         -> {usr_dir}")
         print("      (+ update ~/.config/containers/containers.conf)")
         print()
         choice = input("Choose [r/u]: ").strip().lower()
