@@ -1034,3 +1034,84 @@ def test_check_environment_command(
     assert "podman_version=5.8.0" in out
     assert "hooks=per-container" in out
     assert "health=ok" in out
+
+
+# ── version command test ─────────────────────────────────
+
+
+@mock.patch("terok_shield.run.find_nft", return_value=NFT_BINARY)
+def test_version_flag_prints_versions(
+    _find: mock.Mock,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--version prints terok-shield + podman + nft versions."""
+    with mock.patch("subprocess.run") as mock_run:
+        mock_run.return_value = mock.Mock(returncode=0, stdout="5.8.0\n")
+        with pytest.raises(SystemExit, match="0"):
+            main(["--version"])
+    out = capsys.readouterr().out
+    assert "terok-shield" in out
+    assert "podman 5.8.0" in out
+    assert "nft found" in out
+
+
+@mock.patch("terok_shield.run.find_nft", return_value="")
+def test_version_flag_podman_missing(
+    _find: mock.Mock,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--version handles missing podman gracefully."""
+    with mock.patch("subprocess.run", side_effect=FileNotFoundError):
+        with pytest.raises(SystemExit, match="0"):
+            main(["--version"])
+    out = capsys.readouterr().out
+    assert "podman not found" in out
+    assert "nft not found" in out
+
+
+# ── interactive setup test ───────────────────────────────
+
+
+class TestSetupInteractive:
+    """Tests for interactive setup mode."""
+
+    @mock.patch("terok_shield.mode_hook.setup_global_hooks")
+    @mock.patch("builtins.input", return_value="u")
+    def test_interactive_user_choice(
+        self,
+        _input: mock.Mock,
+        mock_setup: mock.Mock,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Interactive setup with 'u' choice installs user hooks."""
+        monkeypatch.setattr(
+            "terok_shield.podman_info.ensure_containers_conf_hooks_dir", lambda _d: None
+        )
+        main(["setup"])
+        mock_setup.assert_called_once()
+        assert "Done" in capsys.readouterr().out
+
+    @mock.patch("builtins.input", return_value="x")
+    def test_interactive_cancel(
+        self,
+        _input: mock.Mock,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Interactive setup with invalid choice cancels."""
+        main(["setup"])
+        assert "Cancelled" in capsys.readouterr().out
+
+    @mock.patch("terok_shield.mode_hook.setup_global_hooks")
+    @mock.patch("builtins.input", return_value="r")
+    def test_interactive_root_choice(
+        self,
+        _input: mock.Mock,
+        mock_setup: mock.Mock,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Interactive setup with 'r' choice uses sudo."""
+        main(["setup"])
+        mock_setup.assert_called_once()
+        _, kwargs = mock_setup.call_args
+        assert kwargs.get("use_sudo") is True
