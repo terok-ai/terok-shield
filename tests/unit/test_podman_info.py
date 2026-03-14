@@ -391,9 +391,13 @@ class TestParseVersion:
         assert _parse_version("5.4") == (5, 4)
 
     def test_version_with_suffix(self) -> None:
-        """Version with non-numeric suffix stops at the non-numeric part."""
-        # "5.4.2-beta1" splits to ["5", "4", "2-beta1"], int("2-beta1") fails → (5, 4)
-        assert _parse_version("5.4.2-beta1") == (5, 4)
+        """Version with prerelease suffix extracts leading digits."""
+        # "5.4.2-beta1" → each part's leading digits: 5, 4, 2
+        assert _parse_version("5.4.2-beta1") == (5, 4, 2)
+
+    def test_version_rc(self) -> None:
+        """Release candidate version preserves all components."""
+        assert _parse_version("5.6.0-rc1") == (5, 6, 0)
 
     def test_empty_string(self) -> None:
         """Empty string returns (0,)."""

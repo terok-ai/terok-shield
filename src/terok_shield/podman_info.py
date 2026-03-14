@@ -77,12 +77,22 @@ class PodmanInfo:
 
 
 def _parse_version(version_str: str) -> tuple[int, ...]:
-    """Parse a version string like ``5.4.2`` into an int tuple."""
+    """Parse a version string like ``5.4.2`` into an int tuple.
+
+    Extracts leading digits from each dotted component, so
+    ``5.6.0-rc1`` parses as ``(5, 6, 0)`` rather than ``(5, 6)``.
+    """
     parts: list[int] = []
     for part in version_str.split("."):
-        try:
-            parts.append(int(part))
-        except ValueError:
+        digits = ""
+        for ch in part:
+            if ch.isdigit():
+                digits += ch
+            else:
+                break
+        if digits:
+            parts.append(int(digits))
+        else:
             break
     return tuple(parts) if parts else (0,)
 
