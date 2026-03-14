@@ -38,6 +38,8 @@ from ..testnet import (
     IPV6_VERBOSE,
     IPV6_VERBOSE_CANONICAL,
     LINK_LOCAL_DNS,
+    SLIRP4NETNS_DNS,
+    SLIRP4NETNS_GATEWAY,
     TEST_DOMAIN,
     TEST_IP1,
     TEST_IP2,
@@ -588,34 +590,38 @@ class TestGatewayPortRules:
 
     def test_hook_ruleset_includes_gateway_rule(self) -> None:
         """hook_ruleset() with gateway adds accept rule before private-range block."""
-        rs = hook_ruleset(dns="10.0.2.3", loopback_ports=(9418,), gateway="10.0.2.2")
+        rs = hook_ruleset(dns=SLIRP4NETNS_DNS, loopback_ports=(9418,), gateway=SLIRP4NETNS_GATEWAY)
         # Gateway rule must appear before the private-range reject
-        gw_pos = rs.index("daddr 10.0.2.2 accept")
+        gw_pos = rs.index(f"daddr {SLIRP4NETNS_GATEWAY} accept")
         private_pos = rs.index("10.0.0.0/8")
         assert gw_pos < private_pos
 
     def test_hook_ruleset_no_gateway_no_rule(self) -> None:
         """hook_ruleset() without gateway has no gateway rule."""
         rs = hook_ruleset(dns="169.254.1.1", loopback_ports=(9418,))
-        assert "daddr 10.0.2.2" not in rs
+        assert f"daddr {SLIRP4NETNS_GATEWAY}" not in rs
 
     def test_bypass_ruleset_includes_gateway_rule(self) -> None:
         """bypass_ruleset() with gateway adds accept rule."""
-        rs = bypass_ruleset(dns="10.0.2.3", loopback_ports=(9418,), gateway="10.0.2.2")
-        assert "daddr 10.0.2.2 accept" in rs
+        rs = bypass_ruleset(
+            dns=SLIRP4NETNS_DNS, loopback_ports=(9418,), gateway=SLIRP4NETNS_GATEWAY
+        )
+        assert f"daddr {SLIRP4NETNS_GATEWAY} accept" in rs
 
     def test_gateway_multiple_ports(self) -> None:
         """Gateway rule generated for each loopback port."""
-        rs = hook_ruleset(dns="10.0.2.3", loopback_ports=(9418, 8080), gateway="10.0.2.2")
-        assert "tcp dport 9418 ip daddr 10.0.2.2 accept" in rs
-        assert "tcp dport 8080 ip daddr 10.0.2.2 accept" in rs
+        rs = hook_ruleset(
+            dns=SLIRP4NETNS_DNS, loopback_ports=(9418, 8080), gateway=SLIRP4NETNS_GATEWAY
+        )
+        assert f"tcp dport 9418 ip daddr {SLIRP4NETNS_GATEWAY} accept" in rs
+        assert f"tcp dport 8080 ip daddr {SLIRP4NETNS_GATEWAY} accept" in rs
 
     def test_gateway_empty_ports_no_rule(self) -> None:
         """Gateway with no loopback ports produces no rule."""
-        rs = hook_ruleset(dns="10.0.2.3", loopback_ports=(), gateway="10.0.2.2")
-        assert "daddr 10.0.2.2" not in rs
+        rs = hook_ruleset(dns=SLIRP4NETNS_DNS, loopback_ports=(), gateway=SLIRP4NETNS_GATEWAY)
+        assert f"daddr {SLIRP4NETNS_GATEWAY}" not in rs
 
     def test_gateway_validated(self) -> None:
         """Invalid gateway IP is rejected."""
         with pytest.raises(ValueError, match="Invalid"):
-            hook_ruleset(dns="10.0.2.3", loopback_ports=(9418,), gateway="not-an-ip")
+            hook_ruleset(dns=SLIRP4NETNS_DNS, loopback_ports=(9418,), gateway="not-an-ip")

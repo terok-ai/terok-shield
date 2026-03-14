@@ -225,9 +225,9 @@ def hook_ruleset(
         loopback_ports: TCP ports to allow on the loopback interface.
         gateway: Network gateway IP for loopback port access (slirp4netns).
     """
-    safe_ip(dns)
+    dns = safe_ip(dns)
     if gateway:
-        safe_ip(gateway)
+        gateway = safe_ip(gateway)
     for p in loopback_ports:
         _safe_port(p)
     port_rules = _loopback_port_rules(loopback_ports)
@@ -237,7 +237,7 @@ def hook_ruleset(
         infra_block += f"\n{gw_rules}"
     if port_rules:
         infra_block += f"\n{port_rules}"
-    infra_block += "\n" if infra_block else "\n"
+    infra_block += "\n"
     dns_af = "ip" if _is_v4(dns) else "ip6"
     return textwrap.dedent(f"""\
         table {NFT_TABLE} {{
@@ -287,9 +287,9 @@ def bypass_ruleset(
         gateway: Network gateway IP for loopback port access (slirp4netns).
         allow_all: If True, remove private-range reject rules.
     """
-    safe_ip(dns)
+    dns = safe_ip(dns)
     if gateway:
-        safe_ip(gateway)
+        gateway = safe_ip(gateway)
     for p in loopback_ports:
         _safe_port(p)
     port_rules = _loopback_port_rules(loopback_ports)
@@ -299,7 +299,7 @@ def bypass_ruleset(
         infra_block += f"\n{gw_rules}"
     if port_rules:
         infra_block += f"\n{port_rules}"
-    infra_block += "\n" if infra_block else "\n"
+    infra_block += "\n"
     dns_af = "ip" if _is_v4(dns) else "ip6"
     private_block = "" if allow_all else f"\n{_private_range_rules()}"
     bypass_log = f'        ct state new log prefix "{BYPASS_LOG_PREFIX}: " counter'

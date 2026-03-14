@@ -42,6 +42,11 @@ RFC1918_CIDR_10: str = "10.0.0.0/8"  # Broad RFC1918 CIDR (prefix <= 16)
 RFC1918_CIDR_192: str = "192.168.1.0/24"  # Narrow RFC1918 CIDR (prefix > 16)
 LINK_LOCAL_DNS = "169.254.0.1"  # Link-local DNS forwarder (pasta-style)
 
+# ── slirp4netns default network (10.0.2.0/24) ──
+
+SLIRP4NETNS_GATEWAY = "10.0.2.2"  # Default slirp4netns gateway
+SLIRP4NETNS_DNS = "10.0.2.3"  # Default slirp4netns DNS forwarder
+
 # --8<-- [start:outbound-targets]
 # ── Allowed target: Cloudflare (anycast 1.1.1.1 + 1.0.0.1) ──
 # Both IPs must be in the allow set because Cloudflare's anycast may respond
