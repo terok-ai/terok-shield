@@ -25,8 +25,8 @@ destinations — everything else is dropped.
 ### Requirements
 
 - Linux with nftables (`nft` binary)
-  - Tested on Fedora 43, Debian 13, and Ubuntu 24.04, probably also works on other modern Linux distros.
-- Podman (rootless, recommended > 5.6.0, untested < 4.9.3)
+  - Tested on Fedora 43, Debian 12 and 13, and Ubuntu 24.04, probably also works on other modern Linux distros.
+- Podman (rootless, recommended > 5.6.0, untested < 4.3.1)
 - Python 3.12+
 - `dig` (from `dnsutils` / `bind-utils`) for DNS resolution
 
