@@ -1,0 +1,14 @@
+# Debian 12 (Bookworm) — podman 4.3.1, slirp4netns only
+FROM docker.io/library/debian:12
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    podman slirp4netns nftables uidmap fuse-overlayfs \
+    python3 python3-pip python3-venv \
+    git curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Debian 12 ships Python 3.11 — install 3.12 from backports if available,
+# otherwise tests run on 3.11 (some typing features may differ)
+RUN python3 --version
+
+WORKDIR /src

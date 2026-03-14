@@ -63,6 +63,13 @@ test-integration:
 	mkdir -p $(REPORTS_DIR)
 	poetry run pytest tests/integration/ -v --junitxml=$(INTEGRATION_JUNIT_XML) -o junit_family=legacy
 
+# Multi-distro integration test matrix (Debian 12/13, Ubuntu 24.04, Fedora 43)
+test-matrix:
+	./tests/containers/run-matrix.sh
+
+test-matrix-build:
+	./tests/containers/run-matrix.sh --build-only
+
 # Generate integration test map (Markdown table grouped by directory)
 test-integration-map:
 	poetry run python docs/test_map.py
