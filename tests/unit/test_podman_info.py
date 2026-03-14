@@ -253,3 +253,81 @@ class TestHasGlobalHooks:
     def test_empty_dirs_list(self) -> None:
         """Returns False with no dirs to check."""
         assert not has_global_hooks([])
+
+
+# ── ensure_containers_conf_hooks_dir tests ───────────────
+
+from terok_shield.podman_info import ensure_containers_conf_hooks_dir
+
+
+class TestEnsureContainersConf:
+    """Tests for containers.conf modification."""
+
+    def test_creates_new_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Creates containers.conf when absent."""
+        conf_dir = tmp_path / "containers"
+        monkeypatch.setattr(
+            "terok_shield.podman_info._user_containers_conf", lambda: conf_dir / "containers.conf"
+        )
+        ensure_containers_conf_hooks_dir(Path("/my/hooks"))
+        text = (conf_dir / "containers.conf").read_text()
+        assert 'hooks_dir = ["/my/hooks"]' in text
+        assert text.count("[engine]") == 1
+
+    def test_inserts_into_existing_engine_section(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Inserts hooks_dir into existing [engine] without duplicating the section."""
+        conf = tmp_path / "containers.conf"
+        conf.write_text('[engine]\nimage_copy_tmp_dir = "/data/tmp"\n')
+        monkeypatch.setattr("terok_shield.podman_info._user_containers_conf", lambda: conf)
+        ensure_containers_conf_hooks_dir(Path("/my/hooks"))
+        text = conf.read_text()
+        assert text.count("[engine]") == 1
+        assert 'hooks_dir = ["/my/hooks"]' in text
+        assert 'image_copy_tmp_dir = "/data/tmp"' in text
+
+    def test_preserves_comments(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Comments in the file are preserved."""
+        conf = tmp_path / "containers.conf"
+        conf.write_text('# My config\n[engine]\n# temp dir\nimage_copy_tmp_dir = "/data"\n')
+        monkeypatch.setattr("terok_shield.podman_info._user_containers_conf", lambda: conf)
+        ensure_containers_conf_hooks_dir(Path("/my/hooks"))
+        text = conf.read_text()
+        assert "# My config" in text
+        assert "# temp dir" in text
+
+    def test_ignores_engine_in_comment(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Does not match [engine] inside a comment."""
+        conf = tmp_path / "containers.conf"
+        conf.write_text('# see [engine] docs\n[engine]\nfoo = "bar"\n')
+        monkeypatch.setattr("terok_shield.podman_info._user_containers_conf", lambda: conf)
+        ensure_containers_conf_hooks_dir(Path("/my/hooks"))
+        text = conf.read_text()
+        assert text.count("[engine]") == 2  # one in comment, one real
+        assert text.count("hooks_dir") == 1
+
+    def test_skips_if_already_configured(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No-op when hooks_dir already points to the right path."""
+        conf = tmp_path / "containers.conf"
+        conf.write_text('[engine]\nhooks_dir = ["/my/hooks"]\n')
+        monkeypatch.setattr("terok_shield.podman_info._user_containers_conf", lambda: conf)
+        ensure_containers_conf_hooks_dir(Path("/my/hooks"))
+        assert conf.read_text().count("hooks_dir") == 1
+
+    def test_appends_engine_when_no_section(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Appends [engine] section when file exists but has no [engine]."""
+        conf = tmp_path / "containers.conf"
+        conf.write_text("[containers]\nlabel = false\n")
+        monkeypatch.setattr("terok_shield.podman_info._user_containers_conf", lambda: conf)
+        ensure_containers_conf_hooks_dir(Path("/my/hooks"))
+        text = conf.read_text()
+        assert "[containers]" in text
+        assert "[engine]" in text
+        assert 'hooks_dir = ["/my/hooks"]' in text

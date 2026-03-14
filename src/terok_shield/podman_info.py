@@ -226,6 +226,8 @@ def ensure_containers_conf_hooks_dir(hooks_dir: Path) -> None:
     Creates the file if absent.  Inserts ``hooks_dir`` into the existing
     ``[engine]`` section, or appends a new section if none exists.
     Warns (does not fail) if ``hooks_dir`` is already set differently.
+
+    Uses line-based text manipulation to preserve comments and formatting.
     """
     conf_path = _user_containers_conf()
     hooks_str = str(hooks_dir)
@@ -242,11 +244,16 @@ def ensure_containers_conf_hooks_dir(hooks_dir: Path) -> None:
             )
             return
         # File exists but no hooks_dir — insert into [engine] or append
-        text = conf_path.read_text()
-        if "[engine]" in text:
-            # Insert hooks_dir right after the [engine] header
-            text = text.replace("[engine]", f"[engine]\n{hooks_line}", 1)
-            conf_path.write_text(text)
+        lines = conf_path.read_text().splitlines(keepends=True)
+        inserted = False
+        for i, line in enumerate(lines):
+            # Match actual [engine] section header (not in comments)
+            if line.strip() == "[engine]":
+                lines.insert(i + 1, hooks_line + "\n")
+                inserted = True
+                break
+        if inserted:
+            conf_path.write_text("".join(lines))
         else:
             with conf_path.open("a") as f:
                 f.write(f"\n[engine]\n{hooks_line}\n")
