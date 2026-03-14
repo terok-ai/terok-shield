@@ -217,7 +217,7 @@ class HookMode:
         else:
             raise ShieldNeedsSetup(
                 f"Podman {'.'.join(str(v) for v in info.version)} detected.\n\n"
-                + global_hooks_hint()
+                + global_hooks_hint(state_dir=sd)
             )
 
         args += [

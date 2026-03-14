@@ -196,11 +196,23 @@ def parse_resolv_conf(text: str) -> str:
     return ""
 
 
-def global_hooks_hint(hooks_dirs: list[Path] | None = None) -> str:
+_USER_HOOKS_DIR = "~/.local/share/containers/oci/hooks.d"
+
+_HOOK_FILES = ("terok-shield-createRuntime.json", "terok-shield-poststop.json")
+
+
+def global_hooks_hint(
+    state_dir: Path | None = None,
+    hooks_dirs: list[Path] | None = None,
+) -> str:
     """Generate a human-readable hint for setting up global hooks.
 
-    Checks available hooks directories for writability and suggests
-    the best option(s) for the user.
+    When *state_dir* is provided, includes concrete ``cp`` commands
+    using the hook files that ``install_hooks()`` already wrote there.
+
+    Args:
+        state_dir: Per-container state directory (source of hook files).
+        hooks_dirs: Override auto-detected hooks directories.
     """
     if hooks_dirs is None:
         hooks_dirs = find_hooks_dirs()
@@ -212,24 +224,43 @@ def global_hooks_hint(hooks_dirs: list[Path] | None = None) -> str:
         "To ensure hooks survive restart, install them in a global hooks directory.",
     ]
 
-    writable = [d for d in hooks_dirs if d.is_dir() and os.access(d, os.W_OK)]
-    read_only = [d for d in hooks_dirs if d.is_dir() and not os.access(d, os.W_OK)]
-    missing = [d for d in hooks_dirs if not d.is_dir()]
+    # Locate source files
+    hooks_subdir = f"{state_dir}/hooks" if state_dir else "<state_dir>/hooks"
+    entrypoint = f"{state_dir}/terok-shield-hook" if state_dir else "<state_dir>/terok-shield-hook"
+    cp_files = " ".join(f"{hooks_subdir}/{f}" for f in _HOOK_FILES)
 
-    if writable:
-        lines.append(f"\nWritable hooks dir available: {writable[0]}")
-        lines.append("  Copy hook files there to enable global hooks.")
-    elif read_only:
-        lines.append(f"\nHooks dir exists but not writable: {read_only[0]}")
-        lines.append("  Use sudo to install hooks there.")
-    elif missing:
-        lines.append(f"\nConfigured hooks dir does not exist: {missing[0]}")
-        lines.append("  Create it and install hooks there.")
-    else:
-        lines.append("\nNo hooks directory found.")
-        lines.append("  Add hooks_dir to ~/.config/containers/containers.conf:")
-        lines.append("    [engine]")
-        lines.append('    hooks_dir = ["~/.local/share/containers/oci/hooks.d"]')
-        lines.append("  Then create the directory and install hooks there.")
+    # Detect system dirs
+    system_dirs = [d for d in _SYSTEM_HOOKS_DIRS if d.is_dir()]
+    system_dir = system_dirs[0] if system_dirs else _SYSTEM_HOOKS_DIRS[-1]
+
+    # Always show both options so the user can choose
+    lines.append("")
+    lines.append(f"Hook source files: {hooks_subdir}/")
+    lines.append(f"Entrypoint script: {entrypoint}")
+    lines.append("")
+
+    # Option 1: system-wide (sudo)
+    lines.append("Option 1 — system-wide (needs sudo):")
+    lines.append(f"  sudo mkdir -p {system_dir}")
+    lines.append(f"  sudo cp {cp_files} {system_dir}/")
+    lines.append(f"  sudo cp {entrypoint} {system_dir}/")
+    # Fix the entrypoint path in the copied JSONs
+    lines.append(f"  sudo sed -i 's|{entrypoint}|{system_dir}/terok-shield-hook|'")
+    lines.append(f"    {' '.join(f'{system_dir}/{f}' for f in _HOOK_FILES)}")
+
+    # Option 2: user-local (no root)
+    user_dir = _USER_HOOKS_DIR
+    lines.append("")
+    lines.append("Option 2 — user-local (no root):")
+    lines.append(f"  mkdir -p {user_dir}")
+    lines.append(f"  cp {cp_files} {user_dir}/")
+    lines.append(f"  cp {entrypoint} {user_dir}/")
+    lines.append(f"  sed -i 's|{entrypoint}|{user_dir}/terok-shield-hook|'")
+    lines.append(f"    {' '.join(f'{user_dir}/{f}' for f in _HOOK_FILES)}")
+    lines.append("")
+    lines.append("  Then ensure podman checks this directory — add to")
+    lines.append("  ~/.config/containers/containers.conf:")
+    lines.append("    [engine]")
+    lines.append(f'    hooks_dir = ["{user_dir}"]')
 
     return "\n".join(lines)

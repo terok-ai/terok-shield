@@ -145,7 +145,9 @@ class Shield:
                 )
             else:
                 needs_setup = True
-                setup_hint = global_hooks_hint(hooks_dirs)
+                setup_hint = global_hooks_hint(
+                    state_dir=self.config.state_dir, hooks_dirs=hooks_dirs
+                )
                 issues.append(
                     f"Podman {'.'.join(str(v) for v in info.version)}: "
                     "global hooks not installed — containers will lose firewall on restart"
