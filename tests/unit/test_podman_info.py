@@ -40,6 +40,17 @@ DEBIAN_13_INFO = {
     "version": {"Version": "5.4.2"},
 }
 
+# Debian 12 — podman 4.3.1, slirp4netns only, no pasta at all
+DEBIAN_12_INFO = {
+    "host": {
+        "slirp4netns": {
+            "executable": "/usr/bin/slirp4netns",
+            "package": "slirp4netns_1.2.0-1_amd64",
+        },
+    },
+    "version": {"Version": "4.3.1"},
+}
+
 # Fedora 43 — podman 5.8.0, pasta default, slirp4netns not installed
 FEDORA_43_INFO = {
     "host": {
@@ -78,6 +89,14 @@ class TestParsePodmanInfo:
         assert info.rootless_network_cmd == "pasta"
         assert info.slirp4netns_executable == ""
 
+    def test_debian_12(self) -> None:
+        """Debian 12 (podman 4.3.1) — slirp4netns only, no pasta section."""
+        info = parse_podman_info(json.dumps(DEBIAN_12_INFO))
+        assert info.version == (4, 3, 1)
+        assert info.rootless_network_cmd == ""
+        assert info.pasta_executable == ""
+        assert info.slirp4netns_executable == "/usr/bin/slirp4netns"
+
     def test_empty_output(self) -> None:
         """Empty output produces zero-version fallback."""
         info = parse_podman_info("")
@@ -112,6 +131,11 @@ class TestNetworkMode:
         info = parse_podman_info(json.dumps(UBUNTU_2404_INFO))
         assert info.network_mode == "slirp4netns"
 
+    def test_no_pasta_section_at_all(self) -> None:
+        """No pasta section in podman info (Debian 12) -> slirp4netns."""
+        info = parse_podman_info(json.dumps(DEBIAN_12_INFO))
+        assert info.network_mode == "slirp4netns"
+
     def test_absent_field_without_slirp_exe(self) -> None:
         """No rootlessNetworkCmd + no slirp4netns exe → pasta."""
         data = {
@@ -141,6 +165,11 @@ class TestHooksDirPersists:
     def test_podman_542_not_persistent(self) -> None:
         """podman 5.4.2 → hooks-dir does NOT persist."""
         info = parse_podman_info(json.dumps(DEBIAN_13_INFO))
+        assert not info.hooks_dir_persists
+
+    def test_podman_431_not_persistent(self) -> None:
+        """podman 4.3.1 -> hooks-dir does NOT persist."""
+        info = parse_podman_info(json.dumps(DEBIAN_12_INFO))
         assert not info.hooks_dir_persists
 
     def test_podman_560_persistent(self) -> None:
