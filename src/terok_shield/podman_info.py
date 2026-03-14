@@ -223,12 +223,13 @@ def global_hooks_hint() -> str:
 def ensure_containers_conf_hooks_dir(hooks_dir: Path) -> None:
     """Ensure ``~/.config/containers/containers.conf`` includes *hooks_dir*.
 
-    Creates the file if absent.  Appends ``[engine]`` section with
-    ``hooks_dir`` if not already configured.  Warns (but does not fail)
-    if ``hooks_dir`` is already set to a different value.
+    Creates the file if absent.  Inserts ``hooks_dir`` into the existing
+    ``[engine]`` section, or appends a new section if none exists.
+    Warns (does not fail) if ``hooks_dir`` is already set differently.
     """
     conf_path = _user_containers_conf()
     hooks_str = str(hooks_dir)
+    hooks_line = f'hooks_dir = ["{hooks_str}"]'
 
     if conf_path.is_file():
         existing = _parse_hooks_dir_from_conf(conf_path)
@@ -240,9 +241,15 @@ def ensure_containers_conf_hooks_dir(hooks_dir: Path) -> None:
                 f"Add {hooks_str!r} to the list manually if needed."
             )
             return
-        # File exists but no hooks_dir — append
-        with conf_path.open("a") as f:
-            f.write(f'\n[engine]\nhooks_dir = ["{hooks_str}"]\n')
+        # File exists but no hooks_dir — insert into [engine] or append
+        text = conf_path.read_text()
+        if "[engine]" in text:
+            # Insert hooks_dir right after the [engine] header
+            text = text.replace("[engine]", f"[engine]\n{hooks_line}", 1)
+            conf_path.write_text(text)
+        else:
+            with conf_path.open("a") as f:
+                f.write(f"\n[engine]\n{hooks_line}\n")
     else:
         conf_path.parent.mkdir(parents=True, exist_ok=True)
-        conf_path.write_text(f'[engine]\nhooks_dir = ["{hooks_str}"]\n')
+        conf_path.write_text(f"[engine]\n{hooks_line}\n")

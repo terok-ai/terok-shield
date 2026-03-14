@@ -46,17 +46,25 @@ from .util import is_ip as _is_ip
 class EnvironmentCheck:
     """Result of :meth:`Shield.check_environment`.
 
+    Machine-readable fields for programmatic consumers (terok TUI, scripts).
+    Human-readable ``issues`` and ``setup_hint`` for CLI display.
+
     Attributes:
         ok: True if no issues found.
-        issues: List of human-readable issue descriptions.
         podman_version: Detected podman version tuple.
+        hooks: Hook installation type (``per-container``, ``global-system``,
+            ``global-user``, ``not-installed``).
+        health: Environment health (``ok``, ``setup-needed``, ``stale-hooks``).
+        issues: List of human-readable issue descriptions.
         needs_setup: True if one-time setup is required.
         setup_hint: Setup instructions (empty if not needed).
     """
 
     ok: bool = True
-    issues: list[str] = field(default_factory=list)
     podman_version: tuple[int, ...] = (0,)
+    hooks: str = "per-container"
+    health: str = "ok"
+    issues: list[str] = field(default_factory=list)
     needs_setup: bool = False
     setup_hint: str = ""
 
@@ -134,35 +142,43 @@ class Shield:
         issues: list[str] = []
         needs_setup = False
         setup_hint = ""
+        hooks = "per-container"
+        health = "ok"
 
-        # Check hooks-dir persistence (podman < 5.6.0)
         if not info.hooks_dir_persists:
             hooks_dirs = find_hooks_dirs()
             if has_global_hooks(hooks_dirs):
-                issues.append(
-                    f"Podman {'.'.join(str(v) for v in info.version)}: "
-                    "using global hooks (--hooks-dir does not persist on restart)"
-                )
+                # Determine if system or user hooks
+                from .podman_info import _SYSTEM_HOOKS_DIRS
+
+                hooks = "global-user"
+                for sys_dir in _SYSTEM_HOOKS_DIRS:
+                    if has_global_hooks([sys_dir]):
+                        hooks = "global-system"
+                        break
+                health = "ok"
             else:
+                hooks = "not-installed"
+                health = "setup-needed"
                 needs_setup = True
                 setup_hint = global_hooks_hint()
                 issues.append(
-                    f"Podman {'.'.join(str(v) for v in info.version)}: "
-                    "global hooks not installed — containers will lose firewall on restart"
+                    "Global hooks not installed — containers will lose firewall on restart"
                 )
 
-        # Check for stale global hooks on modern podman
         if info.hooks_dir_persists and has_global_hooks():
+            health = "stale-hooks"
             issues.append(
-                "Stale global hooks detected — not needed on "
-                f"podman {'.'.join(str(v) for v in info.version)} (>= 5.6.0). "
-                "Consider removing them from your hooks directory."
+                "Stale global hooks detected — not needed on podman >= 5.6.0. "
+                "Consider removing them."
             )
 
         return EnvironmentCheck(
             ok=not issues,
-            issues=issues,
             podman_version=info.version,
+            hooks=hooks,
+            health=health,
+            issues=issues,
             needs_setup=needs_setup,
             setup_hint=setup_hint,
         )

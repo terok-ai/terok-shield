@@ -60,21 +60,36 @@ class CommandDef:
 # ── Handler functions ─────────────────────────────────────
 
 
+def _format_version(v: tuple[int, ...]) -> str:
+    """Format a version tuple as a dotted string."""
+    return ".".join(str(p) for p in v) if v != (0,) else "unknown"
+
+
 def _handle_status(shield: Shield, *, container: str | None = None) -> None:
     """Show shield status, or query a container's firewall state."""
     if container:
         st = shield.state(container)
         print(st.value)
     else:
+        from importlib.metadata import PackageNotFoundError, version as _meta_version
+
+        try:
+            shield_version = _meta_version("terok-shield")
+        except PackageNotFoundError:
+            shield_version = "dev"
         status = shield.status()
+        env = shield.check_environment()
+        print(f"Version:  {shield_version}")
+        print(f"Podman:   {_format_version(env.podman_version)}")
         print(f"Mode:     {status['mode']}")
+        print(f"Hooks:    {env.hooks}")
+        print(f"Health:   {env.health}")
         print(f"Audit:    {'enabled' if status['audit_enabled'] else 'disabled'}")
         print(f"Profiles: {', '.join(status['profiles']) or '(none)'}")
-        env = shield.check_environment()
         if env.issues:
             print()
             for issue in env.issues:
-                print(f"  Warning: {issue}")
+                print(f"  {issue}")
             if env.needs_setup:
                 print("\n  Run 'terok-shield setup' to fix.")
 
@@ -136,12 +151,15 @@ def _handle_profiles(shield: Shield) -> None:
 def _handle_check_environment(shield: Shield) -> None:
     """Check podman environment for compatibility issues."""
     result = shield.check_environment()
-    if result.ok:
-        version_str = ".".join(str(v) for v in result.podman_version)
-        print(f"Environment OK (podman {version_str})")
-        return
-    for issue in result.issues:
-        print(f"  - {issue}")
+    # Machine-readable block
+    print(f"podman_version={_format_version(result.podman_version)}")
+    print(f"hooks={result.hooks}")
+    print(f"health={result.health}")
+    # Human-readable details (only if issues)
+    if result.issues:
+        print()
+        for issue in result.issues:
+            print(f"  {issue}")
     if result.setup_hint:
         print()
         print(result.setup_hint)

@@ -204,7 +204,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--version",
         action="version",
-        version=f"%(prog)s {_get_version()}",
+        version=_version_string(),
     )
     parser.add_argument(
         "--state-dir",
@@ -516,3 +516,28 @@ def _get_version() -> str:
     from . import __version__
 
     return __version__
+
+
+def _version_string() -> str:
+    """Return version string with terok-shield and podman versions."""
+    from .run import find_nft
+
+    version = _get_version()
+    lines = [f"terok-shield {version}"]
+    # Best-effort podman version (don't fail if podman is missing)
+    try:
+        import subprocess
+
+        r = subprocess.run(  # noqa: S603, S607
+            ["podman", "version", "--format", "{{.Client.Version}}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        podman_v = r.stdout.strip() if r.returncode == 0 else "not found"
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        podman_v = "not found"
+    lines.append(f"podman {podman_v}")
+    nft = find_nft()
+    lines.append(f"nft {'found' if nft else 'not found'}")
+    return "\n".join(lines)
