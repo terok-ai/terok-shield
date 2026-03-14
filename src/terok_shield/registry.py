@@ -65,6 +65,17 @@ def _format_version(v: tuple[int, ...]) -> str:
     return ".".join(str(p) for p in v) if v != (0,) else "unknown"
 
 
+def _print_env_hint(env: object) -> None:
+    """Print human-readable environment issues and setup hint."""
+    if env.issues:
+        print()
+        for issue in env.issues:
+            print(f"  {issue}")
+    if env.setup_hint:
+        print()
+        print(env.setup_hint)
+
+
 def _handle_status(shield: Shield, *, container: str | None = None) -> None:
     """Show shield status, or query a container's firewall state."""
     if container:
@@ -86,12 +97,7 @@ def _handle_status(shield: Shield, *, container: str | None = None) -> None:
         print(f"Health:   {env.health}")
         print(f"Audit:    {'enabled' if status['audit_enabled'] else 'disabled'}")
         print(f"Profiles: {', '.join(status['profiles']) or '(none)'}")
-        if env.issues:
-            print()
-            for issue in env.issues:
-                print(f"  {issue}")
-            if env.needs_setup:
-                print("\n  Run 'terok-shield setup' to fix.")
+        _print_env_hint(env)
 
 
 def _handle_allow(shield: Shield, container: str, *, target: str) -> None:
@@ -155,14 +161,8 @@ def _handle_check_environment(shield: Shield) -> None:
     print(f"podman_version={_format_version(result.podman_version)}")
     print(f"hooks={result.hooks}")
     print(f"health={result.health}")
-    # Human-readable details (only if issues)
-    if result.issues:
-        print()
-        for issue in result.issues:
-            print(f"  {issue}")
-    if result.setup_hint:
-        print()
-        print(result.setup_hint)
+    # Human-readable details (shared with status)
+    _print_env_hint(result)
 
 
 def _handle_preview(shield: Shield, *, down: bool = False, allow_all: bool = False) -> None:
