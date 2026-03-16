@@ -22,7 +22,7 @@ entries = generate_ref_pages(
     config, write_file=write_file, set_edit_path=mkdocs_gen_files.set_edit_path
 )
 for parts, doc_path in entries:
-    nav[parts] = doc_path
+    nav[parts] = str(Path(doc_path).relative_to(config.output_prefix))
 
 with mkdocs_gen_files.open("reference/SUMMARY.md", "w") as f:
     f.writelines(nav.build_literate_nav())
