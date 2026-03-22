@@ -48,13 +48,17 @@ plugins:
             show_symbol_type_toc: true
             members_order: source
             merge_init_into_class: true
-  - gen-files:
-      scripts:
-        - docs/gen_brand_css.py
-        - docs/gen_ref_pages.py
-        - docs/gen_quality_report.py
-        - docs/gen_ci_map.py
-        - docs/gen_test_map.py
+  - terok:
+      ci_map: true
+      ci_map_path: ci_map.md
+      quality_report: true
+      quality_report_path: quality_report.md
+      quality_report_codecov_repo: terok-ai/terok-shield
+      quality_report_codecov_treemap_path: docs/assets/coverage_treemap.svg
+      test_map: true
+      test_map_path: test_map.md
+      ref_pages: true
+      ref_pages_path: reference
   - literate-nav:
       nav_file: SUMMARY.md
   - section-index
@@ -105,4 +109,3 @@ extra:
 
 extra_css:
   - https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;500;700&family=Ubuntu+Mono:wght@400;700&display=swap
-  - stylesheets/extra.css
