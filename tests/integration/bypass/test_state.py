@@ -19,6 +19,7 @@ from ..helpers import disposable_shield as _shield
 
 
 @pytest.mark.needs_podman
+@pytest.mark.needs_hooks
 @pytest.mark.needs_internet
 @podman_missing
 @nft_missing

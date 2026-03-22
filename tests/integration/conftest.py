@@ -22,11 +22,13 @@ import shutil
 import socket
 import subprocess
 import tempfile
+import warnings
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
+from terok_shield.podman_info import has_global_hooks, parse_podman_info
 from terok_shield.run import find_nft
 from tests.testnet import ALLOWED_TARGET_IPS
 
@@ -34,6 +36,25 @@ from .helpers import start_shielded_container
 
 IMAGE = "docker.io/library/alpine:latest"
 CTR_PREFIX = "shield-itest"
+_PODMAN_RM_TIMEOUT = 60
+
+
+def _podman_rm(name: str) -> None:
+    """Best-effort container removal with bounded timeout.
+
+    Used in fixture teardown and finally blocks.  Catches TimeoutExpired
+    so a slow ``podman rm`` never masks the real test failure.
+    """
+    try:
+        subprocess.run(
+            ["podman", "rm", "-f", name], capture_output=True, timeout=_PODMAN_RM_TIMEOUT
+        )
+    except subprocess.TimeoutExpired:
+        warnings.warn(
+            f"podman rm -f {name} timed out after {_PODMAN_RM_TIMEOUT}s",
+            RuntimeWarning,
+            stacklevel=2,
+        )
 
 
 def _has(binary: str) -> bool:
@@ -46,6 +67,7 @@ def _image_available() -> bool:
     r = subprocess.run(
         ["podman", "image", "exists", IMAGE],
         capture_output=True,
+        timeout=10,
     )
     return r.returncode == 0
 
@@ -63,6 +85,40 @@ def _image_available() -> bool:
 podman_missing = pytest.mark.skipif(not _has("podman"), reason="podman not installed")
 nft_missing = pytest.mark.skipif(not find_nft(), reason="nft not installed")
 dig_missing = pytest.mark.skipif(not _has("dig"), reason="dig not installed")
+
+
+def _hooks_available() -> bool:
+    """Return True if OCI hooks will fire on container start.
+
+    Either per-container ``--hooks-dir`` persists (future podman fix)
+    or global hooks are installed via ``terok-shield setup``.
+    """
+    if has_global_hooks():
+        return True
+    if _has("podman"):
+        output = subprocess.run(
+            ["podman", "info", "-f", "json"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        ).stdout
+        return parse_podman_info(output).hooks_dir_persists
+    return False
+
+
+_hooks_available_cached = _hooks_available()
+
+hooks_unavailable = pytest.mark.skipif(
+    not _hooks_available_cached,
+    reason=(
+        "OCI hooks not available. "
+        "Run 'terok-shield setup --user' to install, or use 'make test-matrix' for full coverage."
+    ),
+)
+hooks_present = pytest.mark.skipif(
+    _hooks_available_cached,
+    reason="OCI hooks available — hookless error path not testable",
+)
 
 
 # -- Fixtures -------------------------------------------------
@@ -135,7 +191,7 @@ def nft_in_netns(_pull_image: None, _verify_connectivity: None) -> None:
     if not _has("podman") or not find_nft():
         pytest.skip("podman or nft not installed")
     name = f"{CTR_PREFIX}-nftcheck"
-    subprocess.run(["podman", "rm", "-f", name], capture_output=True)
+    _podman_rm(name)
     try:
         subprocess.run(
             ["podman", "run", "-d", "--name", name, IMAGE, "sleep", "30"],
@@ -161,21 +217,22 @@ def nft_in_netns(_pull_image: None, _verify_connectivity: None) -> None:
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
         pytest.skip(f"nft pre-check failed: {e}")
     finally:
-        subprocess.run(["podman", "rm", "-f", name], capture_output=True)
+        _podman_rm(name)
 
 
 @pytest.fixture
 def container(_pull_image: None) -> Iterator[str]:
     """Start a disposable Alpine container, yield its name, clean up after."""
     name = f"{CTR_PREFIX}-{os.getpid()}"
-    subprocess.run(["podman", "rm", "-f", name], capture_output=True)
+    _podman_rm(name)
     subprocess.run(
         ["podman", "run", "-d", "--name", name, IMAGE, "sleep", "120"],
         check=True,
         capture_output=True,
+        timeout=30,
     )
     yield name
-    subprocess.run(["podman", "rm", "-f", name], capture_output=True)
+    _podman_rm(name)
 
 
 @pytest.fixture
@@ -190,12 +247,13 @@ def container_pid(container: str) -> str:
 def probe_container(_pull_image: None) -> Iterator[str]:
     """Start an Alpine container with Python and shield_probe installed."""
     name = f"{CTR_PREFIX}-probe-{os.getpid()}"
-    subprocess.run(["podman", "rm", "-f", name], capture_output=True)
+    _podman_rm(name)
     try:
         subprocess.run(
             ["podman", "run", "-d", "--name", name, IMAGE, "sleep", "120"],
             check=True,
             capture_output=True,
+            timeout=30,
         )
         # Install Python inside the container.
         subprocess.run(
@@ -214,10 +272,11 @@ def probe_container(_pull_image: None) -> Iterator[str]:
             ["podman", "cp", str(probe_src), f"{name}:/usr/local/bin/shield_probe.py"],
             check=True,
             capture_output=True,
+            timeout=30,
         )
         yield name
     finally:
-        subprocess.run(["podman", "rm", "-f", name], capture_output=True)
+        _podman_rm(name)
 
 
 def nsenter_nft(pid: str, *args: str, stdin: str | None = None) -> subprocess.CompletedProcess:
@@ -243,16 +302,27 @@ def shielded_container(
     _pull_image: None,
     shield_env: Path,
 ) -> Iterator[str]:
-    """Start a container with firewall applied via the public API lifecycle.
+    """Start a container with firewall applied via OCI hooks.
+
+    Requires OCI hooks to be available — either global hooks installed
+    via ``terok-shield setup``, or a podman version where per-container
+    ``--hooks-dir`` persists across restart.
 
     1. ``Shield.pre_start()`` installs hooks, resolves DNS, returns podman args.
-    2. ``podman run`` starts the container with the hook-dir / annotation.
+    2. ``podman run`` starts the container (OCI hooks apply the ruleset).
     3. Yields the container name.
     4. Cleanup: ``podman rm -f``.
 
     Yields:
         Container name with shield firewall applied.
     """
+    if not _hooks_available_cached:
+        pytest.skip(
+            "OCI hooks not available. "
+            "Run 'terok-shield setup --user' to install, "
+            "or use 'make test-matrix' for full coverage."
+        )
+
     from terok_shield import Shield, ShieldConfig
 
     name = f"{CTR_PREFIX}-api-{os.getpid()}"
@@ -260,11 +330,11 @@ def shielded_container(
     cfg = ShieldConfig(state_dir=state_dir)
     shield = Shield(cfg)
 
-    subprocess.run(["podman", "rm", "-f", name], capture_output=True)
+    _podman_rm(name)
 
     try:
         extra_args = shield.pre_start(name)
         start_shielded_container(name, extra_args, IMAGE)
         yield name
     finally:
-        subprocess.run(["podman", "rm", "-f", name], capture_output=True)
+        _podman_rm(name)

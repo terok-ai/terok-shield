@@ -434,7 +434,11 @@ class HookMode:
         """Switch a running container to bypass mode."""
         ruleset = self._container_ruleset(container)
         rs = ruleset.build_bypass(allow_all=allow_all)
-        stdin = f"delete table {NFT_TABLE}\n{rs}"
+        current = self.shield_state(container)
+        if current == ShieldState.INACTIVE:
+            stdin = rs
+        else:
+            stdin = f"delete table {NFT_TABLE}\n{rs}"
         self._runner.nft_via_nsenter(container, stdin=stdin)
         output = self._runner.nft_via_nsenter(container, "list", "ruleset")
         errors = ruleset.verify_bypass(output, allow_all=allow_all)
@@ -445,7 +449,11 @@ class HookMode:
         """Restore normal deny-all mode for a running container."""
         ruleset = self._container_ruleset(container)
         rs = ruleset.build_hook()
-        stdin = f"delete table {NFT_TABLE}\n{rs}"
+        current = self.shield_state(container)
+        if current == ShieldState.INACTIVE:
+            stdin = rs
+        else:
+            stdin = f"delete table {NFT_TABLE}\n{rs}"
         self._runner.nft_via_nsenter(container, stdin=stdin)
 
         # Re-add effective IPs (allowed minus denied)

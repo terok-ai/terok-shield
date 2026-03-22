@@ -9,7 +9,6 @@ Each test checks both actual network behavior and state correctness.
 """
 
 import os
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -23,7 +22,14 @@ from tests.testnet import (
     BLOCKED_TARGET_IP,
 )
 
-from ..conftest import CTR_PREFIX, IMAGE, nft_missing, podman_missing
+from ..conftest import (
+    CTR_PREFIX,
+    IMAGE,
+    _podman_rm,
+    hooks_unavailable,
+    nft_missing,
+    podman_missing,
+)
 from ..helpers import (
     assert_blocked,
     assert_connectable,
@@ -34,6 +40,7 @@ from ..helpers import (
 
 
 @pytest.mark.needs_podman
+@pytest.mark.needs_hooks
 @pytest.mark.needs_internet
 @podman_missing
 @nft_missing
@@ -74,6 +81,7 @@ class TestBypassBasicLifecycle:
 
 
 @pytest.mark.needs_podman
+@pytest.mark.needs_hooks
 @pytest.mark.needs_internet
 @podman_missing
 @nft_missing
@@ -109,6 +117,7 @@ class TestBypassIdempotency:
 
 
 @pytest.mark.needs_podman
+@pytest.mark.needs_hooks
 @pytest.mark.needs_internet
 @podman_missing
 @nft_missing
@@ -144,6 +153,7 @@ class TestBypassModeSwitch:
 
 
 @pytest.mark.needs_podman
+@pytest.mark.needs_hooks
 @pytest.mark.needs_internet
 @podman_missing
 @nft_missing
@@ -188,6 +198,8 @@ class TestBypassWithAllowDeny:
 @pytest.mark.needs_internet
 @podman_missing
 @nft_missing
+@hooks_unavailable
+@pytest.mark.needs_hooks
 @pytest.mark.usefixtures("nft_in_netns")
 class TestBypassIPRestoration:
     """Verify cached IPs are restored when going back up."""
@@ -202,7 +214,7 @@ class TestBypassIPRestoration:
         sd = shield_env / "containers" / name
         shield = Shield(ShieldConfig(state_dir=sd))
 
-        subprocess.run(["podman", "rm", "-f", name], capture_output=True)
+        _podman_rm(name)
 
         try:
             extra_args = shield.pre_start(name)
@@ -226,10 +238,11 @@ class TestBypassIPRestoration:
             assert_reachable(name, ALLOWED_TARGET_HTTP)
 
         finally:
-            subprocess.run(["podman", "rm", "-f", name], capture_output=True, timeout=30)
+            _podman_rm(name)
 
 
 @pytest.mark.needs_podman
+@pytest.mark.needs_hooks
 @pytest.mark.needs_internet
 @podman_missing
 @nft_missing
@@ -269,6 +282,8 @@ class TestBypassAuditTrail:
 @pytest.mark.needs_internet
 @podman_missing
 @nft_missing
+@hooks_unavailable
+@pytest.mark.needs_hooks
 @pytest.mark.usefixtures("nft_in_netns")
 class TestBypassFullE2E:
     """End-to-end test exercising the full user journey.
@@ -292,7 +307,7 @@ class TestBypassFullE2E:
         sd = shield_env / "containers" / name
         shield = Shield(ShieldConfig(state_dir=sd))
 
-        subprocess.run(["podman", "rm", "-f", name], capture_output=True)
+        _podman_rm(name)
 
         try:
             extra_args = shield.pre_start(name)
@@ -352,7 +367,7 @@ class TestBypassFullE2E:
             assert first_allowed < first_down < last_up
 
         finally:
-            subprocess.run(["podman", "rm", "-f", name], capture_output=True, timeout=30)
+            _podman_rm(name)
 
     def test_rapid_toggle(self, shielded_container: str) -> None:
         """Rapidly toggling down/up doesn't break the container.

@@ -28,6 +28,7 @@ declare -A DISTROS=(
     [ubuntu2404]="ubuntu2404"
     [debian13]="debian13"
     [fedora43]="fedora43"
+    [podman]="podman"
 )
 
 # Expected podman versions (for reporting, not enforcement)
@@ -36,6 +37,7 @@ declare -A EXPECTED_VERSIONS=(
     [ubuntu2404]="4.9.x"
     [debian13]="5.4.x"
     [fedora43]="5.8.x"
+    [podman]="latest"
 )
 
 usage() {
@@ -74,6 +76,11 @@ run_tests() {
 
     # Run with --privileged for nested podman/nft support.
     # Mount source as read-only, use a temp venv inside.
+    #
+    # Three-phase test flow:
+    #   1. Run tests that do NOT need hooks (includes hookless error path)
+    #   2. Install global hooks via terok-shield setup --user
+    #   3. Run tests that need hooks (shielded containers, traffic, restart)
     podman run --rm --name "$ctr_name" \
         --privileged \
         --security-opt label=disable \
@@ -103,17 +110,37 @@ run_tests() {
             fi
             poetry install --with test --quiet 2>&1 | tail -3
 
-            # Run integration tests
+            # Track failures across phases so all phases run even if one fails
+            rc=0
+
+            # Phase 1: tests without hooks (hookless error path + hook-independent tests)
             echo ''
-            echo '--- running tests (-m $marker) ---'
-            poetry run pytest tests/integration/ -m '$marker' -v --tb=short 2>&1
+            echo '--- phase 1: tests without hooks (-m \"$marker and not needs_hooks\") ---'
+            poetry run pytest tests/integration/ -m '$marker and not needs_hooks' -v --tb=short 2>&1 || [[ \$? -eq 5 ]] || rc=1
             echo ''
-            echo '--- check-environment ---'
+            echo '--- check-environment (before setup) ---'
             poetry run terok-shield check-environment 2>&1 || true
+
+            # Phase 2: install global hooks
+            echo ''
+            echo '--- phase 2: installing global hooks ---'
+            poetry run terok-shield setup --user 2>&1
+
+            echo ''
+            echo '--- check-environment (after setup) ---'
+            poetry run terok-shield check-environment 2>&1 || true
+
+            # Phase 3: tests that need hooks
+            echo ''
+            echo '--- phase 3: tests with hooks (-m \"$marker and needs_hooks\") ---'
+            poetry run pytest tests/integration/ -m '$marker and needs_hooks' -v --tb=short 2>&1 || [[ \$? -eq 5 ]] || rc=1
+
+            exit \$rc
         "
 
+    local rc=$?
     echo "==> $name: done"
-    return 0
+    return $rc
 }
 
 # Parse args

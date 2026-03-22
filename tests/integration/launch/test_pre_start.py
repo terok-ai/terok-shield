@@ -4,12 +4,13 @@
 """Integration tests: Shield.pre_start and firewall application."""
 
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
 from terok_shield import Shield, ShieldConfig, state
 
-from ..conftest import nft_missing, podman_missing
+from ..conftest import hooks_unavailable, nft_missing, podman_missing
 from ..helpers import assert_ruleset_applied
 
 # -- Shield.pre_start -----------------------------------------
@@ -21,8 +22,9 @@ from ..helpers import assert_ruleset_applied
 class TestShieldPreStart:
     """Verify ``Shield.pre_start()`` returns correct podman args."""
 
-    def test_pre_start_returns_podman_args(self, shield_env: Path) -> None:
-        """Returned args contain ``--hooks-dir``, ``--annotation``, ``--cap-drop``."""
+    @mock.patch("terok_shield.mode_hook.has_global_hooks", return_value=True)
+    def test_pre_start_returns_podman_args(self, _hgh: mock.Mock, shield_env: Path) -> None:
+        """Returned args contain ``--annotation`` and ``--cap-drop``."""
         sd = shield_env / "containers" / "test-container"
         shield = Shield(ShieldConfig(state_dir=sd))
         args = shield.pre_start("test-container")
@@ -33,7 +35,8 @@ class TestShieldPreStart:
         # on older podman, global hooks are used instead
 
     @pytest.mark.needs_internet
-    def test_pre_start_resolves_dns(self, shield_env: Path) -> None:
+    @mock.patch("terok_shield.mode_hook.has_global_hooks", return_value=True)
+    def test_pre_start_resolves_dns(self, _hgh: mock.Mock, shield_env: Path) -> None:
         """The profile.allowed file is created after ``Shield.pre_start()``."""
         sd = shield_env / "containers" / "dns-test-ctr"
         shield = Shield(ShieldConfig(state_dir=sd))
@@ -51,6 +54,8 @@ class TestShieldPreStart:
 @pytest.mark.needs_internet
 @podman_missing
 @nft_missing
+@hooks_unavailable
+@pytest.mark.needs_hooks
 @pytest.mark.usefixtures("nft_in_netns")
 class TestFirewallApplied:
     """Verify firewall rules are applied after the public API lifecycle."""

@@ -19,8 +19,9 @@ from terok_shield.podman_info import (
     has_global_hooks,
     parse_podman_info,
 )
+from terok_shield.run import ShieldNeedsSetup
 
-from ..conftest import podman_missing
+from ..conftest import hooks_present, nft_missing, podman_missing
 
 
 @pytest.mark.needs_host_features
@@ -48,8 +49,8 @@ class TestPodmanInfoDetection:
         env = shield.check_environment()
         assert isinstance(env, EnvironmentCheck)
         assert env.podman_version >= (4,)
-        assert env.hooks in ("per-container", "global-system", "global-user", "not-installed")
-        assert env.health in ("ok", "setup-needed", "stale-hooks")
+        assert env.hooks in ("global-system", "global-user", "not-installed")
+        assert env.health in ("ok", "setup-needed")
 
     def test_hooks_dir_detection(self) -> None:
         """find_hooks_dirs() returns paths (may be empty on minimal systems)."""
@@ -57,6 +58,21 @@ class TestPodmanInfoDetection:
         assert isinstance(dirs, list)
         for d in dirs:
             assert isinstance(d, Path)
+
+
+@pytest.mark.needs_podman
+@podman_missing
+@nft_missing
+@hooks_present
+class TestHooklessErrorPath:
+    """Verify the error path when no OCI hooks are available."""
+
+    def test_pre_start_raises_shield_needs_setup(self, shield_env: Path) -> None:
+        """pre_start() raises ShieldNeedsSetup with setup hint when hooks are missing."""
+        sd = shield_env / "containers" / "hookless-test"
+        shield = Shield(ShieldConfig(state_dir=sd))
+        with pytest.raises(ShieldNeedsSetup, match="terok-shield setup"):
+            shield.pre_start("hookless-test")
 
 
 @pytest.mark.needs_host_features

@@ -6,6 +6,7 @@ FROM docker.io/library/debian:12
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     podman slirp4netns nftables uidmap fuse-overlayfs \
+    python3 \
     git curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 

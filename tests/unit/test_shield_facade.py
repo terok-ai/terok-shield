@@ -383,51 +383,15 @@ class TestCheckEnvironment:
 
     @mock.patch("terok_shield.find_hooks_dirs", return_value=[])
     @mock.patch("terok_shield.has_global_hooks", return_value=False)
-    def test_modern_podman_ok(
+    def test_no_global_hooks(
         self,
         _has_hooks: mock.Mock,
         _find_dirs: mock.Mock,
         make_shield: ShieldHarnessFactory,
     ) -> None:
-        """Modern podman (>= 5.6.0) with no global hooks -> ok/per-container."""
+        """No global hooks → setup-needed."""
         harness = make_shield()
         harness.runner.run.return_value = _podman_info_json("5.8.0")
-        env = harness.shield.check_environment()
-        assert env.ok
-        assert env.health == "ok"
-        assert env.hooks == "per-container"
-        assert env.podman_version == (5, 8, 0)
-        assert not env.needs_setup
-
-    @mock.patch("terok_shield.find_hooks_dirs", return_value=[Path("/fake/hooks")])
-    @mock.patch("terok_shield.has_global_hooks", return_value=True)
-    @mock.patch("terok_shield.system_hooks_dir", return_value=Path("/fake/hooks"))
-    def test_modern_podman_with_stale_hooks(
-        self,
-        _sys_dir: mock.Mock,
-        _has_hooks: mock.Mock,
-        _find_dirs: mock.Mock,
-        make_shield: ShieldHarnessFactory,
-    ) -> None:
-        """Modern podman with global hooks -> stale-hooks."""
-        harness = make_shield()
-        harness.runner.run.return_value = _podman_info_json("5.8.0")
-        env = harness.shield.check_environment()
-        assert not env.ok
-        assert env.health == "stale-hooks"
-        assert any("Stale" in i for i in env.issues)
-
-    @mock.patch("terok_shield.find_hooks_dirs", return_value=[])
-    @mock.patch("terok_shield.has_global_hooks", return_value=False)
-    def test_old_podman_no_hooks(
-        self,
-        _has_hooks: mock.Mock,
-        _find_dirs: mock.Mock,
-        make_shield: ShieldHarnessFactory,
-    ) -> None:
-        """Old podman without global hooks -> setup-needed."""
-        harness = make_shield()
-        harness.runner.run.return_value = _podman_info_json("4.9.3")
         env = harness.shield.check_environment()
         assert not env.ok
         assert env.health == "setup-needed"
@@ -438,35 +402,58 @@ class TestCheckEnvironment:
     @mock.patch("terok_shield.find_hooks_dirs", return_value=[Path("/fake/hooks")])
     @mock.patch("terok_shield.has_global_hooks", return_value=True)
     @mock.patch("terok_shield.system_hooks_dir", return_value=Path("/fake/hooks"))
-    def test_old_podman_with_global_system_hooks(
+    def test_stale_hooks_on_persistent_podman(
         self,
         _sys_dir: mock.Mock,
         _has_hooks: mock.Mock,
         _find_dirs: mock.Mock,
         make_shield: ShieldHarnessFactory,
     ) -> None:
-        """Old podman with system global hooks -> ok/global-system."""
+        """Podman with hooks_dir_persists + global hooks → stale-hooks."""
         harness = make_shield()
-        harness.runner.run.return_value = _podman_info_json("4.9.3")
+        # Use a version >= HOOKS_DIR_PERSIST_VERSION so hooks_dir_persists is True,
+        # which triggers the stale-hooks detection path (global hooks installed but
+        # per-container hooks-dir already persists natively).
+        harness.runner.run.return_value = _podman_info_json("99.0.0")
         env = harness.shield.check_environment()
+        assert not env.ok
+        assert env.health == "stale-hooks"
+        assert any("Stale" in i for i in env.issues)
+
+    @mock.patch("terok_shield.find_hooks_dirs", return_value=[Path("/fake/hooks")])
+    @mock.patch("terok_shield.has_global_hooks", return_value=True)
+    @mock.patch("terok_shield.system_hooks_dir", return_value=Path("/fake/hooks"))
+    def test_global_system_hooks(
+        self,
+        _sys_dir: mock.Mock,
+        _has_hooks: mock.Mock,
+        _find_dirs: mock.Mock,
+        make_shield: ShieldHarnessFactory,
+    ) -> None:
+        """System global hooks → ok/global-system."""
+        harness = make_shield()
+        harness.runner.run.return_value = _podman_info_json("5.8.0")
+        env = harness.shield.check_environment()
+        assert env.ok
         assert env.health == "ok"
         assert env.hooks == "global-system"
 
     @mock.patch("terok_shield.find_hooks_dirs", return_value=[Path("/user/hooks")])
     @mock.patch("terok_shield.system_hooks_dir", return_value=Path("/nonexistent"))
-    def test_old_podman_with_global_user_hooks(
+    def test_global_user_hooks(
         self,
         _sys_dir: mock.Mock,
         _find_dirs: mock.Mock,
         make_shield: ShieldHarnessFactory,
     ) -> None:
-        """Old podman with user global hooks (not system) -> ok/global-user."""
+        """User global hooks (not system) → ok/global-user."""
         harness = make_shield()
-        harness.runner.run.return_value = _podman_info_json("4.9.3")
+        harness.runner.run.return_value = _podman_info_json("5.8.0")
 
         # First call (hooks_dirs from find_hooks_dirs) -> True (hooks exist)
         # Second call ([sys_dir]) -> False (not in system dir)
         with mock.patch("terok_shield.has_global_hooks", side_effect=[True, False]):
             env = harness.shield.check_environment()
+        assert env.ok
         assert env.health == "ok"
         assert env.hooks == "global-user"

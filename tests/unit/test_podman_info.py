@@ -178,16 +178,16 @@ class TestHooksDirPersists:
         info = parse_podman_info(json.dumps(DEBIAN_12_INFO))
         assert not info.hooks_dir_persists
 
-    def test_podman_560_persistent(self) -> None:
-        """podman 5.6.0 → hooks-dir persists."""
+    def test_podman_560_not_persistent(self) -> None:
+        """podman 5.6.0 → hooks-dir does NOT persist (version gate raised, #122)."""
         data = {"host": {}, "version": {"Version": "5.6.0"}}
         info = parse_podman_info(json.dumps(data))
-        assert info.hooks_dir_persists
+        assert not info.hooks_dir_persists
 
-    def test_podman_580_persistent(self) -> None:
-        """podman 5.8.0 → hooks-dir persists."""
+    def test_podman_580_not_persistent(self) -> None:
+        """podman 5.8.0 → hooks-dir does NOT persist (version gate raised, #122)."""
         info = parse_podman_info(json.dumps(FEDORA_43_INFO))
-        assert info.hooks_dir_persists
+        assert not info.hooks_dir_persists
 
 
 # ── parse_resolv_conf tests ──────────────────────────────

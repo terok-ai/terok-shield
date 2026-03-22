@@ -32,8 +32,11 @@ _SYSTEM_CONF_PATHS = (
 )
 
 # Minimum podman version where --hooks-dir persists on restart.
-# Ref: containers/podman#17935, fixed in PR #26127, released in v5.6.0.
-HOOKS_DIR_PERSIST_VERSION = (5, 6, 0)
+# Ref: containers/podman#17935 — originally gated at (5, 6, 0) but
+# podman 5.8.0 still drops per-container --hooks-dir on stop/start
+# (issue #121, #122).  Set to (99, 0, 0) to effectively disable
+# per-container hooks until podman reliably persists them.
+HOOKS_DIR_PERSIST_VERSION = (99, 0, 0)
 
 # Hook JSON filename used to detect terok-shield global hooks.
 HOOK_JSON_FILENAME = "terok-shield-createRuntime.json"
@@ -56,7 +59,9 @@ class PodmanInfo:
     def hooks_dir_persists(self) -> bool:
         """Return True if ``--hooks-dir`` survives container restart.
 
-        False for podman < 5.6.0 due to containers/podman#17935.
+        Currently always False — podman drops per-container hooks-dir
+        on stop/start even on 5.8.0 (issues #121, #122).  The version
+        gate will be lowered when podman fixes this upstream.
         """
         return self.version >= HOOKS_DIR_PERSIST_VERSION
 
@@ -241,7 +246,7 @@ def system_hooks_dir() -> Path:
 def global_hooks_hint() -> str:
     """Short hint telling the user to run ``terok-shield setup``."""
     return (
-        "Podman < 5.6.0: --hooks-dir does not persist on container restart\n"
+        "Per-container --hooks-dir does not persist on container restart\n"
         "(ref: https://github.com/containers/podman/issues/17935).\n"
         "\n"
         "Run 'terok-shield setup' to install global hooks."

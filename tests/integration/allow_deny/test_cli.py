@@ -17,6 +17,7 @@ from ..helpers import assert_blocked, assert_reachable
 
 
 @pytest.mark.needs_podman
+@pytest.mark.needs_hooks
 @pytest.mark.needs_internet
 @podman_missing
 @nft_missing

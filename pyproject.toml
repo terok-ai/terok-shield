@@ -61,6 +61,7 @@ markers = [
   "needs_host_features: needs Linux kernel features (IP_RECVERR, etc.) but no containers",
   "needs_podman: requires podman and nft on the host",
   "needs_internet: requires outbound internet connectivity (dig, DNS, HTTP)",
+  "needs_hooks: requires OCI hooks (global hooks installed or per-container hooks-dir persistence)",
 ]
 
 [tool.ruff]

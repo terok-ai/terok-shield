@@ -133,7 +133,9 @@ def test_hook_mode_stores_collaborators(
     assert harness.mode._ruleset is ruleset
 
 
+@mock.patch("terok_shield.mode_hook.has_global_hooks", return_value=True)
 def test_pre_start_uses_pasta_for_rootless_mode(
+    _has_hooks: mock.Mock,
     monkeypatch: pytest.MonkeyPatch,
     make_hook_mode: HookModeHarnessFactory,
     make_config: ConfigFactory,
@@ -151,7 +153,9 @@ def test_pre_start_uses_pasta_for_rootless_mode(
     assert "-T,8080" in network_arg
 
 
+@mock.patch("terok_shield.mode_hook.has_global_hooks", return_value=True)
 def test_pre_start_installs_hooks_and_creates_state_dirs(
+    _has_hooks: mock.Mock,
     monkeypatch: pytest.MonkeyPatch,
     make_hook_mode: HookModeHarnessFactory,
     make_config: ConfigFactory,
@@ -183,7 +187,9 @@ def test_pre_start_installs_hooks_and_creates_state_dirs(
         ),
     ],
 )
+@mock.patch("terok_shield.mode_hook.has_global_hooks", return_value=True)
 def test_pre_start_includes_expected_annotations(
+    _has_hooks: mock.Mock,
     monkeypatch: pytest.MonkeyPatch,
     make_hook_mode: HookModeHarnessFactory,
     make_config: ConfigFactory,
@@ -333,16 +339,20 @@ def test_shield_down_builds_bypass_ruleset(
     harness = make_hook_mode()
     # Mock DNS reading so _container_ruleset returns the mock ruleset
     harness.mode._container_ruleset = lambda _c: harness.ruleset
+    # shield_state() call (list_rules) + apply + verify
     harness.runner.nft_via_nsenter.side_effect = [
-        "",
-        "bad output" if verify_errors else "valid output",
+        "table inet terok_shield {}",  # shield_state() → list_rules
+        "",  # apply bypass ruleset
+        "bad output" if verify_errors else "valid output",  # verify
     ]
     harness.ruleset.build_bypass.return_value = "bypass ruleset"
     harness.ruleset.verify_bypass.return_value = verify_errors
+    # shield_state() uses verify_bypass/verify_hook to classify
+    harness.ruleset.verify_hook.return_value = []
 
     if expected_message is None:
         harness.mode.shield_down("test-ctr", allow_all=allow_all)
-        assert harness.runner.nft_via_nsenter.call_count == 2
+        assert harness.runner.nft_via_nsenter.call_count == 3
     else:
         with pytest.raises(RuntimeError, match=expected_message):
             harness.mode.shield_down("test-ctr", allow_all=allow_all)
@@ -351,9 +361,9 @@ def test_shield_down_builds_bypass_ruleset(
 @pytest.mark.parametrize(
     ("allowed_ips", "verify_errors", "expected_calls"),
     [
-        pytest.param([], [], 2, id="no-cached-ips"),
-        pytest.param([TEST_IP1], [], 3, id="readds-cached-ips"),
-        pytest.param([], ["error"], 2, id="verification-failure"),
+        pytest.param([], [], 3, id="no-cached-ips"),
+        pytest.param([TEST_IP1], [], 4, id="readds-cached-ips"),
+        pytest.param([], ["error"], 3, id="verification-failure"),
     ],
 )
 def test_shield_up_reapplies_hook_ruleset(
@@ -369,14 +379,19 @@ def test_shield_up_reapplies_hook_ruleset(
         write_lines(state.profile_allowed_path(harness.config.state_dir), allowed_ips)
     # Mock DNS reading so _container_ruleset returns the mock ruleset
     harness.mode._container_ruleset = lambda _c: harness.ruleset
-    harness.runner.nft_via_nsenter.side_effect = [""] * (expected_calls - 1) + [
-        "valid output" if not verify_errors else "bad output"
+    # shield_state() call (list_rules) returns existing table (UP state)
+    harness.runner.nft_via_nsenter.side_effect = [
+        "table inet terok_shield {}",  # shield_state() → list_rules
+        *[""] * (expected_calls - 2),  # apply + optional elements
+        "valid output" if not verify_errors else "bad output",  # verify
     ]
     harness.ruleset.build_hook.return_value = "hook ruleset"
     harness.ruleset.verify_hook.return_value = verify_errors
     harness.ruleset.add_elements_dual.return_value = (
         f"add element {TEST_IP1}" if allowed_ips else ""
     )
+    # For shield_state() classification — report UP so delete table is prepended
+    harness.ruleset.verify_bypass.return_value = ["not bypass"]
 
     if verify_errors:
         with pytest.raises(RuntimeError):
@@ -530,7 +545,9 @@ def test_setup_global_hooks_sudo_uses_subprocess(tmp_path: Path) -> None:
         assert all(cmd[0] == "sudo" for cmd in cmds)
 
 
+@mock.patch("terok_shield.mode_hook.has_global_hooks", return_value=True)
 def test_pre_start_slirp4netns_network_args(
+    _has_hooks: mock.Mock,
     monkeypatch: pytest.MonkeyPatch,
     make_hook_mode: HookModeHarnessFactory,
     make_config: ConfigFactory,
@@ -538,7 +555,7 @@ def test_pre_start_slirp4netns_network_args(
     """pre_start() generates correct slirp4netns network args."""
     _set_euid(monkeypatch, 1000)
     harness = make_hook_mode(config=make_config(loopback_ports=(9418,)))
-    # Podman 4.x with slirp4netns
+    # Podman with slirp4netns
     harness.runner.run.return_value = json.dumps(
         {
             "host": {
@@ -557,20 +574,18 @@ def test_pre_start_slirp4netns_network_args(
     assert "host.containers.internal:10.0.2.2" in args
 
 
-def test_pre_start_old_podman_with_global_hooks(
+def test_pre_start_with_global_hooks_skips_hooks_dir(
     monkeypatch: pytest.MonkeyPatch,
     make_hook_mode: HookModeHarnessFactory,
     make_config: ConfigFactory,
 ) -> None:
-    """pre_start() on old podman with global hooks skips --hooks-dir."""
-    from unittest import mock
-
+    """pre_start() with global hooks skips --hooks-dir."""
     _set_euid(monkeypatch, 0)
     harness = make_hook_mode(config=make_config())
     harness.runner.run.return_value = json.dumps(
         {
             "host": {},
-            "version": {"Version": "5.4.2"},
+            "version": {"Version": "5.8.0"},
         }
     )
     harness.profiles.compose_profiles.return_value = []
@@ -586,14 +601,12 @@ def test_pre_start_old_podman_with_global_hooks(
     )
 
 
-def test_pre_start_old_podman_no_global_hooks_raises(
+def test_pre_start_no_global_hooks_raises(
     monkeypatch: pytest.MonkeyPatch,
     make_hook_mode: HookModeHarnessFactory,
     make_config: ConfigFactory,
 ) -> None:
-    """pre_start() on old podman without global hooks raises ShieldNeedsSetup."""
-    from unittest import mock as _mock
-
+    """pre_start() without global hooks raises ShieldNeedsSetup."""
     from terok_shield.run import ShieldNeedsSetup
 
     _set_euid(monkeypatch, 0)
@@ -601,12 +614,12 @@ def test_pre_start_old_podman_no_global_hooks_raises(
     harness.runner.run.return_value = json.dumps(
         {
             "host": {},
-            "version": {"Version": "5.4.2"},
+            "version": {"Version": "5.8.0"},
         }
     )
     harness.profiles.compose_profiles.return_value = []
 
-    with _mock.patch("terok_shield.mode_hook.has_global_hooks", return_value=False):
+    with mock.patch("terok_shield.mode_hook.has_global_hooks", return_value=False):
         with pytest.raises(ShieldNeedsSetup, match="terok-shield setup"):
             harness.mode.pre_start("test", ["dev-standard"])
 
@@ -657,3 +670,49 @@ def test_container_ruleset_returns_builder_with_dns(
 
     ruleset = harness.mode._container_ruleset("test-ctr")
     assert isinstance(ruleset, RulesetBuilder)
+
+
+def test_shield_up_on_inactive_applies_without_delete(
+    make_hook_mode: HookModeHarnessFactory,
+    make_config: ConfigFactory,
+) -> None:
+    """shield_up() on INACTIVE netns applies ruleset without delete table prefix."""
+    harness = make_hook_mode(config=make_config())
+    harness.mode._container_ruleset = lambda _c: harness.ruleset
+    # shield_state() → list_rules returns empty (INACTIVE)
+    harness.runner.nft_via_nsenter.side_effect = [
+        "",  # shield_state() → INACTIVE
+        "",  # apply ruleset (no delete prefix)
+        "valid output",  # verify
+    ]
+    harness.ruleset.build_hook.return_value = "hook ruleset"
+    harness.ruleset.verify_hook.return_value = []
+    harness.ruleset.add_elements_dual.return_value = ""
+
+    harness.mode.shield_up("test-ctr")
+
+    # On an empty netns there is nothing to delete — no call should contain "delete table"
+    for call in harness.runner.nft_via_nsenter.call_args_list:
+        assert "delete" not in call.kwargs.get("stdin", "")
+
+
+def test_shield_down_on_inactive_applies_without_delete(
+    make_hook_mode: HookModeHarnessFactory,
+) -> None:
+    """shield_down() on INACTIVE netns applies bypass ruleset without delete table prefix."""
+    harness = make_hook_mode()
+    harness.mode._container_ruleset = lambda _c: harness.ruleset
+    # shield_state() → list_rules returns empty (INACTIVE)
+    harness.runner.nft_via_nsenter.side_effect = [
+        "",  # shield_state() → INACTIVE
+        "",  # apply bypass ruleset (no delete prefix)
+        "valid output",  # verify
+    ]
+    harness.ruleset.build_bypass.return_value = "bypass ruleset"
+    harness.ruleset.verify_bypass.return_value = []
+
+    harness.mode.shield_down("test-ctr", allow_all=False)
+
+    # On an empty netns there is nothing to delete — no call should contain "delete table"
+    for call in harness.runner.nft_via_nsenter.call_args_list:
+        assert "delete" not in call.kwargs.get("stdin", "")

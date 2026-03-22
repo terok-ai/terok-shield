@@ -5,17 +5,18 @@
 
 Exercises the complete pre_start → allow → deny → audit cycle as terok
 would use it, driving each step manually rather than via fixtures.
+
+Requires global OCI hooks installed (``terok-shield setup``).
 """
 
 import os
-import subprocess
 
 import pytest
 
 from terok_shield import Shield, ShieldConfig
 
 from ...testnet import ALLOWED_TARGET_HTTP, ALLOWED_TARGET_IPS
-from ..conftest import CTR_PREFIX, IMAGE, nft_missing, podman_missing
+from ..conftest import CTR_PREFIX, IMAGE, _podman_rm, hooks_unavailable, nft_missing, podman_missing
 from ..helpers import assert_blocked, assert_reachable, start_shielded_container
 
 
@@ -23,6 +24,8 @@ from ..helpers import assert_blocked, assert_reachable, start_shielded_container
 @pytest.mark.needs_internet
 @podman_missing
 @nft_missing
+@hooks_unavailable
+@pytest.mark.needs_hooks
 @pytest.mark.usefixtures("nft_in_netns")
 class TestAPILifecycle:
     """End-to-end lifecycle test using the public API."""
@@ -41,7 +44,7 @@ class TestAPILifecycle:
             assert len(extra_args) > 0
 
             # 2. Start container with shield args
-            subprocess.run(["podman", "rm", "-f", name], capture_output=True, timeout=30)
+            _podman_rm(name)
             start_shielded_container(name, extra_args, IMAGE)
 
             # 3. Verify ruleset applied
@@ -78,4 +81,4 @@ class TestAPILifecycle:
             assert "denied" in actions
 
         finally:
-            subprocess.run(["podman", "rm", "-f", name], capture_output=True, timeout=30)
+            _podman_rm(name)

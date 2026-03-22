@@ -33,6 +33,7 @@ from ..helpers import (
 
 
 @pytest.mark.needs_podman
+@pytest.mark.needs_hooks
 @pytest.mark.needs_internet
 @podman_missing
 @nft_missing
@@ -56,6 +57,7 @@ class TestBypassTrafficDNS:
 
 
 @pytest.mark.needs_podman
+@pytest.mark.needs_hooks
 @pytest.mark.needs_internet
 @podman_missing
 @nft_missing
@@ -79,6 +81,7 @@ class TestBypassTrafficHTTP:
 
 
 @pytest.mark.needs_podman
+@pytest.mark.needs_hooks
 @pytest.mark.needs_internet
 @podman_missing
 @nft_missing
@@ -102,6 +105,7 @@ class TestBypassTrafficHTTPS:
 
 
 @pytest.mark.needs_podman
+@pytest.mark.needs_hooks
 @pytest.mark.needs_internet
 @podman_missing
 @nft_missing
@@ -116,6 +120,7 @@ class TestBypassTrafficAllowed:
 
 
 @pytest.mark.needs_podman
+@pytest.mark.needs_hooks
 @pytest.mark.needs_internet
 @podman_missing
 @nft_missing
@@ -139,6 +144,7 @@ class TestBypassRuleset:
 
 
 @pytest.mark.needs_podman
+@pytest.mark.needs_hooks
 @pytest.mark.needs_internet
 @podman_missing
 @nft_missing
@@ -178,6 +184,7 @@ class TestBypassRFC1918:
 
 
 @pytest.mark.needs_podman
+@pytest.mark.needs_hooks
 @pytest.mark.needs_internet
 @podman_missing
 @nft_missing

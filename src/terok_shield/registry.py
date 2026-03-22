@@ -273,7 +273,7 @@ COMMANDS: tuple[CommandDef, ...] = (
     ),
     CommandDef(
         name="setup",
-        help="Install global OCI hooks (for podman < 5.6.0)",
+        help="Install global OCI hooks for restart persistence",
         standalone_only=True,
         args=(
             ArgDef(name="--root", action="store_true", help="Install system-wide (uses sudo)"),
