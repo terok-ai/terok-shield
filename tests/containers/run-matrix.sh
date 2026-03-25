@@ -21,6 +21,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 IMAGE_PREFIX="terok-shield-test"
+SOURCE_MOUNT="/src"
+WORKSPACE_DIR="/workspace"
+PYTHON_VERSION="3.12"
 
 # Target distros: name -> Containerfile suffix
 declare -A DISTROS=(
@@ -46,8 +49,11 @@ usage() {
     echo "Options:"
     echo "  --build-only   Build images without running tests"
     echo "  --list         List available distros"
-    echo "  --host-only    Run only needs_host_features tests (fast)"
+    echo "  --unit-only    Run only unit tests (fast)"
+    echo "  --integ-only   Run only integration tests"
     echo "  -h, --help     Show this help"
+    echo ""
+    echo "Default: install full infrastructure, run unit + integration tests."
     echo ""
     echo "Available distros: ${!DISTROS[*]}"
     return 0
@@ -65,97 +71,110 @@ build_image() {
 
 run_tests() {
     local name="$1"
-    local marker="${2:-needs_host_features}"
+    local test_scope="${2:-all}"
     local image="$IMAGE_PREFIX:$name"
     local ctr_name="$IMAGE_PREFIX-$name"
 
     echo ""
     echo "==> Testing $name (expected podman ${EXPECTED_VERSIONS[$name]})"
-    echo "    marker: $marker"
+    echo "    scope: $test_scope"
     echo ""
 
-    # Run with --privileged for nested podman/nft support.
-    # Mount source as read-only, use a temp venv inside.
-    #
-    # Three-phase test flow:
-    #   1. Run tests that do NOT need hooks (includes hookless error path)
-    #   2. Install global hooks via terok-shield setup --user
-    #   3. Run tests that need hooks (shielded containers, traffic, restart)
+    # The matrix runner is the full-quality environment:
+    # install ALL infrastructure, run ALL tests. The needs_* markers
+    # are for degraded environments (CI, dev machines) — here we want
+    # maximum coverage across distros and podman versions.
     podman run --rm --name "$ctr_name" \
         --privileged \
         --security-opt label=disable \
-        -v "$REPO_ROOT:/src:ro,Z" \
+        -v "$REPO_ROOT:$SOURCE_MOUNT:ro,Z" \
         "$image" \
         bash -c "
             set -e
             echo '--- podman version ---'
             podman --version || echo 'podman not available'
-            echo '--- python version ---'
-            python3 --version
 
-            # Create a writable workspace
-            cp -a /src /workspace
-            cd /workspace
+            cp -a $SOURCE_MOUNT $WORKSPACE_DIR
+            cd $WORKSPACE_DIR
 
-            # Install in a venv (use uv if available, else poetry)
             if command -v uv &>/dev/null; then
-                uv venv --python 3.12 .venv
+                uv venv --python $PYTHON_VERSION .venv
                 . .venv/bin/activate
                 uv pip install poetry
             else
-                python3 -m venv .venv
+                python\${PYTHON_VERSION} -m venv .venv 2>/dev/null \
+                    || python3 -m venv .venv
                 . .venv/bin/activate
-                pip install --quiet pip --upgrade
+                pip install --quiet --upgrade pip
                 pip install --quiet poetry
             fi
-            poetry install --with test --quiet 2>&1 | tail -3
 
-            # Track failures across phases so all phases run even if one fails
-            rc=0
+            echo '--- python version ---'
+            python --version
+            poetry install --with test --no-interaction
+            echo '--- deps installed ---'
 
-            # Phase 1: tests without hooks (hookless error path + hook-independent tests)
+            # ── Infrastructure setup ──
             echo ''
-            echo '--- phase 1: tests without hooks (-m \"$marker and not needs_hooks\") ---'
-            poetry run pytest tests/integration/ -m '$marker and not needs_hooks' -v --tb=short 2>&1 || [[ \$? -eq 5 ]] || rc=1
+            echo '--- installing shield hooks ---'
+            poetry run terok-shield setup --user
+
             echo ''
-            echo '--- check-environment (before setup) ---'
+            echo '--- check-environment ---'
             poetry run terok-shield check-environment 2>&1 || true
 
-            # Phase 2: install global hooks
-            echo ''
-            echo '--- phase 2: installing global hooks ---'
-            poetry run terok-shield setup --user 2>&1
+            # ── Test execution ──
+            case '$test_scope' in
+                unit)
+                    echo ''
+                    echo '--- unit tests ---'
+                    poetry run pytest tests/unit/ -v --tb=short
+                    ;;
+                integ)
+                    echo ''
+                    echo '--- integration tests (all markers) ---'
+                    poetry run pytest tests/integration/ -v --tb=short
+                    ;;
+                all)
+                    _rc=0
 
-            echo ''
-            echo '--- check-environment (after setup) ---'
-            poetry run terok-shield check-environment 2>&1 || true
+                    echo ''
+                    echo '--- unit tests ---'
+                    poetry run pytest tests/unit/ -v --tb=short || _rc=\$?
 
-            # Phase 3: tests that need hooks
-            echo ''
-            echo '--- phase 3: tests with hooks (-m \"$marker and needs_hooks\") ---'
-            poetry run pytest tests/integration/ -m '$marker and needs_hooks' -v --tb=short 2>&1 || [[ \$? -eq 5 ]] || rc=1
+                    echo ''
+                    echo '--- integration tests (all markers) ---'
+                    poetry run pytest tests/integration/ -v --tb=short || { [ \$_rc -eq 0 ] && _rc=\$?; }
 
-            exit \$rc
+                    exit \$_rc
+                    ;;
+            esac
         "
 
-    local rc=$?
-    echo "==> $name: done"
-    return $rc
+    local status=$?
+    if [[ $status -eq 0 ]]; then
+        echo "==> $name: done"
+    else
+        echo "==> $name: failed" >&2
+    fi
+    return "$status"
 }
 
-# Parse args
 BUILD_ONLY=false
 LIST_ONLY=false
-MARKER="needs_host_features"
+TEST_SCOPE="all"
 TARGETS=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --build-only) BUILD_ONLY=true ;;
         --list) LIST_ONLY=true ;;
-        --host-only) MARKER="needs_host_features" ;;
-        --podman) MARKER="needs_podman" ;;
-        --all-markers) MARKER="" ;;
+        --unit-only)
+            [[ "$TEST_SCOPE" != "all" ]] && { echo "Error: --unit-only and --integ-only are mutually exclusive" >&2; exit 1; }
+            TEST_SCOPE="unit" ;;
+        --integ-only)
+            [[ "$TEST_SCOPE" != "all" ]] && { echo "Error: --unit-only and --integ-only are mutually exclusive" >&2; exit 1; }
+            TEST_SCOPE="integ" ;;
         -h|--help) usage; exit 0 ;;
         *) TARGETS+=("$1") ;;
     esac
@@ -169,22 +188,19 @@ if $LIST_ONLY; then
     exit 0
 fi
 
-# Default: all distros
 if [[ ${#TARGETS[@]} -eq 0 ]]; then
     TARGETS=("${!DISTROS[@]}")
 fi
 
-# Validate targets
-for t in "${TARGETS[@]}"; do
-    if [[ -z "${DISTROS[$t]+x}" ]]; then
-        echo "Error: unknown distro '$t'. Available: ${!DISTROS[*]}" >&2
+for target in "${TARGETS[@]}"; do
+    if [[ -z "${DISTROS[$target]+x}" ]]; then
+        echo "Error: unknown distro '$target'. Available: ${!DISTROS[*]}" >&2
         exit 1
     fi
 done
 
-# Build
-for t in "${TARGETS[@]}"; do
-    build_image "$t"
+for target in "${TARGETS[@]}"; do
+    build_image "$target"
 done
 
 if $BUILD_ONLY; then
@@ -192,26 +208,24 @@ if $BUILD_ONLY; then
     exit 0
 fi
 
-# Run
 PASSED=()
 FAILED=()
 
-for t in "${TARGETS[@]}"; do
-    if run_tests "$t" "$MARKER"; then
-        PASSED+=("$t")
+for target in "${TARGETS[@]}"; do
+    if run_tests "$target" "$TEST_SCOPE"; then
+        PASSED+=("$target")
     else
-        FAILED+=("$t")
+        FAILED+=("$target")
     fi
 done
 
-# Summary
 echo ""
 echo "===== Matrix Summary ====="
-for t in "${PASSED[@]}"; do
-    echo "  PASS: $t (podman ${EXPECTED_VERSIONS[$t]})"
+for target in "${PASSED[@]}"; do
+    echo "  PASS: $target (podman ${EXPECTED_VERSIONS[$target]})"
 done
-for t in "${FAILED[@]}"; do
-    echo "  FAIL: $t (podman ${EXPECTED_VERSIONS[$t]})"
+for target in "${FAILED[@]}"; do
+    echo "  FAIL: $target (podman ${EXPECTED_VERSIONS[$target]})"
 done
 
 if [[ ${#FAILED[@]} -gt 0 ]]; then
