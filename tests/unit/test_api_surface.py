@@ -13,7 +13,14 @@ from pathlib import Path
 import pytest
 
 import terok_shield
-from terok_shield import ExecError, NftNotFoundError, ShieldConfig, ShieldMode, ShieldState
+from terok_shield import (
+    DigNotFoundError,
+    ExecError,
+    NftNotFoundError,
+    ShieldConfig,
+    ShieldMode,
+    ShieldState,
+)
 
 EXPECTED_ALL = [
     "ArgDef",
@@ -21,6 +28,7 @@ EXPECTED_ALL = [
     "COMMANDS",
     "CommandDef",
     "CommandRunner",
+    "DigNotFoundError",
     "DnsResolver",
     "EnvironmentCheck",
     "ExecError",
@@ -99,6 +107,13 @@ class TestAPISurface:
     def test_nft_not_found_error_is_runtime_error(self):
         """NftNotFoundError is a RuntimeError subclass for backwards compat."""
         err = NftNotFoundError("nft missing")
+        assert isinstance(err, RuntimeError)
+
+    # ── DigNotFoundError ─────────────────────────────────
+
+    def test_dig_not_found_error_is_runtime_error(self):
+        """DigNotFoundError is a RuntimeError subclass."""
+        err = DigNotFoundError("dig missing")
         assert isinstance(err, RuntimeError)
 
     # ── ExecError ────────────────────────────────────────

@@ -11,7 +11,14 @@ from unittest import mock
 
 import pytest
 
-from terok_shield.run import CommandRunner, ExecError, NftNotFoundError, SubprocessRunner, find_nft
+from terok_shield.run import (
+    CommandRunner,
+    DigNotFoundError,
+    ExecError,
+    NftNotFoundError,
+    SubprocessRunner,
+    find_nft,
+)
 
 from ..testfs import NFT_BINARY, NFT_SBIN
 from ..testnet import (
@@ -33,7 +40,10 @@ def _completed(*, rc: int = 0, stdout: str = "", stderr: str = "") -> mock.Mock:
 def runner() -> SubprocessRunner:
     """Return a fresh subprocess runner with a mocked nft path."""
     with mock.patch("terok_shield.run.find_nft", return_value=NFT_BINARY):
-        return SubprocessRunner()
+        r = SubprocessRunner()
+    # Assume dig is available for most tests; individual tests override.
+    r._has_cache["dig"] = True
+    return r
 
 
 @pytest.fixture
@@ -161,6 +171,7 @@ def test_has_uses_shutil_which(
     expected: bool,
 ) -> None:
     """has() reflects whether the executable can be found."""
+    runner._has_cache.clear()
     monkeypatch.setattr(shutil, "which", lambda _name: which_result)
     assert runner.has("nft") is expected
 
@@ -307,13 +318,15 @@ def test_dig_all_returns_empty_on_failure(
     assert runner.dig_all(NONEXISTENT_DOMAIN) == []
 
 
-def test_dig_all_returns_empty_when_binary_missing(
+def test_dig_all_raises_when_binary_missing(
     runner: SubprocessRunner,
-    subprocess_run: mock.Mock,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """dig_all() returns an empty list when the dig binary is unavailable."""
-    subprocess_run.side_effect = FileNotFoundError("dig not found")
-    assert runner.dig_all(TEST_DOMAIN) == []
+    """dig_all() raises DigNotFoundError when dig is not on PATH."""
+    runner._has_cache.clear()
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    with pytest.raises(DigNotFoundError, match="dig binary not found"):
+        runner.dig_all(TEST_DOMAIN)
 
 
 def test_dig_all_uses_single_query(

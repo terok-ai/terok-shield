@@ -42,7 +42,14 @@ from .podman_info import (
     system_hooks_dir,
 )
 from .profiles import ProfileLoader
-from .run import CommandRunner, ExecError, NftNotFoundError, ShieldNeedsSetup, SubprocessRunner
+from .run import (
+    CommandRunner,
+    DigNotFoundError,
+    ExecError,
+    NftNotFoundError,
+    ShieldNeedsSetup,
+    SubprocessRunner,
+)
 from .util import is_ip as _is_ip
 
 
@@ -148,6 +155,12 @@ class Shield:
         setup_hint = ""
         hooks = "per-container"
         health = "ok"
+
+        if not self.runner.has("dig"):
+            issues.append(
+                "dig not found — DNS resolution will fail. "
+                "Install: dnsutils (Debian/Ubuntu) or bind-utils (Fedora/RHEL)"
+            )
 
         hooks_dirs = find_hooks_dirs()
         global_hooks = has_global_hooks(hooks_dirs)
@@ -287,6 +300,7 @@ __all__ = [
     "COMMANDS",
     "CommandDef",
     "CommandRunner",
+    "DigNotFoundError",
     "DnsResolver",
     "EnvironmentCheck",
     "ExecError",

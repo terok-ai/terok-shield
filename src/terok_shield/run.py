@@ -37,6 +37,13 @@ class NftNotFoundError(RuntimeError):
     """Raised when the ``nft`` binary is not found on the host."""
 
 
+class DigNotFoundError(RuntimeError):
+    """Raised when the ``dig`` binary is not found on the host.
+
+    DNS resolution requires ``dig`` (from ``bind-utils`` / ``dnsutils``).
+    """
+
+
 class ShieldNeedsSetup(RuntimeError):
     """Raised when the podman environment requires one-time setup.
 
@@ -119,6 +126,7 @@ class SubprocessRunner:
 
     def __init__(self) -> None:
         """Resolve the nft binary path, raising NftNotFoundError if missing."""
+        self._has_cache: dict[str, bool] = {}
         self._nft = find_nft()
         if not self._nft:
             raise NftNotFoundError(
@@ -161,8 +169,10 @@ class SubprocessRunner:
         return r.stdout or ""
 
     def has(self, name: str) -> bool:
-        """Return True if an executable is on PATH."""
-        return shutil.which(name) is not None
+        """Return True if an executable is on PATH (cached per name)."""
+        if name not in self._has_cache:
+            self._has_cache[name] = shutil.which(name) is not None
+        return self._has_cache[name]
 
     def nft(self, *args: str, stdin: str | None = None, check: bool = True) -> str:
         """Run nft command directly (hook mode, inside container netns)."""
@@ -194,8 +204,16 @@ class SubprocessRunner:
         """Resolve domain to both IPv4 and IPv6 addresses in a single query.
 
         Runs ``dig +short domain A domain AAAA`` and validates each line
-        with ``ipaddress``.  Returns empty list on failure or timeout.
+        with ``ipaddress``.  Raises ``DigNotFoundError`` if ``dig`` is
+        not installed.  Returns empty list on lookup failure or timeout.
         """
+        if not self.has("dig"):
+            raise DigNotFoundError(
+                "dig binary not found. Install DNS utilities:\n"
+                "  Debian/Ubuntu: sudo apt install dnsutils\n"
+                "  Fedora/RHEL:   sudo dnf install bind-utils\n"
+                "  Arch:          sudo pacman -S bind"
+            )
         out = self.run(
             ["dig", "+short", domain, "A", domain, "AAAA"],
             check=False,
