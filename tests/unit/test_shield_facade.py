@@ -381,6 +381,23 @@ def _podman_info_json(version: str = "5.8.0", **host_extra: object) -> str:
 class TestCheckEnvironment:
     """Tests for Shield.check_environment()."""
 
+    @mock.patch("terok_shield.find_hooks_dirs", return_value=[Path("/fake/hooks")])
+    @mock.patch("terok_shield.has_global_hooks", return_value=True)
+    @mock.patch("terok_shield.system_hooks_dir", return_value=Path("/fake/hooks"))
+    def test_dig_missing_reports_issue(
+        self,
+        _sys_dir: mock.Mock,
+        _has_hooks: mock.Mock,
+        _find_dirs: mock.Mock,
+        make_shield: ShieldHarnessFactory,
+    ) -> None:
+        """Missing dig binary is reported in environment check."""
+        harness = make_shield()
+        harness.runner.run.return_value = _podman_info_json("5.8.0")
+        harness.runner.has.side_effect = lambda cmd: cmd != "dig"
+        env = harness.shield.check_environment()
+        assert any("dig" in i for i in env.issues)
+
     @mock.patch("terok_shield.find_hooks_dirs", return_value=[])
     @mock.patch("terok_shield.has_global_hooks", return_value=False)
     def test_no_global_hooks(
