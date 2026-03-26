@@ -43,6 +43,16 @@ declare -A EXPECTED_VERSIONS=(
     [podman]="latest"
 )
 
+# Non-root user baked into each Containerfile (uid 1000).
+# The podman image uses its pre-existing 'podman' user.
+declare -A TEST_USERS=(
+    [debian12]="testrunner"
+    [ubuntu2404]="testrunner"
+    [debian13]="testrunner"
+    [fedora43]="testrunner"
+    [podman]="podman"
+)
+
 usage() {
     echo "Usage: $0 [OPTIONS] [DISTRO...]"
     echo ""
@@ -74,10 +84,11 @@ run_tests() {
     local test_scope="${2:-all}"
     local image="$IMAGE_PREFIX:$name"
     local ctr_name="$IMAGE_PREFIX-$name"
+    local test_user="${TEST_USERS[$name]}"
 
     echo ""
     echo "==> Testing $name (expected podman ${EXPECTED_VERSIONS[$name]})"
-    echo "    scope: $test_scope"
+    echo "    scope: $test_scope, user: $test_user"
     echo ""
 
     # The matrix runner is the full-quality environment:
@@ -87,24 +98,22 @@ run_tests() {
     podman run --rm --name "$ctr_name" \
         --privileged \
         --security-opt label=disable \
+        --device /dev/fuse:rw \
+        -e container=podman \
         -v "$REPO_ROOT:$SOURCE_MOUNT:ro,Z" \
         "$image" \
         bash -c "
             set -e
 
-            # ── Create a rootless test user ──
-            # Tests must run as non-root to exercise rootless podman,
-            # which is the shield's primary deployment model.
-            useradd -m -s /bin/bash testrunner 2>/dev/null || true
-            echo 'testrunner:100000:65536' >> /etc/subuid
-            echo 'testrunner:100000:65536' >> /etc/subgid
-
+            # ── Prepare workspace (as root) ──
             cp -a $SOURCE_MOUNT $WORKSPACE_DIR
-            chown -R testrunner:testrunner $WORKSPACE_DIR
+            chown -R $test_user:$test_user $WORKSPACE_DIR
 
-            # Run the rest as the rootless user
-            su - testrunner -c '
+            # ── Run everything as the rootless test user ──
+            su - $test_user -c '
                 set -e
+                export XDG_RUNTIME_DIR=/run/user/\$(id -u)
+
                 cd $WORKSPACE_DIR
 
                 echo \"--- podman version ---\"
