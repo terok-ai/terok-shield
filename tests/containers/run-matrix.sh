@@ -128,7 +128,9 @@ run_tests() {
 
             # Strip IPv6 zone-ID nameservers — they reference host interfaces
             # (e.g. eno1) that don't exist inside the container, causing dig
-            # to reject the entire resolv.conf.  See #133.
+            # to reject the entire resolv.conf.  Fixed upstream in podman 5.4+
+            # (https://github.com/containers/common/pull/2233).
+            # Remove once we drop < 5.4 support.  See #133.
             cp /etc/resolv.conf /tmp/resolv.conf.clean
             grep -v '^nameserver.*%' /tmp/resolv.conf.clean > /etc/resolv.conf
 
