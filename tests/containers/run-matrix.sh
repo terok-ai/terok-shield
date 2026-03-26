@@ -25,6 +25,19 @@ SOURCE_MOUNT="/src"
 WORKSPACE_DIR="/workspace"
 PYTHON_VERSION="3.12"
 
+# ── Terminal colors (disabled when stdout is not a tty) ──
+if [[ -t 1 ]]; then
+    C_BOLD='\033[1m'
+    C_CYAN='\033[1;36m'
+    C_YELLOW='\033[1;33m'
+    C_GREEN='\033[1;32m'
+    C_RED='\033[1;31m'
+    C_DIM='\033[2m'
+    C_RESET='\033[0m'
+else
+    C_BOLD='' C_CYAN='' C_YELLOW='' C_GREEN='' C_RED='' C_DIM='' C_RESET=''
+fi
+
 # Target distros: name -> Containerfile suffix
 declare -A DISTROS=(
     [debian12]="debian12"
@@ -78,7 +91,7 @@ build_image() {
 
     $NO_CACHE && build_args+=(--no-cache)
 
-    echo "==> Building $image from $file"
+    echo -e "${C_CYAN}==> Building ${C_BOLD}$image${C_CYAN} from $file${C_RESET}"
     podman build "${build_args[@]}" -t "$image" -f "$file" "$REPO_ROOT"
     return $?
 }
@@ -91,8 +104,8 @@ run_tests() {
     local test_user="${TEST_USERS[$name]}"
 
     echo ""
-    echo "==> Testing $name (expected podman ${EXPECTED_VERSIONS[$name]})"
-    echo "    scope: $test_scope, user: $test_user"
+    echo -e "${C_CYAN}==> Testing ${C_BOLD}$name${C_CYAN} (expected podman ${EXPECTED_VERSIONS[$name]})${C_RESET}"
+    echo -e "    ${C_DIM}scope: $test_scope, user: $test_user${C_RESET}"
     echo ""
 
     # The matrix runner is the full-quality environment:
@@ -184,9 +197,9 @@ run_tests() {
 
     local status=$?
     if [[ $status -eq 0 ]]; then
-        echo "==> $name: done"
+        echo -e "${C_GREEN}==> $name: PASS${C_RESET}"
     else
-        echo "==> $name: failed" >&2
+        echo -e "${C_RED}==> $name: FAIL${C_RESET}" >&2
     fi
     return "$status"
 }
@@ -227,7 +240,7 @@ fi
 
 for target in "${TARGETS[@]}"; do
     if [[ -z "${DISTROS[$target]+x}" ]]; then
-        echo "Error: unknown distro '$target'. Available: ${!DISTROS[*]}" >&2
+        echo -e "${C_RED}Error: unknown distro '$target'. Available: ${!DISTROS[*]}${C_RESET}" >&2
         exit 1
     fi
 done
@@ -237,7 +250,7 @@ for target in "${TARGETS[@]}"; do
 done
 
 if $BUILD_ONLY; then
-    echo "Images built. Use '$0' without --build-only to run tests."
+    echo -e "${C_GREEN}Images built.${C_RESET} Use '$0' without --build-only to run tests."
     exit 0
 fi
 
@@ -253,12 +266,12 @@ for target in "${TARGETS[@]}"; do
 done
 
 echo ""
-echo "===== Matrix Summary ====="
+echo -e "${C_BOLD}===== Matrix Summary =====${C_RESET}"
 for target in "${PASSED[@]}"; do
-    echo "  PASS: $target (podman ${EXPECTED_VERSIONS[$target]})"
+    echo -e "  ${C_GREEN}PASS${C_RESET}: $target ${C_DIM}(podman ${EXPECTED_VERSIONS[$target]})${C_RESET}"
 done
 for target in "${FAILED[@]}"; do
-    echo "  FAIL: $target (podman ${EXPECTED_VERSIONS[$target]})"
+    echo -e "  ${C_RED}FAIL${C_RESET}: $target ${C_DIM}(podman ${EXPECTED_VERSIONS[$target]})${C_RESET}"
 done
 
 if [[ ${#FAILED[@]} -gt 0 ]]; then
