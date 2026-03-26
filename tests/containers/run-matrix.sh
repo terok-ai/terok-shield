@@ -126,6 +126,11 @@ run_tests() {
             cp -a $SOURCE_MOUNT $WORKSPACE_DIR
             chown -R $test_user:$test_user $WORKSPACE_DIR
 
+            # Strip IPv6 zone-ID nameservers — they reference host interfaces
+            # (e.g. eno1) that don't exist inside the container, causing dig
+            # to reject the entire resolv.conf.  See #133.
+            sed -i '/^nameserver.*%/d' /etc/resolv.conf
+
             # ── Run everything as the rootless test user ──
             su - $test_user -c '
                 set -e
@@ -139,15 +144,6 @@ run_tests() {
                 echo \"--- rootless podman preflight ---\"
                 podman info --format \"podman={{.Version.Version}} storage={{.Store.GraphDriverName}}\" \
                     || { echo \"FATAL: rootless podman not functional\" >&2; exit 1; }
-
-                echo \"--- dns diagnostic ---\"
-                echo \"resolv.conf:\"
-                cat /etc/resolv.conf
-                echo \"dig +short github.com A:\"
-                dig +short github.com A 2>&1 || echo \"dig exit=\$?\"
-                echo \"getent hosts github.com:\"
-                getent hosts github.com 2>&1 || echo \"getent exit=\$?\"
-                echo \"---\"
 
                 if command -v uv >/dev/null 2>&1; then
                     uv venv --python $PYTHON_VERSION .venv
