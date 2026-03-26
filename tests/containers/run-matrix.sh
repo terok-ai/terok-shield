@@ -140,7 +140,7 @@ run_tests() {
                 podman info --format \"podman={{.Version.Version}} storage={{.Store.GraphDriverName}}\" \
                     || { echo \"FATAL: rootless podman not functional\" >&2; exit 1; }
 
-                if command -v uv &>/dev/null; then
+                if command -v uv >/dev/null 2>&1; then
                     uv venv --python $PYTHON_VERSION .venv
                     . .venv/bin/activate
                     uv pip install poetry
