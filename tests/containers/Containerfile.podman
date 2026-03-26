@@ -3,7 +3,7 @@
 
 # Official podman image — tracks the latest upstream release.
 # Already ships user 'podman' (uid 1000) with full rootless setup
-# (subuid/subgid, storage.conf, containers.conf).
+# (subuid/subgid, storage.conf, containers.conf, setuid newuidmap).
 FROM quay.io/podman/stable:latest
 
 RUN dnf install -y \

@@ -5,23 +5,22 @@
 FROM docker.io/library/debian:trixie
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    podman passt slirp4netns nftables uidmap fuse-overlayfs \
+    podman passt slirp4netns nftables uidmap fuse-overlayfs crun \
     python3 python3-pip python3-venv \
     git curl ca-certificates dnsutils \
     && rm -rf /var/lib/apt/lists/*
 
-# Rootless test user with subordinate UID/GID ranges
+# ── Rootless podman setup ────
 RUN useradd -m testrunner \
-    && echo "testrunner:100000:65536" >> /etc/subuid \
-    && echo "testrunner:100000:65536" >> /etc/subgid \
-    && mkdir -p /run/user/$(id -u testrunner) \
-    && chown testrunner:testrunner /run/user/$(id -u testrunner)
-
-# Configure podman for nested rootless operation
-RUN mkdir -p /etc/containers \
+    && echo "testrunner:100000:65536" > /etc/subuid \
+    && echo "testrunner:100000:65536" > /etc/subgid \
+    && chmod 4755 /usr/bin/newuidmap /usr/bin/newgidmap \
+    && mkdir -p /etc/containers \
     && printf '[storage]\ndriver = "overlay"\n\n[storage.options.overlay]\nmount_program = "/usr/bin/fuse-overlayfs"\nmountopt = "nodev,fsync=0"\n' \
         > /etc/containers/storage.conf \
     && printf '[engine]\ncgroup_manager = "cgroupfs"\nevents_logger = "file"\n' \
-        > /etc/containers/containers.conf
+        > /etc/containers/containers.conf \
+    && mkdir -p /run/user/$(id -u testrunner) \
+    && chown testrunner:testrunner /run/user/$(id -u testrunner)
 
 WORKDIR /src

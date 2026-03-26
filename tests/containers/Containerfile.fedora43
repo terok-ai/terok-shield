@@ -5,23 +5,32 @@
 FROM registry.fedoraproject.org/fedora:43
 
 RUN dnf install -y \
-    podman passt nftables slirp4netns fuse-overlayfs \
+    podman passt nftables slirp4netns fuse-overlayfs crun \
     python3 python3-pip \
     git curl bind-utils \
-    && dnf clean all \
-    && rpm --setcaps shadow-utils 2>/dev/null
+    && dnf clean all
 
-# Rootless test user with subordinate UID/GID ranges
-RUN useradd -m testrunner \
-    && echo "testrunner:100000:65536" >> /etc/subuid \
-    && echo "testrunner:100000:65536" >> /etc/subgid \
-    && mkdir -p /run/user/$(id -u testrunner) \
-    && chown testrunner:testrunner /run/user/$(id -u testrunner)
+# ── Rootless podman setup (mirrors quay.io/podman/stable pattern) ────
+# 1. Create test user
+RUN useradd -m testrunner
 
-# Configure podman for nested rootless operation
+# 2. Authoritative subuid/subgid — truncate to avoid duplicates from useradd
+RUN echo "testrunner:100000:65536" > /etc/subuid \
+    && echo "testrunner:100000:65536" > /etc/subgid
+
+# 3. Setuid on newuidmap/newgidmap — file capabilities are stripped by OCI layers
+RUN chmod 4755 /usr/bin/newuidmap /usr/bin/newgidmap
+
+# 4. Storage: fuse-overlayfs for nested rootless operation
 RUN printf '[storage]\ndriver = "overlay"\n\n[storage.options.overlay]\nmount_program = "/usr/bin/fuse-overlayfs"\nmountopt = "nodev,fsync=0"\n' \
-        > /etc/containers/storage.conf \
-    && printf '[engine]\ncgroup_manager = "cgroupfs"\nevents_logger = "file"\n' \
+        > /etc/containers/storage.conf
+
+# 5. Engine: cgroupfs (no systemd in nested containers)
+RUN printf '[engine]\ncgroup_manager = "cgroupfs"\nevents_logger = "file"\n' \
         > /etc/containers/containers.conf
+
+# 6. XDG runtime directory for rootless session
+RUN mkdir -p /run/user/$(id -u testrunner) \
+    && chown testrunner:testrunner /run/user/$(id -u testrunner)
 
 WORKDIR /src

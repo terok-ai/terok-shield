@@ -119,6 +119,10 @@ run_tests() {
                 echo \"--- podman version ---\"
                 podman --version || echo \"podman not available\"
 
+                echo \"--- rootless podman preflight ---\"
+                podman info --format \"podman={{.Version.Version}} storage={{.Store.GraphDriverName}}\" \
+                    || { echo \"FATAL: rootless podman not functional\" >&2; exit 1; }
+
                 if command -v uv &>/dev/null; then
                     uv venv --python $PYTHON_VERSION .venv
                     . .venv/bin/activate
