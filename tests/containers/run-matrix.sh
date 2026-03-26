@@ -129,7 +129,8 @@ run_tests() {
             # Strip IPv6 zone-ID nameservers — they reference host interfaces
             # (e.g. eno1) that don't exist inside the container, causing dig
             # to reject the entire resolv.conf.  See #133.
-            sed -i '/^nameserver.*%/d' /etc/resolv.conf
+            cp /etc/resolv.conf /tmp/resolv.conf.clean
+            grep -v '^nameserver.*%' /tmp/resolv.conf.clean > /etc/resolv.conf
 
             # ── Run everything as the rootless test user ──
             su - $test_user -c '
