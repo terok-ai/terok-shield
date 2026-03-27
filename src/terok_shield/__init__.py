@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 
 from . import state
 from .audit import AuditLogger
-from .config import ShieldConfig, ShieldMode, ShieldState
+from .config import DnsTier, ShieldConfig, ShieldMode, ShieldState
 from .dns import DnsResolver
 from .mode_hook import setup_global_hooks
 from .nft import RulesetBuilder
@@ -66,6 +66,7 @@ class EnvironmentCheck:
         hooks: Hook installation type (``per-container``, ``global-system``,
             ``global-user``, ``not-installed``).
         health: Environment health (``ok``, ``setup-needed``, ``stale-hooks``).
+        dns_tier: Active DNS resolution tier (``dnsmasq``, ``dig``, ``getent``).
         issues: List of human-readable issue descriptions.
         needs_setup: True if one-time setup is required.
         setup_hint: Setup instructions (empty if not needed).
@@ -75,6 +76,7 @@ class EnvironmentCheck:
     podman_version: tuple[int, ...] = (0,)
     hooks: str = "per-container"
     health: str = "ok"
+    dns_tier: str = "dig"
     issues: list[str] = field(default_factory=list)
     needs_setup: bool = False
     setup_hint: str = ""
@@ -148,6 +150,8 @@ class Shield:
         :class:`EnvironmentCheck` with detected issues and setup hints.
         Does not raise — the caller decides how to handle issues.
         """
+        from .dnsmasq import has_nftset
+
         output = self.runner.run(["podman", "info", "-f", "json"], check=False)
         info = parse_podman_info(output)
         issues: list[str] = []
@@ -156,9 +160,15 @@ class Shield:
         hooks = "per-container"
         health = "ok"
 
-        if not self.runner.has("dig"):
+        # Detect DNS tier
+        if self.runner.has("dnsmasq") and has_nftset(self.runner):
+            dns_tier = DnsTier.DNSMASQ.value
+        elif self.runner.has("dig"):
+            dns_tier = DnsTier.DIG.value
+        else:
+            dns_tier = DnsTier.GETENT.value
             issues.append(
-                "dig not found — DNS resolution will fail. "
+                "dig not found — DNS resolution will use getent (degraded). "
                 "Install: dnsutils (Debian/Ubuntu) or bind-utils (Fedora/RHEL)"
             )
 
@@ -190,6 +200,7 @@ class Shield:
             podman_version=info.version,
             hooks=hooks,
             health=health,
+            dns_tier=dns_tier,
             issues=issues,
             needs_setup=needs_setup,
             setup_hint=setup_hint,
@@ -213,7 +224,8 @@ class Shield:
 
     def allow(self, container: str, target: str) -> list[str]:
         """Live-allow a domain or IP for a running container."""
-        ips = [target] if _is_ip(target) else self.dns.resolve_domains([target])
+        is_domain = not _is_ip(target)
+        ips = [target] if not is_domain else self.dns.resolve_domains([target])
         allowed: list[str] = []
         for ip in ips:
             try:
@@ -222,11 +234,18 @@ class Shield:
                 continue
             allowed.append(ip)
             self.audit.log_event(container, "allowed", dest=ip, detail=f"target={target}")
+        # Update dnsmasq config for domain targets (so future IP rotations are captured)
+        if is_domain and allowed:
+            try:
+                self._mode.allow_domain(container, target)
+            except (ExecError, OSError, RuntimeError):
+                pass  # best-effort: nft sets already updated above
         return allowed
 
     def deny(self, container: str, target: str) -> list[str]:
         """Live-deny a domain or IP for a running container."""
-        ips = [target] if _is_ip(target) else self.dns.resolve_domains([target])
+        is_domain = not _is_ip(target)
+        ips = [target] if not is_domain else self.dns.resolve_domains([target])
         denied: list[str] = []
         for ip in ips:
             try:
@@ -235,6 +254,12 @@ class Shield:
                 continue
             denied.append(ip)
             self.audit.log_event(container, "denied", dest=ip, detail=f"target={target}")
+        # Remove domain from dnsmasq config (stops future auto-population)
+        if is_domain and denied:
+            try:
+                self._mode.deny_domain(container, target)
+            except (ExecError, OSError, RuntimeError):
+                pass  # best-effort: nft sets already updated above
         return denied
 
     def rules(self, container: str) -> str:
@@ -302,6 +327,7 @@ __all__ = [
     "CommandRunner",
     "DigNotFoundError",
     "DnsResolver",
+    "DnsTier",
     "EnvironmentCheck",
     "ExecError",
     "NftNotFoundError",

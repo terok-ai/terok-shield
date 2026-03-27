@@ -11,7 +11,7 @@ import logging
 import time
 from pathlib import Path
 
-from .run import CommandRunner
+from .run import CommandRunner, DigNotFoundError
 from .util import is_ip as _is_ip
 
 logger = logging.getLogger(__name__)
@@ -59,14 +59,22 @@ class DnsResolver:
     def resolve_domains(self, domains: list[str]) -> list[str]:
         """Resolve a list of domains to IPv4 and IPv6 addresses.
 
-        Queries both A and AAAA records for each domain.
+        Queries both A and AAAA records for each domain via ``dig``.
+        Falls back to ``getent hosts`` when ``dig`` is not installed
+        (fewer IPs captured, no AAAA parallel query).
         Skips domains that fail to resolve (best-effort).
         Returns deduplicated IPs.
         """
         seen: set[str] = set()
         result: list[str] = []
+        use_getent = False
         for domain in domains:
-            ips = self._runner.dig_all(domain)
+            try:
+                ips = self._resolve_one(domain, use_getent=use_getent)
+            except DigNotFoundError:
+                logger.warning("dig not found — falling back to getent for DNS resolution")
+                use_getent = True
+                ips = self._resolve_one(domain, use_getent=True)
             if not ips:
                 logger.warning("Domain %r resolved to no IPs (typo or DNS failure?)", domain)
             for ip in ips:
@@ -74,6 +82,12 @@ class DnsResolver:
                     seen.add(ip)
                     result.append(ip)
         return result
+
+    def _resolve_one(self, domain: str, *, use_getent: bool = False) -> list[str]:
+        """Resolve a single domain using dig or getent."""
+        if use_getent:
+            return self._runner.getent_hosts(domain)
+        return self._runner.dig_all(domain)
 
     def resolve_and_cache(
         self,

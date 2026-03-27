@@ -23,6 +23,8 @@ from .nft_constants import (
     PRIVATE_RANGES,
 )
 
+_SAFE_TIMEOUT_RE = re.compile(r"^\d+[smhd]$")
+
 # ── Validation ───────────────────────────────────────────
 
 
@@ -88,6 +90,17 @@ def _try_validate(ip: str) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _safe_timeout(value: str) -> str:
+    """Validate an nft timeout value (e.g. ``30m``, ``1h``, ``60s``).
+
+    Raises ValueError on invalid input.  Prevents injection via
+    timeout strings in nft set declarations.
+    """
+    if not _SAFE_TIMEOUT_RE.fullmatch(value):
+        raise ValueError(f"Invalid nft timeout: {value!r} (expected e.g. '30m', '1h', '60s')")
+    return value
 
 
 # ── Private helpers ──────────────────────────────────────
@@ -167,6 +180,7 @@ class RulesetBuilder:
         dns: str = PASTA_DNS,
         loopback_ports: tuple[int, ...] = (),
         gateway: str = "",
+        set_timeout: str = "",
     ) -> None:
         """Create a builder with validated DNS, gateway, and loopback port config.
 
@@ -176,20 +190,29 @@ class RulesetBuilder:
             gateway: Network gateway IP (e.g. slirp4netns 10.0.2.2).
                 When set with loopback_ports, generates accept rules for
                 the gateway before private-range reject rules.
+            set_timeout: nft set element timeout (e.g. ``30m``).  When set,
+                allow sets use ``flags interval, timeout`` so dnsmasq-populated
+                IPs expire and are refreshed on the next DNS query.
         """
         dns = safe_ip(dns)
         for p in loopback_ports:
             _safe_port(p)
         if gateway:
             gateway = _safe_host_ip(gateway)
+        if set_timeout:
+            _safe_timeout(set_timeout)
         self._dns = dns
         self._loopback_ports = loopback_ports
         self._gateway = gateway
+        self._set_timeout = set_timeout
 
     def build_hook(self) -> str:
         """Generate the hook-mode (deny-all) nftables ruleset."""
         return hook_ruleset(
-            dns=self._dns, loopback_ports=self._loopback_ports, gateway=self._gateway
+            dns=self._dns,
+            loopback_ports=self._loopback_ports,
+            gateway=self._gateway,
+            set_timeout=self._set_timeout,
         )
 
     def build_bypass(self, *, allow_all: bool = False) -> str:
@@ -199,6 +222,7 @@ class RulesetBuilder:
             loopback_ports=self._loopback_ports,
             gateway=self._gateway,
             allow_all=allow_all,
+            set_timeout=self._set_timeout,
         )
 
     def verify_hook(self, nft_output: str) -> list[str]:
@@ -223,10 +247,25 @@ class RulesetBuilder:
 # ── Module-level free functions (unchanged API) ──────────
 
 
+def _set_declaration(name: str, family: str, set_timeout: str = "") -> str:
+    """Generate an nft set declaration with optional timeout.
+
+    Args:
+        name: Set name (e.g. ``allow_v4``).
+        family: Address type (``ipv4_addr`` or ``ipv6_addr``).
+        set_timeout: Element timeout (e.g. ``30m``).  When set, adds
+            ``timeout`` flag so elements auto-expire.
+    """
+    if set_timeout:
+        return f"set {name} {{ type {family}; flags interval, timeout; timeout {set_timeout}; }}"
+    return f"set {name} {{ type {family}; flags interval; }}"
+
+
 def hook_ruleset(
     dns: str = PASTA_DNS,
     loopback_ports: tuple[int, ...] = (),
     gateway: str = "",
+    set_timeout: str = "",
 ) -> str:
     """Generate a per-container nftables ruleset for hook mode.
 
@@ -241,10 +280,13 @@ def hook_ruleset(
         dns: DNS server address (pasta default forwarder).
         loopback_ports: TCP ports to allow on the loopback interface.
         gateway: Network gateway IP for loopback port access (slirp4netns).
+        set_timeout: nft set element timeout (e.g. ``30m``).
     """
     dns = safe_ip(dns)
     if gateway:
         gateway = _safe_host_ip(gateway)
+    if set_timeout:
+        _safe_timeout(set_timeout)
     for p in loopback_ports:
         _safe_port(p)
     port_rules = _loopback_port_rules(loopback_ports)
@@ -256,10 +298,12 @@ def hook_ruleset(
         infra_block += f"\n{port_rules}"
     infra_block += "\n"
     dns_af = "ip" if _is_v4(dns) else "ip6"
+    set_v4 = _set_declaration("allow_v4", "ipv4_addr", set_timeout)
+    set_v6 = _set_declaration("allow_v6", "ipv6_addr", set_timeout)
     return textwrap.dedent(f"""\
         table {NFT_TABLE} {{
-            set allow_v4 {{ type ipv4_addr; flags interval; }}
-            set allow_v6 {{ type ipv6_addr; flags interval; }}
+            {set_v4}
+            {set_v6}
 
             chain output {{
                 type filter hook output priority filter; policy drop;
@@ -290,6 +334,7 @@ def bypass_ruleset(
     gateway: str = "",
     *,
     allow_all: bool = False,
+    set_timeout: str = "",
 ) -> str:
     """Generate a bypass (accept-all + log) nftables ruleset.
 
@@ -303,10 +348,13 @@ def bypass_ruleset(
         loopback_ports: TCP ports to allow on the loopback interface.
         gateway: Network gateway IP for loopback port access (slirp4netns).
         allow_all: If True, remove private-range reject rules.
+        set_timeout: nft set element timeout (e.g. ``30m``).
     """
     dns = safe_ip(dns)
     if gateway:
         gateway = _safe_host_ip(gateway)
+    if set_timeout:
+        _safe_timeout(set_timeout)
     for p in loopback_ports:
         _safe_port(p)
     port_rules = _loopback_port_rules(loopback_ports)
@@ -318,12 +366,14 @@ def bypass_ruleset(
         infra_block += f"\n{port_rules}"
     infra_block += "\n"
     dns_af = "ip" if _is_v4(dns) else "ip6"
+    set_v4 = _set_declaration("allow_v4", "ipv4_addr", set_timeout)
+    set_v6 = _set_declaration("allow_v6", "ipv6_addr", set_timeout)
     private_block = "" if allow_all else f"\n{_private_range_rules()}"
     bypass_log = f'        ct state new log prefix "{BYPASS_LOG_PREFIX}: " counter'
     return textwrap.dedent(f"""\
         table {NFT_TABLE} {{
-            set allow_v4 {{ type ipv4_addr; flags interval; }}
-            set allow_v6 {{ type ipv6_addr; flags interval; }}
+            {set_v4}
+            {set_v6}
 
             chain output {{
                 type filter hook output priority filter; policy accept;

@@ -14,6 +14,7 @@ from collections.abc import Callable
 import pytest
 
 from terok_shield.nft import (
+    _safe_timeout,
     add_elements,
     add_elements_dual,
     bypass_ruleset,
@@ -633,3 +634,67 @@ class TestGatewayPortRules:
         """CIDR network as gateway is rejected (must be a single host)."""
         with pytest.raises(ValueError, match="network"):
             hook_ruleset(dns=SLIRP4NETNS_DNS, loopback_ports=(9418,), gateway="10.0.2.0/24")
+
+
+# ── _safe_timeout validation ─────────────────────────────
+
+
+class TestSafeTimeout:
+    """Security boundary: timeout validation prevents nft injection."""
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            pytest.param("30m", id="minutes"),
+            pytest.param("1h", id="hours"),
+            pytest.param("60s", id="seconds"),
+            pytest.param("7d", id="days"),
+        ],
+    )
+    def test_accepts_valid_timeout(self, value: str) -> None:
+        """Valid nft timeout values are accepted."""
+        assert _safe_timeout(value) == value
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            pytest.param("", id="empty"),
+            pytest.param("30", id="no-unit"),
+            pytest.param("m30", id="unit-first"),
+            pytest.param("30x", id="invalid-unit"),
+            pytest.param("30m; drop", id="injection"),
+            pytest.param("-1m", id="negative"),
+        ],
+    )
+    def test_rejects_invalid_timeout(self, value: str) -> None:
+        """Invalid timeout values are rejected."""
+        with pytest.raises(ValueError, match="Invalid nft timeout"):
+            _safe_timeout(value)
+
+
+# ── set_timeout in rulesets ──────────────────────────────
+
+
+class TestSetTimeout:
+    """nft set declarations with optional timeout for dnsmasq mode."""
+
+    def test_hook_ruleset_without_timeout(self) -> None:
+        """Default rulesets have no timeout in set declarations."""
+        rs = hook_ruleset()
+        assert "flags interval;" in rs
+        assert "timeout" not in rs
+
+    def test_hook_ruleset_with_timeout(self) -> None:
+        """With set_timeout, sets get interval+timeout flags."""
+        rs = hook_ruleset(set_timeout="30m")
+        assert "flags interval, timeout; timeout 30m;" in rs
+
+    def test_bypass_ruleset_with_timeout(self) -> None:
+        """Bypass rulesets also support set_timeout."""
+        rs = bypass_ruleset(set_timeout="1h")
+        assert "flags interval, timeout; timeout 1h;" in rs
+
+    def test_hook_ruleset_rejects_invalid_timeout(self) -> None:
+        """Invalid timeout in hook_ruleset is rejected."""
+        with pytest.raises(ValueError):
+            hook_ruleset(set_timeout="bad")

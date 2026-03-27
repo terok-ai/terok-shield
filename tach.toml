@@ -80,13 +80,23 @@ depends_on = [
     "terok_shield.validation",
 ]
 
-# OCI hook entry point — depends on audit, config, nft, run, state
+# dnsmasq lifecycle — config generation, launch, cleanup
+[[modules]]
+path = "terok_shield.dnsmasq"
+depends_on = [
+    "terok_shield.nft_constants",
+    "terok_shield.state",
+]
+
+# OCI hook entry point — depends on audit, config, dnsmasq, nft, run, state
 [[modules]]
 path = "terok_shield.oci_hook"
 depends_on = [
     "terok_shield.audit",
     "terok_shield.config",
+    "terok_shield.dnsmasq",
     "terok_shield.nft",
+    "terok_shield.nft_constants",
     "terok_shield.podman_info",
     "terok_shield.run",
     "terok_shield.state",
@@ -97,7 +107,9 @@ depends_on = [
 path = "terok_shield.mode_hook"
 depends_on = [
     "terok_shield.config",
+    "terok_shield.dnsmasq",
     "terok_shield.nft",
+    "terok_shield.nft_constants",
     "terok_shield.podman_info",
     "terok_shield.run",
     "terok_shield.state",
@@ -128,6 +140,7 @@ path = "terok_shield"
 depends_on = [
     "terok_shield.audit",
     "terok_shield.config",
+    "terok_shield.dnsmasq",
     "terok_shield.dns",
     "terok_shield.mode_hook",
     "terok_shield.nft",

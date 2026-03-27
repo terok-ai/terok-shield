@@ -19,6 +19,24 @@ ANNOTATION_STATE_DIR_KEY = "terok.shield.state_dir"
 ANNOTATION_LOOPBACK_PORTS_KEY = "terok.shield.loopback_ports"
 ANNOTATION_VERSION_KEY = "terok.shield.version"
 ANNOTATION_AUDIT_ENABLED_KEY = "terok.shield.audit_enabled"
+ANNOTATION_UPSTREAM_DNS_KEY = "terok.shield.upstream_dns"
+ANNOTATION_DNS_TIER_KEY = "terok.shield.dns_tier"
+
+
+class DnsTier(enum.Enum):
+    """DNS resolution tier for egress control.
+
+    Determines how domain-based allowlists are enforced:
+
+    DNSMASQ: Per-container dnsmasq with ``--nftset`` auto-populates nft
+        allow sets on every DNS query.  Handles IP rotation.
+    DIG: Static resolution at pre-start via ``dig`` (current fallback).
+    GETENT: Single-IP resolution via ``getent hosts`` (minimal fallback).
+    """
+
+    DNSMASQ = "dnsmasq"
+    DIG = "dig"
+    GETENT = "getent"
 
 
 class ShieldMode(enum.Enum):
@@ -88,8 +106,16 @@ class ShieldModeBackend(Protocol):
         """Live-allow an IP for a running container."""
         ...
 
+    def allow_domain(self, container: str, domain: str) -> None:
+        """Live-allow a domain (update dnsmasq config if active)."""
+        ...
+
     def deny_ip(self, container: str, ip: str) -> None:
         """Live-deny an IP for a running container."""
+        ...
+
+    def deny_domain(self, container: str, domain: str) -> None:
+        """Live-deny a domain (remove from dnsmasq config if active)."""
         ...
 
     def list_rules(self, container: str) -> str:

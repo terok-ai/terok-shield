@@ -15,10 +15,12 @@ import pytest
 from terok_shield import state
 from terok_shield.config import (
     ANNOTATION_AUDIT_ENABLED_KEY,
+    ANNOTATION_DNS_TIER_KEY,
     ANNOTATION_KEY,
     ANNOTATION_LOOPBACK_PORTS_KEY,
     ANNOTATION_NAME_KEY,
     ANNOTATION_STATE_DIR_KEY,
+    ANNOTATION_UPSTREAM_DNS_KEY,
     ANNOTATION_VERSION_KEY,
 )
 from terok_shield.oci_hook import (
@@ -61,6 +63,8 @@ def _valid_annotations(state_dir: Path) -> dict[str, str]:
         ANNOTATION_STATE_DIR_KEY: str(state_dir),
         ANNOTATION_LOOPBACK_PORTS_KEY: "1234",
         ANNOTATION_VERSION_KEY: str(state.BUNDLE_VERSION),
+        ANNOTATION_UPSTREAM_DNS_KEY: "169.254.1.1",
+        ANNOTATION_DNS_TIER_KEY: "dig",
     }
 
 
@@ -90,6 +94,7 @@ def hook_main_harness(monkeypatch: pytest.MonkeyPatch) -> HookMainHarness:
     monkeypatch.setattr("terok_shield.oci_hook.SubprocessRunner", mock.MagicMock)
     monkeypatch.setattr("terok_shield.oci_hook._read_container_dns", lambda pid: "169.254.1.1")
     monkeypatch.setattr("terok_shield.oci_hook._read_container_gateway", lambda pid: "")
+    monkeypatch.setattr("terok_shield.oci_hook.dnsmasq", mock.MagicMock())
     return HookMainHarness(
         executor_cls=executor_cls,
         audit_cls=audit_cls,
@@ -235,7 +240,10 @@ def test_hook_main_success(hook_main_harness: HookMainHarness, tmp_path: Path) -
     rc = hook_main(_oci_state("test-ctr", 42, annotations=_valid_annotations(tmp_path)))
     assert rc == 0
     hook_main_harness.ruleset_builder_cls.assert_called_once_with(
-        dns="169.254.1.1", loopback_ports=(1234,), gateway=""
+        dns="169.254.1.1",
+        loopback_ports=(1234,),
+        gateway="",
+        set_timeout="",
     )
     hook_main_harness.executor.apply.assert_called_once_with("test-ctr", "42")
 
@@ -367,3 +375,41 @@ def test_hook_main_configures_audit_logger_from_annotation(
     assert hook_main(_oci_state(annotations=annotations)) == 0
     _, kwargs = hook_main_harness.audit_cls.call_args
     assert kwargs["enabled"] is expected_enabled
+
+
+def test_hook_main_dnsmasq_tier_sets_timeout(
+    hook_main_harness: HookMainHarness,
+    tmp_path: Path,
+) -> None:
+    """hook_main() passes set_timeout when DNS tier is dnsmasq."""
+    annotations = _valid_annotations(tmp_path)
+    annotations[ANNOTATION_DNS_TIER_KEY] = "dnsmasq"
+    assert hook_main(_oci_state(annotations=annotations)) == 0
+    _, kwargs = hook_main_harness.ruleset_builder_cls.call_args
+    assert kwargs["set_timeout"] == "30m"
+
+
+def test_hook_main_uses_upstream_dns_from_annotation(
+    hook_main_harness: HookMainHarness,
+    tmp_path: Path,
+) -> None:
+    """hook_main() uses upstream_dns annotation for RulesetBuilder DNS param."""
+    annotations = _valid_annotations(tmp_path)
+    annotations[ANNOTATION_UPSTREAM_DNS_KEY] = "10.0.2.3"
+    assert hook_main(_oci_state(annotations=annotations)) == 0
+    _, kwargs = hook_main_harness.ruleset_builder_cls.call_args
+    assert kwargs["dns"] == "10.0.2.3"
+
+
+def test_hook_main_poststop_calls_dnsmasq_kill(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """poststop stage calls dnsmasq.kill() best-effort."""
+    mock_dnsmasq = mock.MagicMock()
+    monkeypatch.setattr("terok_shield.oci_hook.dnsmasq", mock_dnsmasq)
+
+    annotations = _valid_annotations(tmp_path)
+    rc = hook_main(_oci_state(pid=0, annotations=annotations), stage="poststop")
+    assert rc == 0
+    mock_dnsmasq.kill.assert_called_once()

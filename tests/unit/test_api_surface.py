@@ -30,6 +30,7 @@ EXPECTED_ALL = [
     "CommandRunner",
     "DigNotFoundError",
     "DnsResolver",
+    "DnsTier",
     "EnvironmentCheck",
     "ExecError",
     "NftNotFoundError",

@@ -23,15 +23,19 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import state
+from . import dnsmasq, state
 from .audit import AuditLogger
 from .config import (
     ANNOTATION_AUDIT_ENABLED_KEY,
+    ANNOTATION_DNS_TIER_KEY,
     ANNOTATION_LOOPBACK_PORTS_KEY,
     ANNOTATION_STATE_DIR_KEY,
+    ANNOTATION_UPSTREAM_DNS_KEY,
     ANNOTATION_VERSION_KEY,
+    DnsTier,
 )
 from .nft import RulesetBuilder
+from .nft_constants import NFT_SET_TIMEOUT_DNSMASQ
 from .podman_info import parse_proc_net_route, parse_resolv_conf
 from .run import ExecError, SubprocessRunner
 
@@ -329,6 +333,33 @@ def _read_container_gateway(pid: str) -> str:
 # ── Entry point ──────────────────────────────────────────
 
 
+def _read_state_dir(annotations: dict[str, str]) -> Path:
+    """Extract and validate the state directory from annotations.
+
+    Raises RuntimeError on missing or invalid annotation.
+    """
+    state_dir_str = annotations.get(ANNOTATION_STATE_DIR_KEY)
+    if not state_dir_str:
+        raise RuntimeError(
+            f"Missing {ANNOTATION_STATE_DIR_KEY} annotation. "
+            "Container was not started with terok-shield pre_start()."
+        )
+    sd = Path(state_dir_str)
+    if not sd.is_absolute():
+        raise RuntimeError(
+            f"{ANNOTATION_STATE_DIR_KEY} must be an absolute path: {state_dir_str!r}"
+        )
+    return sd.resolve()
+
+
+def _read_profile_domains(state_dir: Path) -> list[str]:
+    """Read domain names from the profile.domains state file."""
+    path = state.profile_domains_path(state_dir)
+    if not path.is_file():
+        return []
+    return [line.strip() for line in path.read_text().splitlines() if line.strip()]
+
+
 def hook_main(stdin_data: str | None = None, stage: str = "createRuntime") -> int:
     """OCI hook entry point.
 
@@ -353,25 +384,14 @@ def hook_main(stdin_data: str | None = None, stage: str = "createRuntime") -> in
 
     try:
         if stage == "poststop":
-            return 0
+            return _handle_poststop(annotations)
 
         # createRuntime (default)
         if not pid:
             raise RuntimeError("Hook mode requires a valid PID in OCI state")
 
         # Read config from annotations
-        state_dir_str = annotations.get(ANNOTATION_STATE_DIR_KEY)
-        if not state_dir_str:
-            raise RuntimeError(
-                f"Missing {ANNOTATION_STATE_DIR_KEY} annotation. "
-                "Container was not started with terok-shield pre_start()."
-            )
-        sd = Path(state_dir_str)
-        if not sd.is_absolute():
-            raise RuntimeError(
-                f"{ANNOTATION_STATE_DIR_KEY} must be an absolute path: {state_dir_str!r}"
-            )
-        sd = sd.resolve()
+        sd = _read_state_dir(annotations)
 
         version_str = annotations.get(ANNOTATION_VERSION_KEY, "")
         if not version_str:
@@ -392,17 +412,31 @@ def hook_main(stdin_data: str | None = None, stage: str = "createRuntime") -> in
         raw_audit = annotations.get(ANNOTATION_AUDIT_ENABLED_KEY, "true").strip().lower()
         audit_enabled = raw_audit not in ("false", "0")
 
-        # Read DNS and gateway from the container's network namespace
-        # (mounts + netns are done at createRuntime per OCI spec).
-        dns = _read_container_dns(pid)
+        # DNS tier and upstream DNS from annotations
+        upstream_dns = annotations.get(ANNOTATION_UPSTREAM_DNS_KEY, "")
+        dns_tier_str = annotations.get(ANNOTATION_DNS_TIER_KEY, "")
+
+        # Determine DNS for nft rules: use upstream annotation, fall back to resolv.conf
+        if upstream_dns:
+            dns = upstream_dns
+        else:
+            dns = _read_container_dns(pid)
         gateway = _read_container_gateway(pid)
+
+        # dnsmasq tier: nft sets get timeout for auto-expiry
+        set_timeout = NFT_SET_TIMEOUT_DNSMASQ if dns_tier_str == DnsTier.DNSMASQ.value else ""
 
         runner = SubprocessRunner()
         audit = AuditLogger(
             audit_path=state.audit_path(sd),
             enabled=audit_enabled,
         )
-        ruleset = RulesetBuilder(dns=dns, loopback_ports=loopback_ports, gateway=gateway)
+        ruleset = RulesetBuilder(
+            dns=dns,
+            loopback_ports=loopback_ports,
+            gateway=gateway,
+            set_timeout=set_timeout,
+        )
         executor = HookExecutor(
             runner=runner,
             audit=audit,
@@ -410,10 +444,35 @@ def hook_main(stdin_data: str | None = None, stage: str = "createRuntime") -> in
             state_dir=sd,
         )
         executor.apply(container_id, pid)
+
+        # Launch per-container dnsmasq when tier is active
+        if dns_tier_str == DnsTier.DNSMASQ.value:
+            domains = _read_profile_domains(sd)
+            dnsmasq.launch(runner, pid, sd, upstream_dns, domains)
+            dnsmasq.write_resolv_conf(pid)
+            audit.log_event(
+                container_id,
+                "setup",
+                detail=f"dnsmasq launched with {len(domains)} domains",
+            )
+
     except RuntimeError as e:
         print(f"terok-shield hook: {e}", file=sys.stderr)
         return 1
 
+    return 0
+
+
+def _handle_poststop(annotations: dict[str, str]) -> int:
+    """Handle the poststop hook stage: clean up dnsmasq (best-effort).
+
+    Returns 0 always — poststop failures must not block container teardown.
+    """
+    try:
+        sd = _read_state_dir(annotations)
+        dnsmasq.kill(sd)
+    except (RuntimeError, OSError):
+        pass  # best-effort cleanup
     return 0
 
 

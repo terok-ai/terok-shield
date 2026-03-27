@@ -13,6 +13,7 @@ import pytest
 
 from terok_shield import state
 from terok_shield.dns import DnsResolver
+from terok_shield.run import DigNotFoundError
 
 from ..testfs import NONEXISTENT_DIR, TEST_CACHE_FILENAME, TEST_SUBDIR_NAME
 from ..testnet import (
@@ -189,3 +190,28 @@ def test_resolve_and_cache_mixed_entries(
     result = harness.resolver.resolve_and_cache([TEST_IP1, TEST_DOMAIN], cache_path)
     assert TEST_IP1 in result
     assert TEST_IP2 in result
+
+
+def test_resolve_domains_falls_back_to_getent(
+    make_resolver: ResolverHarnessFactory,
+) -> None:
+    """resolve_domains() falls back to getent when dig is not found."""
+    harness = make_resolver()
+    harness.runner.dig_all.side_effect = DigNotFoundError("dig not found")
+    harness.runner.getent_hosts.side_effect = [[TEST_IP1], [TEST_IP2]]
+
+    result = harness.resolver.resolve_domains([CLOUDFLARE_DOMAIN, GOOGLE_DNS_DOMAIN])
+    assert result == [TEST_IP1, TEST_IP2]
+    harness.runner.getent_hosts.assert_called()
+
+
+def test_resolve_domains_getent_fallback_deduplicates(
+    make_resolver: ResolverHarnessFactory,
+) -> None:
+    """getent fallback still deduplicates IPs."""
+    harness = make_resolver()
+    harness.runner.dig_all.side_effect = DigNotFoundError("dig not found")
+    harness.runner.getent_hosts.side_effect = [[TEST_IP1], [TEST_IP1]]
+
+    result = harness.resolver.resolve_domains([CLOUDFLARE_DOMAIN, GOOGLE_DNS_DOMAIN])
+    assert result == [TEST_IP1]

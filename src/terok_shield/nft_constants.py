@@ -35,5 +35,12 @@ IPV6_PRIVATE: tuple[str, ...] = (
 # for rule generation and verification.
 PRIVATE_RANGES: tuple[str, ...] = RFC1918 + IPV6_PRIVATE
 
+# ── slirp4netns defaults ──────────────────────────────
+SLIRP4NETNS_DNS = "10.0.2.3"  # slirp4netns default DNS forwarder
+
+# ── dnsmasq defaults ─────────────────────────────────
+DNSMASQ_BIND = "127.0.0.1"  # dnsmasq listen address inside container
+NFT_SET_TIMEOUT_DNSMASQ = "30m"  # set element timeout when dnsmasq manages IPs
+
 # ── Log prefixes ───────────────────────────────────────
 BYPASS_LOG_PREFIX = "TEROK_SHIELD_BYPASS"

@@ -16,14 +16,17 @@ Bundle layout::
     │   └── terok-shield-poststop.json
     ├── terok-shield-hook              # entrypoint script
     ├── profile.allowed                # IPs from DNS resolution
+    ├── profile.domains                # domain names for dnsmasq config
     ├── live.allowed                   # IPs from allow/deny
     ├── deny.list                      # persistent deny overrides
+    ├── dnsmasq.conf                   # generated dnsmasq configuration
+    ├── dnsmasq.pid                    # dnsmasq PID (in container netns)
     └── audit.jsonl                    # per-container audit log
 """
 
 from pathlib import Path
 
-BUNDLE_VERSION = 1
+BUNDLE_VERSION = 2
 """Integer version of the state bundle layout.
 
 Bumped whenever the file layout changes in a backwards-incompatible way.
@@ -64,6 +67,21 @@ def deny_path(state_dir: Path) -> Path:
 def audit_path(state_dir: Path) -> Path:
     """Return the path to the per-container audit log."""
     return state_dir / "audit.jsonl"
+
+
+def profile_domains_path(state_dir: Path) -> Path:
+    """Return the path to the profile domain names list (for dnsmasq config)."""
+    return state_dir / "profile.domains"
+
+
+def dnsmasq_conf_path(state_dir: Path) -> Path:
+    """Return the path to the generated dnsmasq configuration file."""
+    return state_dir / "dnsmasq.conf"
+
+
+def dnsmasq_pid_path(state_dir: Path) -> Path:
+    """Return the path to the dnsmasq PID file."""
+    return state_dir / "dnsmasq.pid"
 
 
 def read_allowed_ips(state_dir: Path) -> list[str]:

@@ -25,15 +25,20 @@ from typing import TYPE_CHECKING
 from . import state
 from .config import (
     ANNOTATION_AUDIT_ENABLED_KEY,
+    ANNOTATION_DNS_TIER_KEY,
     ANNOTATION_KEY,
     ANNOTATION_LOOPBACK_PORTS_KEY,
     ANNOTATION_NAME_KEY,
     ANNOTATION_STATE_DIR_KEY,
+    ANNOTATION_UPSTREAM_DNS_KEY,
     ANNOTATION_VERSION_KEY,
+    DnsTier,
     ShieldConfig,
     ShieldState,
 )
+from .dnsmasq import has_nftset
 from .nft import NFT_TABLE, RulesetBuilder
+from .nft_constants import DNSMASQ_BIND, PASTA_DNS, SLIRP4NETNS_DNS
 from .podman_info import (
     PodmanInfo,
     global_hooks_hint,
@@ -43,7 +48,7 @@ from .podman_info import (
     parse_resolv_conf,
 )
 from .run import ExecError, ShieldNeedsSetup
-from .util import is_ipv4
+from .util import is_ip as _is_ip, is_ipv4
 
 if TYPE_CHECKING:
     from .audit import AuditLogger
@@ -53,6 +58,22 @@ if TYPE_CHECKING:
 
 
 # ── Private helpers ──────────────────────────────────────
+
+
+def _split_domains_ips(entries: list[str]) -> tuple[list[str], list[str]]:
+    """Split profile entries into (domains, raw_ips).
+
+    Domains are forwarded to dnsmasq for runtime resolution via ``--nftset``.
+    Raw IPs are resolved/cached as before and loaded into nft sets at hook time.
+    """
+    domains: list[str] = []
+    raw_ips: list[str] = []
+    for entry in entries:
+        if _is_ip(entry):
+            raw_ips.append(entry)
+        else:
+            domains.append(entry)
+    return domains, raw_ips
 
 
 def _generate_entrypoint() -> str:
@@ -208,8 +229,8 @@ class HookMode:
         """Prepare for container start in hook mode.
 
         Installs hooks (idempotent), composes profiles, resolves DNS
-        domains, writes allowlist, sets annotations, and returns the
-        podman CLI arguments needed for shield protection.
+        domains, writes allowlist, detects DNS tier, sets annotations,
+        and returns the podman CLI arguments needed for shield protection.
 
         Raises:
             ShieldNeedsSetup: On podman < 5.6.0 without global hooks.
@@ -224,15 +245,27 @@ class HookMode:
             hooks_dir=state.hooks_dir(sd),
         )
 
+        # Detect DNS tier and upstream DNS
+        tier = self._detect_dns_tier()
+        mode = info.network_mode if os.geteuid() != 0 else "pasta"
+        upstream_dns = SLIRP4NETNS_DNS if mode == "slirp4netns" else PASTA_DNS
+
         # Resolve DNS and write profile allowlist
         entries = self._profiles.compose_profiles(profiles)
-        self._dns.resolve_and_cache(entries, state.profile_allowed_path(sd))
+        if tier == DnsTier.DNSMASQ:
+            # dnsmasq handles domain→IP resolution at runtime via --nftset.
+            # Split entries: write domains for dnsmasq config, resolve only raw IPs.
+            domains, raw_ips = _split_domains_ips(entries)
+            state.profile_domains_path(sd).write_text("\n".join(domains) + "\n" if domains else "")
+            self._dns.resolve_and_cache(raw_ips, state.profile_allowed_path(sd))
+        else:
+            # dig/getent tier: resolve everything to IPs at pre-start time.
+            self._dns.resolve_and_cache(entries, state.profile_allowed_path(sd))
 
         # Build podman args
         args: list[str] = []
 
         if os.geteuid() != 0:
-            mode = info.network_mode
             if mode == "slirp4netns":
                 args += [
                     "--network",
@@ -250,7 +283,11 @@ class HookMode:
                     "host.containers.internal:127.0.0.1",
                 ]
 
-        # Annotations: profiles, name, state_dir, loopback_ports, version
+        # Point container DNS to per-container dnsmasq when active
+        if tier == DnsTier.DNSMASQ:
+            args += ["--dns", DNSMASQ_BIND]
+
+        # Annotations: profiles, name, state_dir, loopback_ports, version, dns
         ports_str = ",".join(str(p) for p in self._config.loopback_ports)
         args += [
             "--annotation",
@@ -265,6 +302,10 @@ class HookMode:
             f"{ANNOTATION_VERSION_KEY}={state.BUNDLE_VERSION}",
             "--annotation",
             f"{ANNOTATION_AUDIT_ENABLED_KEY}={str(self._config.audit_enabled).lower()}",
+            "--annotation",
+            f"{ANNOTATION_UPSTREAM_DNS_KEY}={upstream_dns}",
+            "--annotation",
+            f"{ANNOTATION_DNS_TIER_KEY}={tier.value}",
         ]
 
         # Hooks dir: per-container on modern podman, global on old podman
@@ -292,6 +333,17 @@ class HookMode:
             "NET_RAW",
         ]
         return args
+
+    def _detect_dns_tier(self) -> DnsTier:
+        """Detect the best available DNS resolution tier.
+
+        Checks for dnsmasq with HAVE_NFTSET first, then dig, then getent.
+        """
+        if self._runner.has("dnsmasq") and has_nftset(self._runner):
+            return DnsTier.DNSMASQ
+        if self._runner.has("dig"):
+            return DnsTier.DIG
+        return DnsTier.GETENT
 
     def _get_podman_info(self) -> PodmanInfo:
         """Get podman info, caching the result for the lifetime of this instance."""
@@ -381,6 +433,55 @@ class HookMode:
                 if ip not in existing:
                     with dp.open("a") as f:
                         f.write(f"{ip}\n")
+
+    def allow_domain(self, container: str, domain: str) -> None:
+        """Add a domain to the dnsmasq config and reload.
+
+        When dnsmasq is not active (dig/getent tier), this is a no-op —
+        domain-level tracking only matters when dnsmasq handles resolution.
+        """
+        from . import dnsmasq
+
+        sd = self._config.state_dir.resolve()
+        if not dnsmasq.add_domain(sd, domain):
+            return  # already present
+        self._reload_dnsmasq(container, sd)
+
+    def deny_domain(self, container: str, domain: str) -> None:
+        """Remove a domain from the dnsmasq config and reload.
+
+        When dnsmasq is not active, this is a no-op.
+        """
+        from . import dnsmasq
+
+        sd = self._config.state_dir.resolve()
+        if not dnsmasq.remove_domain(sd, domain):
+            return  # not present
+        self._reload_dnsmasq(container, sd)
+
+    def _reload_dnsmasq(self, container: str, state_dir: Path) -> None:
+        """Reload dnsmasq with the current domain list (best-effort).
+
+        No-op if dnsmasq is not running (PID file absent).
+        """
+        from . import dnsmasq
+
+        pid_path = state.dnsmasq_pid_path(state_dir)
+        if not pid_path.is_file():
+            return  # dnsmasq not running (dig/getent tier)
+
+        # Read upstream DNS from the dnsmasq config (first server= line)
+        conf_path = state.dnsmasq_conf_path(state_dir)
+        upstream = PASTA_DNS  # fallback
+        if conf_path.is_file():
+            for line in conf_path.read_text().splitlines():
+                if line.startswith("server="):
+                    upstream = line.split("=", 1)[1]
+                    break
+
+        container_pid = self._runner.podman_inspect(container, "{{.State.Pid}}")
+        domains = dnsmasq._read_domains(state.profile_domains_path(state_dir))
+        dnsmasq.reload(self._runner, container_pid, state_dir, upstream, domains)
 
     def list_rules(self, container: str) -> str:
         """List current nft rules for a running container."""
