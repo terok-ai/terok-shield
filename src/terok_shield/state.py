@@ -84,6 +84,11 @@ def dnsmasq_pid_path(state_dir: Path) -> Path:
     return state_dir / "dnsmasq.pid"
 
 
+def upstream_dns_path(state_dir: Path) -> Path:
+    """Return the path to the persisted upstream DNS address."""
+    return state_dir / "upstream.dns"
+
+
 def read_allowed_ips(state_dir: Path) -> list[str]:
     """Read IPs from both profile.allowed and live.allowed, merged and deduplicated.
 

@@ -485,14 +485,9 @@ class HookMode:
         No-op if dnsmasq is not running (PID file absent).
         Raises RuntimeError if dnsmasq is dead (stale PID).
         """
-        # Read upstream DNS from the existing dnsmasq config
-        conf_path = state.dnsmasq_conf_path(state_dir)
-        upstream = PASTA_DNS
-        if conf_path.is_file():
-            for line in conf_path.read_text().splitlines():
-                if line.startswith("server="):
-                    upstream = line.split("=", 1)[1]
-                    break
+        upstream = self._read_upstream_dns()
+        if not upstream:
+            raise RuntimeError("Cannot reload dnsmasq: upstream DNS not persisted in state")
 
         domains = dnsmasq.read_domains(state.profile_domains_path(state_dir))
         dnsmasq.reload(state_dir, upstream, domains)
@@ -539,9 +534,27 @@ class HookMode:
         )
         return parse_proc_net_route(output)
 
+    def _read_upstream_dns(self) -> str | None:
+        """Read persisted upstream DNS from state (written by the OCI hook).
+
+        Returns None if the file is absent (pre-dnsmasq container or
+        container started before this feature).
+        """
+        sd = self._config.state_dir.resolve()
+        path = state.upstream_dns_path(sd)
+        if not path.is_file():
+            return None
+        value = path.read_text().strip()
+        return value or None
+
     def _container_ruleset(self, container: str) -> RulesetBuilder:
-        """Build a RulesetBuilder with the container's actual DNS and gateway."""
-        dns = self._read_container_dns(container)
+        """Build a RulesetBuilder with the container's actual DNS and gateway.
+
+        Prefers persisted upstream DNS (from OCI hook) over resolv.conf,
+        because dnsmasq mode rewrites resolv.conf to ``127.0.0.1``.
+        """
+        upstream = self._read_upstream_dns()
+        dns = upstream if upstream else self._read_container_dns(container)
         gateway = self._read_container_gateway(container)
         return RulesetBuilder(dns=dns, loopback_ports=self._config.loopback_ports, gateway=gateway)
 

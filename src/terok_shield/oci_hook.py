@@ -423,6 +423,10 @@ def hook_main(stdin_data: str | None = None, stage: str = "createRuntime") -> in
             dns = _read_container_dns(pid)
         gateway = _read_container_gateway(pid)
 
+        # Persist upstream DNS so shield_up/shield_down can rebuild rules correctly
+        # (resolv.conf will be rewritten to 127.0.0.1 when dnsmasq is active)
+        state.upstream_dns_path(sd).write_text(f"{dns}\n")
+
         # dnsmasq tier: nft sets get timeout for auto-expiry
         set_timeout = NFT_SET_TIMEOUT_DNSMASQ if dns_tier_str == DnsTier.DNSMASQ.value else ""
 

@@ -278,10 +278,23 @@ def remove_domain(state_dir: Path, domain: str) -> bool:
 
 
 def read_domains(domains_path: Path) -> list[str]:
-    """Read domain names from a domains file."""
+    """Read and normalize domain names from a domains file.
+
+    Validates and lowercases each entry so comparisons with
+    ``add_domain()``/``remove_domain()`` are consistent.
+    Invalid entries are silently skipped.
+    """
     if not domains_path.is_file():
         return []
-    return [line.strip() for line in domains_path.read_text().splitlines() if line.strip()]
+    domains: list[str] = []
+    for line in domains_path.read_text().splitlines():
+        if not line.strip():
+            continue
+        try:
+            domains.append(_validate_domain(line))
+        except ValueError:
+            continue
+    return list(dict.fromkeys(domains))
 
 
 def write_resolv_conf(pid: str, nameserver: str = DNSMASQ_BIND) -> None:
