@@ -450,7 +450,7 @@ class HookMode:
                     with dp.open("a") as f:
                         f.write(f"{ip}\n")
 
-    def allow_domain(self, container: str, domain: str) -> None:
+    def allow_domain(self, domain: str) -> None:
         """Add a domain to the dnsmasq config and signal reload.
 
         Always persists the domain to ``profile.domains`` for future
@@ -468,7 +468,7 @@ class HookMode:
             return  # already present
         self._reload_dnsmasq(sd)
 
-    def deny_domain(self, container: str, domain: str) -> None:
+    def deny_domain(self, domain: str) -> None:
         """Remove a domain from the dnsmasq config and signal reload.
 
         Counterpart of ``allow_domain()``.  Removes the domain so dnsmasq

@@ -236,7 +236,7 @@ class Shield:
             self.audit.log_event(container, "allowed", dest=ip, detail=f"target={target}")
         # Update dnsmasq config for domain targets (so future IP rotations are captured)
         if is_domain and allowed:
-            self._mode.allow_domain(container, target)
+            self._mode.allow_domain(target)
         return allowed
 
     def deny(self, container: str, target: str) -> list[str]:
@@ -253,7 +253,7 @@ class Shield:
             self.audit.log_event(container, "denied", dest=ip, detail=f"target={target}")
         # Remove domain from dnsmasq config (stops future auto-population)
         if is_domain and denied:
-            self._mode.deny_domain(container, target)
+            self._mode.deny_domain(target)
         return denied
 
     def rules(self, container: str) -> str:
