@@ -716,3 +716,71 @@ def test_shield_down_on_inactive_applies_without_delete(
     # On an empty netns there is nothing to delete — no call should contain "delete table"
     for call in harness.runner.nft_via_nsenter.call_args_list:
         assert "delete" not in call.kwargs.get("stdin", "")
+
+
+# ── allow_domain / deny_domain ────────────────────────────
+
+
+class TestDomainOperations:
+    """Tests for allow_domain, deny_domain, and dnsmasq reload."""
+
+    def test_allow_domain_persists_and_reloads(
+        self, make_hook_mode: HookModeHarnessFactory
+    ) -> None:
+        """allow_domain() writes domain to state and sends SIGHUP."""
+        harness = make_hook_mode()
+        sd = harness.config.state_dir.resolve()
+        state.ensure_state_dirs(sd)
+        # Write upstream.dns so reload works
+        state.upstream_dns_path(sd).write_text("169.254.1.1\n")
+        # Write a dnsmasq PID file so reload triggers
+        state.dnsmasq_pid_path(sd).write_text("12345\n")
+
+        with (
+            mock.patch("terok_shield.dnsmasq._is_dnsmasq_pid", return_value=True),
+            mock.patch("terok_shield.dnsmasq.os.kill"),
+        ):
+            harness.mode.allow_domain(TEST_DOMAIN)
+
+        domains = state.profile_domains_path(sd).read_text()
+        assert TEST_DOMAIN in domains
+
+    def test_allow_domain_skips_duplicate(self, make_hook_mode: HookModeHarnessFactory) -> None:
+        """allow_domain() is a no-op for already-present domains."""
+        harness = make_hook_mode()
+        sd = harness.config.state_dir.resolve()
+        state.ensure_state_dirs(sd)
+        state.profile_domains_path(sd).write_text(f"{TEST_DOMAIN}\n")
+
+        with mock.patch("terok_shield.dnsmasq.reload") as mock_reload:
+            harness.mode.allow_domain(TEST_DOMAIN)
+        mock_reload.assert_not_called()
+
+    def test_deny_domain_removes_and_reloads(self, make_hook_mode: HookModeHarnessFactory) -> None:
+        """deny_domain() removes domain from state and reloads."""
+        harness = make_hook_mode()
+        sd = harness.config.state_dir.resolve()
+        state.ensure_state_dirs(sd)
+        state.profile_domains_path(sd).write_text(f"{TEST_DOMAIN}\n")
+        state.upstream_dns_path(sd).write_text("169.254.1.1\n")
+        state.dnsmasq_pid_path(sd).write_text("12345\n")
+
+        with (
+            mock.patch("terok_shield.dnsmasq._is_dnsmasq_pid", return_value=True),
+            mock.patch("terok_shield.dnsmasq.os.kill"),
+        ):
+            harness.mode.deny_domain(TEST_DOMAIN)
+
+        domains = state.profile_domains_path(sd).read_text()
+        assert TEST_DOMAIN not in domains
+
+    def test_reload_raises_without_upstream_dns(
+        self, make_hook_mode: HookModeHarnessFactory
+    ) -> None:
+        """_reload_dnsmasq() raises when upstream DNS is not persisted."""
+        harness = make_hook_mode()
+        sd = harness.config.state_dir.resolve()
+        state.ensure_state_dirs(sd)
+
+        with pytest.raises(RuntimeError, match="upstream DNS not persisted"):
+            harness.mode._reload_dnsmasq(sd)

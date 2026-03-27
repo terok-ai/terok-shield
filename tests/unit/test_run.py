@@ -380,3 +380,30 @@ def test_subprocess_runner_stores_nft_path() -> None:
     with mock.patch("terok_shield.run.find_nft", return_value=NFT_SBIN):
         runner = SubprocessRunner()
     assert runner._nft == NFT_SBIN
+
+
+# ── getent_hosts tests ───────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("stdout", "expected"),
+    [
+        pytest.param(f"{TEST_IP1}       {TEST_DOMAIN}\n", [TEST_IP1], id="single-ip"),
+        pytest.param(
+            f"{TEST_IP1}       host1\n{TEST_IP2}       host2\n",
+            [TEST_IP1, TEST_IP2],
+            id="multiple-lines",
+        ),
+        pytest.param("", [], id="empty-output"),
+        pytest.param("not-an-ip    host\n", [], id="invalid-ip-skipped"),
+    ],
+)
+def test_getent_hosts(
+    runner: SubprocessRunner,
+    subprocess_run: mock.Mock,
+    stdout: str,
+    expected: list[str],
+) -> None:
+    """getent_hosts() parses IP addresses from getent output."""
+    subprocess_run.return_value = _completed(stdout=stdout)
+    assert runner.getent_hosts(TEST_DOMAIN) == expected

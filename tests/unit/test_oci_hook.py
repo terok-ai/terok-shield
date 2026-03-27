@@ -401,6 +401,55 @@ def test_hook_main_uses_upstream_dns_from_annotation(
     assert kwargs["dns"] == "10.0.2.3"
 
 
+def test_hook_main_dnsmasq_tier_launches_dnsmasq(
+    hook_main_harness: HookMainHarness,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """hook_main() launches dnsmasq and writes resolv.conf when tier is dnsmasq."""
+    mock_dnsmasq = mock.MagicMock()
+    monkeypatch.setattr("terok_shield.oci_hook.dnsmasq", mock_dnsmasq)
+
+    annotations = _valid_annotations(tmp_path)
+    annotations[ANNOTATION_DNS_TIER_KEY] = "dnsmasq"
+    annotations[ANNOTATION_UPSTREAM_DNS_KEY] = "169.254.1.1"
+    assert hook_main(_oci_state(annotations=annotations)) == 0
+
+    mock_dnsmasq.launch.assert_called_once()
+    mock_dnsmasq.write_resolv_conf.assert_called_once()
+
+
+def test_hook_main_persists_upstream_dns(
+    hook_main_harness: HookMainHarness,
+    tmp_path: Path,
+) -> None:
+    """hook_main() writes upstream DNS to state for shield_up/shield_down."""
+    from terok_shield import state as st
+
+    annotations = _valid_annotations(tmp_path)
+    assert hook_main(_oci_state(annotations=annotations)) == 0
+
+    upstream_path = st.upstream_dns_path(tmp_path)
+    assert upstream_path.is_file()
+    assert upstream_path.read_text().strip() == "169.254.1.1"
+
+
+def test_hook_main_dnsmasq_launch_failure_returns_1(
+    hook_main_harness: HookMainHarness,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """hook_main() returns 1 (fail-closed) when dnsmasq fails to launch."""
+    mock_dnsmasq = mock.MagicMock()
+    mock_dnsmasq.launch.side_effect = RuntimeError("dnsmasq failed")
+    monkeypatch.setattr("terok_shield.oci_hook.dnsmasq", mock_dnsmasq)
+
+    annotations = _valid_annotations(tmp_path)
+    annotations[ANNOTATION_DNS_TIER_KEY] = "dnsmasq"
+    annotations[ANNOTATION_UPSTREAM_DNS_KEY] = "169.254.1.1"
+    assert hook_main(_oci_state(annotations=annotations)) == 1
+
+
 def test_hook_main_poststop_calls_dnsmasq_kill(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

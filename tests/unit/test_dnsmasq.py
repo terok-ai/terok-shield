@@ -279,9 +279,73 @@ def test_reload_noop_when_not_running(tmp_path: Path) -> None:
 # ── write_resolv_conf ────────────────────────────────────
 
 
+def test_reload_raises_on_stale_pid(tmp_path: Path) -> None:
+    """reload() raises RuntimeError when PID is not dnsmasq (stale)."""
+    state.ensure_state_dirs(tmp_path)
+    state.dnsmasq_pid_path(tmp_path).write_text("12345\n")
+
+    with mock.patch("terok_shield.dnsmasq._is_dnsmasq_pid", return_value=False):
+        with pytest.raises(RuntimeError, match="not dnsmasq"):
+            reload(tmp_path, PASTA_DNS, [TEST_DOMAIN])
+
+
+def test_reload_raises_on_dead_process(tmp_path: Path) -> None:
+    """reload() raises RuntimeError when SIGHUP fails (process dead)."""
+    state.ensure_state_dirs(tmp_path)
+    state.dnsmasq_pid_path(tmp_path).write_text("12345\n")
+
+    with (
+        mock.patch("terok_shield.dnsmasq._is_dnsmasq_pid", return_value=True),
+        mock.patch("terok_shield.dnsmasq.os.kill", side_effect=ProcessLookupError),
+    ):
+        with pytest.raises(RuntimeError, match="dead"):
+            reload(tmp_path, PASTA_DNS, [TEST_DOMAIN])
+
+
+# ── read_domains normalization ───────────────────────────
+
+
+def test_read_domains_normalizes_case(tmp_path: Path) -> None:
+    """read_domains() lowercases entries for consistent comparison."""
+    from terok_shield.dnsmasq import read_domains
+
+    domains_path = tmp_path / "profile.domains"
+    domains_path.write_text("GitHub.COM\nexample.org\n")
+    assert read_domains(domains_path) == ["github.com", "example.org"]
+
+
+def test_read_domains_skips_invalid(tmp_path: Path) -> None:
+    """read_domains() silently skips invalid domain entries."""
+    from terok_shield.dnsmasq import read_domains
+
+    domains_path = tmp_path / "profile.domains"
+    domains_path.write_text("github.com\n; injection\nexample.org\n")
+    assert read_domains(domains_path) == ["github.com", "example.org"]
+
+
+def test_read_domains_deduplicates(tmp_path: Path) -> None:
+    """read_domains() deduplicates after normalization."""
+    from terok_shield.dnsmasq import read_domains
+
+    domains_path = tmp_path / "profile.domains"
+    domains_path.write_text("github.com\nGITHUB.COM\n")
+    assert read_domains(domains_path) == ["github.com"]
+
+
+# ── generate_config validation ───────────────────────────
+
+
+def test_generate_config_rejects_invalid_upstream(tmp_path: Path) -> None:
+    """generate_config() raises ValueError for non-IP upstream."""
+    with pytest.raises(ValueError):
+        generate_config("not-an-ip", [], tmp_path / "dnsmasq.pid")
+
+
+# ── write_resolv_conf ────────────────────────────────────
+
+
 def test_write_resolv_conf(tmp_path: Path) -> None:
     """write_resolv_conf() overwrites the resolv.conf file."""
-    # Simulate /proc/{pid}/root/etc/resolv.conf via monkeypatch
     resolv_path = tmp_path / "resolv.conf"
     resolv_path.write_text("nameserver 169.254.1.1\n")
 
@@ -289,3 +353,9 @@ def test_write_resolv_conf(tmp_path: Path) -> None:
         write_resolv_conf("42")
 
     assert resolv_path.read_text() == f"nameserver {DNSMASQ_BIND}\n"
+
+
+def test_write_resolv_conf_rejects_non_numeric_pid() -> None:
+    """write_resolv_conf() raises ValueError for non-numeric PID."""
+    with pytest.raises(ValueError, match="numeric"):
+        write_resolv_conf("../../etc")
