@@ -23,6 +23,7 @@ from terok_shield.config import DnsTier, detect_dns_tier
 from terok_shield.dnsmasq import generate_config, nftset_entry, read_domains
 from terok_shield.nft_constants import DNSMASQ_BIND, PASTA_DNS
 from terok_shield.run import SubprocessRunner
+from tests.testnet import ALLOWED_TARGET_HTTP, BLOCKED_TARGET_HTTP
 
 from ..conftest import (
     CTR_PREFIX,
@@ -244,13 +245,12 @@ class TestDnsmasqInContainer:
     def test_allowed_domain_resolves_and_is_reachable(self, dnsmasq_container) -> None:
         """Traffic to allowed domains works through dnsmasq resolution."""
         name, _sd, _shield = dnsmasq_container
-        # one.one.one.one is in dev-standard profile and resolves to Cloudflare
-        assert_reachable(name, "http://1.1.1.1/")
+        assert_reachable(name, ALLOWED_TARGET_HTTP)
 
     def test_blocked_target_is_denied(self, dnsmasq_container) -> None:
         """Traffic to non-allowed targets is denied by nft."""
         name, _sd, _shield = dnsmasq_container
-        assert_blocked(name, "http://8.8.8.8/")
+        assert_blocked(name, BLOCKED_TARGET_HTTP)
 
 
 # ── Story 5: live domain allow/deny ─────────────────────

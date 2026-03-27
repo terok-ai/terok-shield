@@ -271,9 +271,6 @@ def test_kill_silently_ignores_invalid_pid_content(tmp_path: Path) -> None:
     kill(tmp_path)  # should not raise
 
 
-# ── write_resolv_conf ────────────────────────────────────
-
-
 # ── add_domain / remove_domain ────────────────────────────
 
 
@@ -400,9 +397,6 @@ def test_reload_noop_when_not_running(tmp_path: Path) -> None:
     with mock.patch("terok_shield.dnsmasq.os.kill") as mock_kill:
         reload(tmp_path, PASTA_DNS, [TEST_DOMAIN])
     mock_kill.assert_not_called()
-
-
-# ── write_resolv_conf ────────────────────────────────────
 
 
 def test_reload_raises_on_stale_pid(tmp_path: Path) -> None:
