@@ -11,7 +11,9 @@ import pytest
 from terok_shield.state import (
     BUNDLE_VERSION,
     audit_path,
+    denied_domains_path,
     deny_path,
+    dns_tier_path,
     dnsmasq_conf_path,
     dnsmasq_pid_path,
     ensure_state_dirs,
@@ -19,6 +21,7 @@ from terok_shield.state import (
     hook_json_path,
     hooks_dir,
     live_allowed_path,
+    live_domains_path,
     profile_allowed_path,
     profile_domains_path,
     read_denied_ips,
@@ -51,6 +54,9 @@ def test_bundle_version_is_positive_int() -> None:
         ),
         pytest.param(dnsmasq_conf_path, FAKE_STATE_DIR / "dnsmasq.conf", id="dnsmasq-conf"),
         pytest.param(dnsmasq_pid_path, FAKE_STATE_DIR / "dnsmasq.pid", id="dnsmasq-pid"),
+        pytest.param(dns_tier_path, FAKE_STATE_DIR / "dns.tier", id="dns-tier"),
+        pytest.param(live_domains_path, FAKE_STATE_DIR / "live.domains", id="live-domains"),
+        pytest.param(denied_domains_path, FAKE_STATE_DIR / "denied.domains", id="denied-domains"),
     ],
 )
 def test_path_derivation_functions(

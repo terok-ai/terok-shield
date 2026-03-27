@@ -353,11 +353,8 @@ def _read_state_dir(annotations: dict[str, str]) -> Path:
 
 
 def _read_profile_domains(state_dir: Path) -> list[str]:
-    """Read domain names from the profile.domains state file."""
-    path = state.profile_domains_path(state_dir)
-    if not path.is_file():
-        return []
-    return [line.strip() for line in path.read_text().splitlines() if line.strip()]
+    """Read merged domain names: (profile + live) - denied."""
+    return dnsmasq.read_merged_domains(state_dir)
 
 
 def hook_main(stdin_data: str | None = None, stage: str = "createRuntime") -> int:
@@ -427,6 +424,9 @@ def hook_main(stdin_data: str | None = None, stage: str = "createRuntime") -> in
         # (resolv.conf will be rewritten to 127.0.0.1 when dnsmasq is active)
         state.upstream_dns_path(sd).write_text(f"{dns}\n")
 
+        # Persist DNS tier so _container_ruleset() can set nft timeouts correctly
+        state.dns_tier_path(sd).write_text(f"{dns_tier_str}\n")
+
         # dnsmasq tier: nft sets get timeout for auto-expiry
         set_timeout = NFT_SET_TIMEOUT_DNSMASQ if dns_tier_str == DnsTier.DNSMASQ.value else ""
 
@@ -453,12 +453,16 @@ def hook_main(stdin_data: str | None = None, stage: str = "createRuntime") -> in
         if dns_tier_str == DnsTier.DNSMASQ.value:
             domains = _read_profile_domains(sd)
             dnsmasq.launch(runner, pid, sd, dns, domains)
-            dnsmasq.write_resolv_conf(pid)
-            audit.log_event(
-                container_id,
-                "setup",
-                detail=f"dnsmasq launched with {len(domains)} domains",
-            )
+            try:
+                dnsmasq.write_resolv_conf(pid)
+                audit.log_event(
+                    container_id,
+                    "setup",
+                    detail=f"dnsmasq launched with {len(domains)} domains",
+                )
+            except Exception as exc:
+                dnsmasq.kill(sd)
+                raise RuntimeError(f"dnsmasq post-launch setup failed: {exc}") from exc
 
     except RuntimeError as e:
         print(f"terok-shield hook: {e}", file=sys.stderr)

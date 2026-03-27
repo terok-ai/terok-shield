@@ -85,6 +85,7 @@ depends_on = [
 path = "terok_shield.dnsmasq"
 depends_on = [
     "terok_shield.nft_constants",
+    "terok_shield.run",
     "terok_shield.state",
 ]
 

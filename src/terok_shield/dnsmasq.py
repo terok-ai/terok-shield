@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 
 from . import state
 from .nft_constants import DNSMASQ_BIND, NFT_TABLE_NAME
+from .run import ExecError
 
 if TYPE_CHECKING:
     from .run import CommandRunner
@@ -30,7 +31,7 @@ if TYPE_CHECKING:
 
 # Strict domain label validation (RFC 1035 + wildcards).
 # Allows: a-z, 0-9, hyphens, dots, leading wildcard (*.).
-_DOMAIN_RE = re.compile(r"^(\*\.)?([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)*[a-zA-Z]{2,}$")
+_DOMAIN_RE = re.compile(r"^(\*\.)?([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$")
 
 
 # ── Config generation ────────────────────────────────────
@@ -144,7 +145,10 @@ def launch(
         "dnsmasq",
         f"--conf-file={conf_path}",
     ]
-    runner.run(cmd, check=True)
+    try:
+        runner.run(cmd, check=True)
+    except ExecError as e:
+        raise RuntimeError(f"dnsmasq failed to start: {e}") from e
 
     if not pid_path.is_file():
         raise RuntimeError(
@@ -248,32 +252,63 @@ def reload(state_dir: Path, upstream_dns: str, domains: list[str]) -> None:
 
 
 def add_domain(state_dir: Path, domain: str) -> bool:
-    """Append a domain to the profile.domains file.
+    """Append a domain to the live.domains file.
 
-    Returns True if the domain was added, False if already present.
+    Writes to ``live.domains`` (not ``profile.domains``) so that
+    runtime additions survive container restarts without overwriting
+    the profile-derived domain list.
+
+    Returns True if the domain was added, False if already present
+    in the merged domain set (profile + live - denied).
     """
     domain = _validate_domain(domain)
-    domains_path = state.profile_domains_path(state_dir)
-    existing = read_domains(domains_path)
+    existing = read_merged_domains(state_dir)
     if domain in existing:
         return False
-    with domains_path.open("a") as f:
+
+    # Remove from denied.domains if present (un-deny)
+    denied_path = state.denied_domains_path(state_dir)
+    if denied_path.is_file():
+        denied = read_domains(denied_path)
+        if domain in denied:
+            denied.remove(domain)
+            denied_path.write_text("\n".join(denied) + "\n" if denied else "")
+
+    live_path = state.live_domains_path(state_dir)
+    with live_path.open("a") as f:
         f.write(f"{domain}\n")
     return True
 
 
 def remove_domain(state_dir: Path, domain: str) -> bool:
-    """Remove a domain from the profile.domains file.
+    """Remove a domain by adding it to the denied.domains file.
 
-    Returns True if the domain was removed, False if not found.
+    Writes to ``denied.domains`` so the denial persists across
+    dnsmasq reloads.  Also removes from ``live.domains`` if present.
+
+    Returns True if the domain was removed, False if not found
+    in the merged domain set.
     """
     domain = _validate_domain(domain)
-    domains_path = state.profile_domains_path(state_dir)
-    existing = read_domains(domains_path)
+    existing = read_merged_domains(state_dir)
     if domain not in existing:
         return False
-    existing.remove(domain)
-    domains_path.write_text("\n".join(existing) + "\n" if existing else "")
+
+    # Remove from live.domains if present
+    live_path = state.live_domains_path(state_dir)
+    if live_path.is_file():
+        live = read_domains(live_path)
+        if domain in live:
+            live.remove(domain)
+            live_path.write_text("\n".join(live) + "\n" if live else "")
+
+    # Add to denied.domains
+    denied_path = state.denied_domains_path(state_dir)
+    denied = read_domains(denied_path)
+    if domain not in denied:
+        with denied_path.open("a") as f:
+            f.write(f"{domain}\n")
+
     return True
 
 
@@ -295,6 +330,24 @@ def read_domains(domains_path: Path) -> list[str]:
         except ValueError:
             continue
     return list(dict.fromkeys(domains))
+
+
+def read_merged_domains(state_dir: Path) -> list[str]:
+    """Read and merge domains: (profile + live) - denied.
+
+    Returns a deduplicated, stable-order list.
+    """
+    profile = read_domains(state.profile_domains_path(state_dir))
+    live = read_domains(state.live_domains_path(state_dir))
+    denied = set(read_domains(state.denied_domains_path(state_dir)))
+
+    merged: list[str] = []
+    seen: set[str] = set()
+    for d in profile + live:
+        if d not in seen and d not in denied:
+            seen.add(d)
+            merged.append(d)
+    return merged
 
 
 def write_resolv_conf(pid: str, nameserver: str = DNSMASQ_BIND) -> None:

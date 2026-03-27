@@ -89,6 +89,21 @@ def upstream_dns_path(state_dir: Path) -> Path:
     return state_dir / "upstream.dns"
 
 
+def dns_tier_path(state_dir: Path) -> Path:
+    """Return the path to the persisted DNS tier value."""
+    return state_dir / "dns.tier"
+
+
+def live_domains_path(state_dir: Path) -> Path:
+    """Return the path to the live domain overrides file (from allow_domain)."""
+    return state_dir / "live.domains"
+
+
+def denied_domains_path(state_dir: Path) -> Path:
+    """Return the path to the denied domains file (from deny_domain)."""
+    return state_dir / "denied.domains"
+
+
 def read_allowed_ips(state_dir: Path) -> list[str]:
     """Read IPs from both profile.allowed and live.allowed, merged and deduplicated.
 

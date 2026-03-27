@@ -727,7 +727,7 @@ class TestDomainOperations:
     def test_allow_domain_persists_and_reloads(
         self, make_hook_mode: HookModeHarnessFactory
     ) -> None:
-        """allow_domain() writes domain to state and sends SIGHUP."""
+        """allow_domain() writes domain to live.domains and sends SIGHUP."""
         harness = make_hook_mode()
         sd = harness.config.state_dir.resolve()
         state.ensure_state_dirs(sd)
@@ -742,7 +742,7 @@ class TestDomainOperations:
         ):
             harness.mode.allow_domain(TEST_DOMAIN)
 
-        domains = state.profile_domains_path(sd).read_text()
+        domains = state.live_domains_path(sd).read_text()
         assert TEST_DOMAIN in domains
 
     def test_allow_domain_skips_duplicate(self, make_hook_mode: HookModeHarnessFactory) -> None:
@@ -757,7 +757,7 @@ class TestDomainOperations:
         mock_reload.assert_not_called()
 
     def test_deny_domain_removes_and_reloads(self, make_hook_mode: HookModeHarnessFactory) -> None:
-        """deny_domain() removes domain from state and reloads."""
+        """deny_domain() adds domain to denied.domains and reloads."""
         harness = make_hook_mode()
         sd = harness.config.state_dir.resolve()
         state.ensure_state_dirs(sd)
@@ -771,8 +771,12 @@ class TestDomainOperations:
         ):
             harness.mode.deny_domain(TEST_DOMAIN)
 
-        domains = state.profile_domains_path(sd).read_text()
-        assert TEST_DOMAIN not in domains
+        # Domain is in denied.domains, excluded from merged set
+        from terok_shield.dnsmasq import read_merged_domains
+
+        denied = state.denied_domains_path(sd).read_text()
+        assert TEST_DOMAIN in denied
+        assert TEST_DOMAIN not in read_merged_domains(sd)
 
     def test_reload_raises_without_upstream_dns(
         self, make_hook_mode: HookModeHarnessFactory
@@ -784,3 +788,56 @@ class TestDomainOperations:
 
         with pytest.raises(RuntimeError, match="upstream DNS not persisted"):
             harness.mode._reload_dnsmasq(sd)
+
+
+class TestContainerRulesetDnsTier:
+    """_container_ruleset() uses persisted DNS tier for set_timeout."""
+
+    def test_dnsmasq_tier_enables_set_timeout(self, make_hook_mode: HookModeHarnessFactory) -> None:
+        """When dns.tier is 'dnsmasq', RulesetBuilder gets set_timeout."""
+        harness = make_hook_mode()
+        sd = harness.config.state_dir.resolve()
+        state.ensure_state_dirs(sd)
+        state.upstream_dns_path(sd).write_text("169.254.1.1\n")
+        state.dns_tier_path(sd).write_text("dnsmasq\n")
+
+        harness.runner.podman_inspect.return_value = "42"
+        harness.runner.run.side_effect = [
+            "nameserver 127.0.0.1\n",  # podman unshare cat resolv.conf
+            "",  # podman unshare cat /proc/.../route
+        ]
+
+        ruleset = harness.mode._container_ruleset("test-ctr")
+        assert ruleset._set_timeout == "30m"
+
+    def test_dig_tier_no_set_timeout(self, make_hook_mode: HookModeHarnessFactory) -> None:
+        """When dns.tier is 'dig', RulesetBuilder has no timeout."""
+        harness = make_hook_mode()
+        sd = harness.config.state_dir.resolve()
+        state.ensure_state_dirs(sd)
+        state.upstream_dns_path(sd).write_text("169.254.1.1\n")
+        state.dns_tier_path(sd).write_text("dig\n")
+
+        harness.runner.podman_inspect.return_value = "42"
+        harness.runner.run.side_effect = [
+            "nameserver 169.254.1.1\n",
+            "",
+        ]
+
+        ruleset = harness.mode._container_ruleset("test-ctr")
+        assert ruleset._set_timeout == ""
+
+    def test_no_tier_file_no_timeout(self, make_hook_mode: HookModeHarnessFactory) -> None:
+        """When dns.tier file is absent, no timeout (backward compat)."""
+        harness = make_hook_mode()
+        sd = harness.config.state_dir.resolve()
+        state.ensure_state_dirs(sd)
+
+        harness.runner.podman_inspect.return_value = "42"
+        harness.runner.run.side_effect = [
+            "nameserver 169.254.1.1\n",
+            "",
+        ]
+
+        ruleset = harness.mode._container_ruleset("test-ctr")
+        assert ruleset._set_timeout == ""

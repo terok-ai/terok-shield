@@ -16,6 +16,7 @@ from terok_shield.dnsmasq import (
     kill,
     launch,
     nftset_entry,
+    read_merged_domains,
     reload,
     remove_domain,
     write_resolv_conf,
@@ -51,6 +52,9 @@ def test_validate_domain_accepts_valid(domain: str, expected: str) -> None:
         pytest.param("no spaces.com", id="spaces"),
         pytest.param("; rm -rf /", id="injection-attempt"),
         pytest.param("../../etc/passwd", id="traversal"),
+        pytest.param("com", id="tld-only"),
+        pytest.param("*.com", id="wildcard-tld-only"),
+        pytest.param("org", id="tld-only-org"),
     ],
 )
 def test_validate_domain_rejects_invalid(domain: str) -> None:
@@ -159,6 +163,64 @@ def test_launch_raises_when_pid_file_missing(tmp_path: Path) -> None:
         launch(runner, "42", tmp_path, PASTA_DNS, [])
 
 
+def test_launch_maps_exec_error_to_runtime_error(tmp_path: Path) -> None:
+    """launch() converts ExecError from runner into RuntimeError."""
+    from terok_shield.run import ExecError
+
+    state.ensure_state_dirs(tmp_path)
+    runner = mock.MagicMock()
+    runner.run.side_effect = ExecError(["dnsmasq"], 1, "bad option")
+
+    with pytest.raises(RuntimeError, match="dnsmasq failed to start"):
+        launch(runner, "42", tmp_path, PASTA_DNS, [TEST_DOMAIN])
+
+
+# ── _is_dnsmasq_pid / _clear_pid_file ────────────────────
+
+
+def test_is_dnsmasq_pid_true(tmp_path: Path) -> None:
+    """_is_dnsmasq_pid returns True when /proc/{pid}/cmdline contains 'dnsmasq'."""
+    from terok_shield.dnsmasq import _is_dnsmasq_pid
+
+    fake_proc = tmp_path / "cmdline"
+    fake_proc.write_bytes(b"dnsmasq\x00--conf-file=/tmp/x\x00")
+    with mock.patch("terok_shield.dnsmasq.Path", return_value=fake_proc):
+        assert _is_dnsmasq_pid(12345) is True
+
+
+def test_is_dnsmasq_pid_false_different_process(tmp_path: Path) -> None:
+    """_is_dnsmasq_pid returns False when cmdline is a different process."""
+    from terok_shield.dnsmasq import _is_dnsmasq_pid
+
+    fake_proc = tmp_path / "cmdline"
+    fake_proc.write_bytes(b"nginx\x00-g\x00daemon off;\x00")
+    with mock.patch("terok_shield.dnsmasq.Path", return_value=fake_proc):
+        assert _is_dnsmasq_pid(12345) is False
+
+
+def test_is_dnsmasq_pid_false_missing_proc() -> None:
+    """_is_dnsmasq_pid returns False when /proc/{pid} doesn't exist."""
+    from terok_shield.dnsmasq import _is_dnsmasq_pid
+
+    assert _is_dnsmasq_pid(999999999) is False
+
+
+def test_clear_pid_file_removes_file(tmp_path: Path) -> None:
+    """_clear_pid_file removes the PID file."""
+    from terok_shield.dnsmasq import _clear_pid_file
+
+    state.dnsmasq_pid_path(tmp_path).write_text("12345\n")
+    _clear_pid_file(tmp_path)
+    assert not state.dnsmasq_pid_path(tmp_path).exists()
+
+
+def test_clear_pid_file_ignores_missing(tmp_path: Path) -> None:
+    """_clear_pid_file silently ignores missing PID file."""
+    from terok_shield.dnsmasq import _clear_pid_file
+
+    _clear_pid_file(tmp_path)  # should not raise
+
+
 # ── kill ─────────────────────────────────────────────────
 
 
@@ -216,10 +278,10 @@ def test_kill_silently_ignores_invalid_pid_content(tmp_path: Path) -> None:
 
 
 def test_add_domain_appends(tmp_path: Path) -> None:
-    """add_domain() appends a new domain to profile.domains."""
+    """add_domain() appends a new domain to live.domains."""
     state.ensure_state_dirs(tmp_path)
     assert add_domain(tmp_path, TEST_DOMAIN) is True
-    assert TEST_DOMAIN in state.profile_domains_path(tmp_path).read_text()
+    assert TEST_DOMAIN in state.live_domains_path(tmp_path).read_text()
 
 
 def test_add_domain_deduplicates(tmp_path: Path) -> None:
@@ -229,21 +291,85 @@ def test_add_domain_deduplicates(tmp_path: Path) -> None:
     assert add_domain(tmp_path, TEST_DOMAIN) is False
 
 
+def test_add_domain_deduplicates_against_profile(tmp_path: Path) -> None:
+    """add_domain() returns False when domain already exists in profile.domains."""
+    state.ensure_state_dirs(tmp_path)
+    state.profile_domains_path(tmp_path).write_text(f"{TEST_DOMAIN}\n")
+    assert add_domain(tmp_path, TEST_DOMAIN) is False
+
+
+def test_add_domain_undenies(tmp_path: Path) -> None:
+    """add_domain() removes domain from denied.domains if present."""
+    state.ensure_state_dirs(tmp_path)
+    state.denied_domains_path(tmp_path).write_text(f"{TEST_DOMAIN}\n")
+    assert add_domain(tmp_path, TEST_DOMAIN) is True
+    denied = state.denied_domains_path(tmp_path).read_text()
+    assert TEST_DOMAIN not in denied
+
+
 def test_remove_domain(tmp_path: Path) -> None:
-    """remove_domain() removes a domain from profile.domains."""
+    """remove_domain() adds domain to denied.domains and removes from live.domains."""
     state.ensure_state_dirs(tmp_path)
     add_domain(tmp_path, TEST_DOMAIN)
     add_domain(tmp_path, TEST_DOMAIN2)
     assert remove_domain(tmp_path, TEST_DOMAIN) is True
-    content = state.profile_domains_path(tmp_path).read_text()
-    assert TEST_DOMAIN not in content
-    assert TEST_DOMAIN2 in content
+    merged = read_merged_domains(tmp_path)
+    assert TEST_DOMAIN not in merged
+    assert TEST_DOMAIN2 in merged
+
+
+def test_remove_domain_from_profile(tmp_path: Path) -> None:
+    """remove_domain() denies a domain that exists in profile.domains."""
+    state.ensure_state_dirs(tmp_path)
+    state.profile_domains_path(tmp_path).write_text(f"{TEST_DOMAIN}\n{TEST_DOMAIN2}\n")
+    assert remove_domain(tmp_path, TEST_DOMAIN) is True
+    merged = read_merged_domains(tmp_path)
+    assert TEST_DOMAIN not in merged
+    assert TEST_DOMAIN2 in merged
+    # profile.domains is unchanged
+    assert TEST_DOMAIN in state.profile_domains_path(tmp_path).read_text()
 
 
 def test_remove_domain_not_found(tmp_path: Path) -> None:
     """remove_domain() returns False when domain is not present."""
     state.ensure_state_dirs(tmp_path)
     assert remove_domain(tmp_path, TEST_DOMAIN) is False
+
+
+# ── read_merged_domains ──────────────────────────────────
+
+
+def test_read_merged_domains_empty(tmp_path: Path) -> None:
+    """read_merged_domains() returns empty list when no domain files exist."""
+    state.ensure_state_dirs(tmp_path)
+    assert read_merged_domains(tmp_path) == []
+
+
+def test_read_merged_domains_profile_only(tmp_path: Path) -> None:
+    """read_merged_domains() returns profile domains when no live/denied."""
+    state.ensure_state_dirs(tmp_path)
+    state.profile_domains_path(tmp_path).write_text(f"{TEST_DOMAIN}\n{TEST_DOMAIN2}\n")
+    assert read_merged_domains(tmp_path) == [TEST_DOMAIN, TEST_DOMAIN2]
+
+
+def test_read_merged_domains_merges_live(tmp_path: Path) -> None:
+    """read_merged_domains() merges profile + live with dedup."""
+    state.ensure_state_dirs(tmp_path)
+    state.profile_domains_path(tmp_path).write_text(f"{TEST_DOMAIN}\n")
+    state.live_domains_path(tmp_path).write_text(f"{TEST_DOMAIN2}\n")
+    merged = read_merged_domains(tmp_path)
+    assert TEST_DOMAIN in merged
+    assert TEST_DOMAIN2 in merged
+
+
+def test_read_merged_domains_subtracts_denied(tmp_path: Path) -> None:
+    """read_merged_domains() subtracts denied domains from the result."""
+    state.ensure_state_dirs(tmp_path)
+    state.profile_domains_path(tmp_path).write_text(f"{TEST_DOMAIN}\n{TEST_DOMAIN2}\n")
+    state.denied_domains_path(tmp_path).write_text(f"{TEST_DOMAIN}\n")
+    merged = read_merged_domains(tmp_path)
+    assert TEST_DOMAIN not in merged
+    assert TEST_DOMAIN2 in merged
 
 
 # ── reload ───────────────────────────────────────────────

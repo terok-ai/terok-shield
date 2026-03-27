@@ -450,6 +450,24 @@ def test_hook_main_dnsmasq_launch_failure_returns_1(
     assert hook_main(_oci_state(annotations=annotations)) == 1
 
 
+def test_hook_main_dnsmasq_cleanup_on_post_launch_failure(
+    hook_main_harness: HookMainHarness,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """hook_main() kills dnsmasq if write_resolv_conf fails after launch."""
+    mock_dnsmasq = mock.MagicMock()
+    mock_dnsmasq.write_resolv_conf.side_effect = OSError("write failed")
+    monkeypatch.setattr("terok_shield.oci_hook.dnsmasq", mock_dnsmasq)
+
+    annotations = _valid_annotations(tmp_path)
+    annotations[ANNOTATION_DNS_TIER_KEY] = "dnsmasq"
+    annotations[ANNOTATION_UPSTREAM_DNS_KEY] = "169.254.1.1"
+    # Should fail (post-launch error) but dnsmasq.kill should be called
+    assert hook_main(_oci_state(annotations=annotations)) == 1
+    mock_dnsmasq.kill.assert_called_once()
+
+
 def test_hook_main_poststop_calls_dnsmasq_kill(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

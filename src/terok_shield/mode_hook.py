@@ -38,7 +38,7 @@ from .config import (
     detect_dns_tier,
 )
 from .nft import NFT_TABLE, RulesetBuilder
-from .nft_constants import DNSMASQ_BIND, PASTA_DNS, SLIRP4NETNS_DNS
+from .nft_constants import DNSMASQ_BIND, NFT_SET_TIMEOUT_DNSMASQ, PASTA_DNS, SLIRP4NETNS_DNS
 from .podman_info import (
     PodmanInfo,
     global_hooks_hint,
@@ -489,7 +489,7 @@ class HookMode:
         if not upstream:
             raise RuntimeError("Cannot reload dnsmasq: upstream DNS not persisted in state")
 
-        domains = dnsmasq.read_domains(state.profile_domains_path(state_dir))
+        domains = dnsmasq.read_merged_domains(state_dir)
         dnsmasq.reload(state_dir, upstream, domains)
 
     def list_rules(self, container: str) -> str:
@@ -552,11 +552,27 @@ class HookMode:
 
         Prefers persisted upstream DNS (from OCI hook) over resolv.conf,
         because dnsmasq mode rewrites resolv.conf to ``127.0.0.1``.
+        Reads persisted DNS tier to set nft element timeouts for dnsmasq mode.
         """
         upstream = self._read_upstream_dns()
         dns = upstream if upstream else self._read_container_dns(container)
         gateway = self._read_container_gateway(container)
-        return RulesetBuilder(dns=dns, loopback_ports=self._config.loopback_ports, gateway=gateway)
+
+        # Read persisted DNS tier to determine if set timeouts are needed
+        sd = self._config.state_dir.resolve()
+        tier_path = state.dns_tier_path(sd)
+        set_timeout = ""
+        if tier_path.is_file():
+            tier_str = tier_path.read_text().strip()
+            if tier_str == DnsTier.DNSMASQ.value:
+                set_timeout = NFT_SET_TIMEOUT_DNSMASQ
+
+        return RulesetBuilder(
+            dns=dns,
+            loopback_ports=self._config.loopback_ports,
+            gateway=gateway,
+            set_timeout=set_timeout,
+        )
 
     def shield_down(self, container: str, *, allow_all: bool = False) -> None:
         """Switch a running container to bypass mode."""
