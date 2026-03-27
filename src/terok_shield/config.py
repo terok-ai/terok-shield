@@ -9,6 +9,7 @@ implementations must satisfy.
 """
 
 import enum
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -37,6 +38,23 @@ class DnsTier(enum.Enum):
     DNSMASQ = "dnsmasq"
     DIG = "dig"
     GETENT = "getent"
+
+
+def detect_dns_tier(has: Callable[[str], bool]) -> DnsTier:
+    """Detect the best available DNS resolution tier.
+
+    Uses *has* to probe for executables on ``PATH``.  Shared by
+    ``HookMode._detect_dns_tier`` and ``Shield.check_environment``.
+
+    Args:
+        has: Callable that returns True if the named executable exists
+            (e.g. ``CommandRunner.has``).
+    """
+    if has("dnsmasq"):
+        return DnsTier.DNSMASQ
+    if has("dig"):
+        return DnsTier.DIG
+    return DnsTier.GETENT
 
 
 class ShieldMode(enum.Enum):

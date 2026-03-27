@@ -163,10 +163,13 @@ def test_launch_raises_when_pid_file_missing(tmp_path: Path) -> None:
 
 
 def test_kill_sends_sigterm(tmp_path: Path) -> None:
-    """kill() reads PID file and sends SIGTERM."""
+    """kill() reads PID file, verifies identity, and sends SIGTERM."""
     state.dnsmasq_pid_path(tmp_path).write_text("12345\n")
 
-    with mock.patch("terok_shield.dnsmasq.os.kill") as mock_kill:
+    with (
+        mock.patch("terok_shield.dnsmasq._is_dnsmasq_pid", return_value=True),
+        mock.patch("terok_shield.dnsmasq.os.kill") as mock_kill,
+    ):
         kill(tmp_path)
 
     import signal
@@ -183,8 +186,21 @@ def test_kill_silently_ignores_stale_pid(tmp_path: Path) -> None:
     """kill() silently handles ProcessLookupError (already dead)."""
     state.dnsmasq_pid_path(tmp_path).write_text("99999\n")
 
-    with mock.patch("terok_shield.dnsmasq.os.kill", side_effect=ProcessLookupError):
+    with (
+        mock.patch("terok_shield.dnsmasq._is_dnsmasq_pid", return_value=True),
+        mock.patch("terok_shield.dnsmasq.os.kill", side_effect=ProcessLookupError),
+    ):
         kill(tmp_path)  # should not raise
+
+
+def test_kill_clears_stale_pid_file(tmp_path: Path) -> None:
+    """kill() clears PID file when PID is not a dnsmasq process."""
+    state.dnsmasq_pid_path(tmp_path).write_text("12345\n")
+
+    with mock.patch("terok_shield.dnsmasq._is_dnsmasq_pid", return_value=False):
+        kill(tmp_path)
+
+    assert not state.dnsmasq_pid_path(tmp_path).is_file()
 
 
 def test_kill_silently_ignores_invalid_pid_content(tmp_path: Path) -> None:
@@ -238,7 +254,10 @@ def test_reload_regenerates_config_and_sends_sighup(tmp_path: Path) -> None:
     state.ensure_state_dirs(tmp_path)
     state.dnsmasq_pid_path(tmp_path).write_text("12345\n")
 
-    with mock.patch("terok_shield.dnsmasq.os.kill") as mock_kill:
+    with (
+        mock.patch("terok_shield.dnsmasq._is_dnsmasq_pid", return_value=True),
+        mock.patch("terok_shield.dnsmasq.os.kill") as mock_kill,
+    ):
         reload(tmp_path, PASTA_DNS, [TEST_DOMAIN])
 
     # Config was regenerated

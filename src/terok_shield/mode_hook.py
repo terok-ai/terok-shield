@@ -35,6 +35,7 @@ from .config import (
     DnsTier,
     ShieldConfig,
     ShieldState,
+    detect_dns_tier,
 )
 from .nft import NFT_TABLE, RulesetBuilder
 from .nft_constants import DNSMASQ_BIND, PASTA_DNS, SLIRP4NETNS_DNS
@@ -262,7 +263,7 @@ class HookMode:
 
         # Detect DNS tier and upstream DNS
         tier = self._detect_dns_tier()
-        mode = info.network_mode if os.geteuid() != 0 else "pasta"
+        mode = info.network_mode or "pasta"
         upstream_dns = _upstream_dns_for_mode(mode)
 
         # Resolve DNS and write profile allowlist
@@ -352,16 +353,13 @@ class HookMode:
     def _detect_dns_tier(self) -> DnsTier:
         """Detect the best available DNS resolution tier.
 
+        Delegates to the shared :func:`detect_dns_tier` helper.
         If dnsmasq is installed, assumes nftset support (all supported
         distros ship dnsmasq >= 2.87 with nftset).  If dnsmasq lacks
         nftset, the launch will fail with a clear "bad option" error
         (fail-closed).
         """
-        if self._runner.has("dnsmasq"):
-            return DnsTier.DNSMASQ
-        if self._runner.has("dig"):
-            return DnsTier.DIG
-        return DnsTier.GETENT
+        return detect_dns_tier(self._runner.has)
 
     def _get_podman_info(self) -> PodmanInfo:
         """Get podman info, caching the result for the lifetime of this instance."""
@@ -482,9 +480,10 @@ class HookMode:
         self._reload_dnsmasq(sd)
 
     def _reload_dnsmasq(self, state_dir: Path) -> None:
-        """Regenerate dnsmasq config and send SIGHUP (best-effort).
+        """Regenerate dnsmasq config and send SIGHUP.
 
         No-op if dnsmasq is not running (PID file absent).
+        Raises RuntimeError if dnsmasq is dead (stale PID).
         """
         # Read upstream DNS from the existing dnsmasq config
         conf_path = state.dnsmasq_conf_path(state_dir)
@@ -495,7 +494,7 @@ class HookMode:
                     upstream = line.split("=", 1)[1]
                     break
 
-        domains = dnsmasq._read_domains(state.profile_domains_path(state_dir))
+        domains = dnsmasq.read_domains(state.profile_domains_path(state_dir))
         dnsmasq.reload(state_dir, upstream, domains)
 
     def list_rules(self, container: str) -> str:

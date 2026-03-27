@@ -448,7 +448,7 @@ def hook_main(stdin_data: str | None = None, stage: str = "createRuntime") -> in
         # Launch per-container dnsmasq when tier is active
         if dns_tier_str == DnsTier.DNSMASQ.value:
             domains = _read_profile_domains(sd)
-            dnsmasq.launch(runner, pid, sd, upstream_dns, domains)
+            dnsmasq.launch(runner, pid, sd, dns, domains)
             dnsmasq.write_resolv_conf(pid)
             audit.log_event(
                 container_id,

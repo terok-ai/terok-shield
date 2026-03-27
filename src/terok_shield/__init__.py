@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 
 from . import state
 from .audit import AuditLogger
-from .config import DnsTier, ShieldConfig, ShieldMode, ShieldState
+from .config import DnsTier, ShieldConfig, ShieldMode, ShieldState, detect_dns_tier
 from .dns import DnsResolver
 from .mode_hook import setup_global_hooks
 from .nft import RulesetBuilder
@@ -158,16 +158,18 @@ class Shield:
         hooks = "per-container"
         health = "ok"
 
-        # Detect DNS tier (same logic as mode_hook._detect_dns_tier)
-        if self.runner.has("dnsmasq"):
-            dns_tier = DnsTier.DNSMASQ.value
-        elif self.runner.has("dig"):
-            dns_tier = DnsTier.DIG.value
-        else:
-            dns_tier = DnsTier.GETENT.value
+        tier = detect_dns_tier(self.runner.has)
+        dns_tier = tier.value
+        if tier == DnsTier.DIG:
             issues.append(
-                "dig not found — DNS resolution will use getent (degraded). "
-                "Install: dnsutils (Debian/Ubuntu) or bind-utils (Fedora/RHEL)"
+                "dnsmasq not found — domain allowlisting uses static pre-start "
+                "resolution (no IP rotation handling). "
+                "Install dnsmasq for dynamic domain-based egress control"
+            )
+        elif tier == DnsTier.GETENT:
+            issues.append(
+                "Neither dnsmasq nor dig found — DNS resolution uses getent "
+                "(single IP, no AAAA). Install dnsmasq or at minimum dnsutils/bind-utils"
             )
 
         hooks_dirs = find_hooks_dirs()
@@ -234,10 +236,7 @@ class Shield:
             self.audit.log_event(container, "allowed", dest=ip, detail=f"target={target}")
         # Update dnsmasq config for domain targets (so future IP rotations are captured)
         if is_domain and allowed:
-            try:
-                self._mode.allow_domain(container, target)
-            except (ExecError, OSError, RuntimeError):
-                pass  # best-effort: nft sets already updated above
+            self._mode.allow_domain(container, target)
         return allowed
 
     def deny(self, container: str, target: str) -> list[str]:
@@ -254,10 +253,7 @@ class Shield:
             self.audit.log_event(container, "denied", dest=ip, detail=f"target={target}")
         # Remove domain from dnsmasq config (stops future auto-population)
         if is_domain and denied:
-            try:
-                self._mode.deny_domain(container, target)
-            except (ExecError, OSError, RuntimeError):
-                pass  # best-effort: nft sets already updated above
+            self._mode.deny_domain(container, target)
         return denied
 
     def rules(self, container: str) -> str:
