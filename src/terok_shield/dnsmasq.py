@@ -131,6 +131,10 @@ def launch(
     conf_path = state.dnsmasq_conf_path(state_dir)
     pid_path = state.dnsmasq_pid_path(state_dir)
 
+    # Remove any PID file left by a previous run so the post-launch
+    # existence check is not fooled by a stale file from a reused state dir.
+    _clear_pid_file(state_dir)
+
     config = generate_config(upstream_dns, domains, pid_path)
     conf_path.write_text(config)
 

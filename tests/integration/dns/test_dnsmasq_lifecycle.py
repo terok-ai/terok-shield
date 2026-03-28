@@ -154,13 +154,13 @@ class TestPreStartDnsmasqTier:
             shield = Shield(ShieldConfig(state_dir=sd))
             args = shield.pre_start("test-ctr")
 
-        tier = _tier_from_args(args)
-        if tier != "dnsmasq":
-            pytest.skip(f"pre_start selected tier '{tier}', not dnsmasq")
-        domains_path = state.profile_domains_path(sd)
-        assert domains_path.is_file()
-        domains = read_domains(domains_path)
-        assert len(domains) > 0
+            tier = _tier_from_args(args)
+            if tier != "dnsmasq":
+                pytest.skip(f"pre_start selected tier '{tier}', not dnsmasq")
+            domains_path = state.profile_domains_path(sd)
+            assert domains_path.is_file()
+            domains = read_domains(domains_path)
+            assert len(domains) > 0
 
     def test_pre_start_sets_dns_tier_annotation(self) -> None:
         """pre_start() sets a dns_tier annotation."""

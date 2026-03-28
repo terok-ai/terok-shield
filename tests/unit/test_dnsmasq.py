@@ -131,10 +131,14 @@ def test_launch_writes_config_and_runs_nsenter(tmp_path: Path) -> None:
     """launch() writes config file and calls runner with nsenter command."""
     state.ensure_state_dirs(tmp_path)
     runner = mock.MagicMock()
-    runner.run.return_value = ""
 
-    # Pre-create PID file to simulate dnsmasq writing it
-    state.dnsmasq_pid_path(tmp_path).write_text("12345\n")
+    # Simulate dnsmasq daemonising and writing its PID file as a side effect
+    # of the nsenter run call (matches real behaviour; pre-seeding would be
+    # cleared by launch()'s stale-PID cleanup).
+    def _write_pid(_cmd, **_kw):
+        state.dnsmasq_pid_path(tmp_path).write_text("12345\n")
+
+    runner.run.side_effect = _write_pid
 
     launch(runner, "42", tmp_path, PASTA_DNS, [TEST_DOMAIN])
 
