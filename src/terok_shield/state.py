@@ -14,7 +14,9 @@ Bundle layout::
     ├── hooks/
     │   ├── terok-shield-createRuntime.json
     │   └── terok-shield-poststop.json
-    ├── terok-shield-hook              # entrypoint script
+    ├── terok-shield-hook              # entrypoint script (stdlib-only Python)
+    ├── ruleset.nft                    # pre-generated nft ruleset (written by pre_start)
+    ├── gateway                        # discovered gateway IP (written by OCI hook)
     ├── profile.allowed                # IPs from DNS resolution
     ├── profile.domains                # domain names for dnsmasq config
     ├── live.allowed                   # IPs from allow/deny
@@ -26,7 +28,7 @@ Bundle layout::
 
 from pathlib import Path
 
-BUNDLE_VERSION = 2
+BUNDLE_VERSION = 3
 """Integer version of the state bundle layout.
 
 Bumped whenever the file layout changes in a backwards-incompatible way.
@@ -82,6 +84,16 @@ def dnsmasq_conf_path(state_dir: Path) -> Path:
 def dnsmasq_pid_path(state_dir: Path) -> Path:
     """Return the path to the dnsmasq PID file."""
     return state_dir / "dnsmasq.pid"
+
+
+def ruleset_path(state_dir: Path) -> Path:
+    """Return the path to the pre-generated nft ruleset file."""
+    return state_dir / "ruleset.nft"
+
+
+def gateway_path(state_dir: Path) -> Path:
+    """Return the path to the persisted discovered gateway IP."""
+    return state_dir / "gateway"
 
 
 def upstream_dns_path(state_dir: Path) -> Path:

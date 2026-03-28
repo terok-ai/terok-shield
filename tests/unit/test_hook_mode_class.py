@@ -509,8 +509,9 @@ def test_install_hooks_creates_entrypoint_and_hook_jsons(tmp_path: Path) -> None
 
     assert hook_entrypoint.exists()
     assert hook_entrypoint.stat().st_mode & 0o100
-    assert hook_entrypoint.read_text().startswith("#!/bin/sh\n")
-    assert "terok_shield.oci_hook" in hook_entrypoint.read_text()
+    content = hook_entrypoint.read_text()
+    assert content.splitlines()[0] == "#!/usr/bin/env python3"
+    assert "import terok_shield" not in content
 
     for stage_name in ("createRuntime", "poststop"):
         hook_file = hooks_dir / f"terok-shield-{stage_name}.json"
@@ -519,6 +520,40 @@ def test_install_hooks_creates_entrypoint_and_hook_jsons(tmp_path: Path) -> None
         assert data["version"] == "1.0.0"
         assert data["hook"]["path"] == str(hook_entrypoint)
         assert stage_name in data["stages"]
+
+
+def test_generate_entrypoint_is_stdlib_only(tmp_path: Path) -> None:
+    """The entrypoint script uses /usr/bin/env python3 and has no terok_shield imports."""
+    from terok_shield.mode_hook import _generate_entrypoint
+
+    content = _generate_entrypoint()
+    assert content.splitlines()[0] == "#!/usr/bin/env python3"
+    assert "import terok_shield" not in content
+    assert "ruleset.nft" in content
+
+
+@mock.patch("terok_shield.mode_hook.has_global_hooks", return_value=True)
+def test_pre_start_writes_ruleset_nft(
+    _has_hooks: mock.Mock,
+    monkeypatch: pytest.MonkeyPatch,
+    make_hook_mode: HookModeHarnessFactory,
+    make_config: ConfigFactory,
+) -> None:
+    """pre_start() writes ruleset.nft to the state directory before container start."""
+    _set_euid(monkeypatch, 0)
+    config = make_config()
+    harness = make_hook_mode(config=config)
+    harness.runner.run.return_value = _MODERN_PODMAN_INFO
+    harness.profiles.compose_profiles.return_value = []
+
+    harness.mode.pre_start("test", ["dev-standard"])
+
+    ruleset_file = state.ruleset_path(config.state_dir)
+    assert ruleset_file.is_file(), "pre_start() must write ruleset.nft"
+    content = ruleset_file.read_text()
+    assert "terok_shield" in content
+    assert "gateway_v4" in content
+    assert "gateway_v6" in content
 
 
 def test_setup_global_hooks_non_sudo(tmp_path: Path) -> None:

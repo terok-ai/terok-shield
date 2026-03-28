@@ -56,23 +56,6 @@ def safe_ip(value: str) -> str:
         raise ValueError(f"Invalid IP/CIDR: {v!r}") from e
 
 
-def _safe_host_ip(value: str) -> str:
-    """Validate that *value* is a single host IP (not a CIDR network).
-
-    Used for gateway addresses where a network range would punch an
-    overly broad hole in the private-range firewall rules.
-
-    Raises ValueError on invalid input or CIDR notation.
-    """
-    v = value.strip()
-    if "/" in v:
-        raise ValueError(f"Expected host IP, got network: {v!r}")
-    try:
-        return str(ipaddress.ip_address(v))
-    except ValueError as e:
-        raise ValueError(f"Invalid host IP: {v!r}") from e
-
-
 def _is_v4(value: str) -> bool:
     """Return True if a validated IP string is IPv4."""
     try:
@@ -148,17 +131,22 @@ def _loopback_port_rules(ports: tuple[int, ...]) -> str:
     return "\n".join(f'            tcp dport {p} oifname "lo" accept' for p in ports)
 
 
-def _gateway_port_rules(gateway: str, ports: tuple[int, ...]) -> str:
-    """Generate nft accept rules for gateway + loopback ports.
+def _gateway_port_rules(ports: tuple[int, ...]) -> str:
+    """Generate nft accept rules for gateway ports using dynamic gateway sets.
 
-    Allows traffic to the network gateway (e.g. slirp4netns 10.0.2.2)
-    on the specified ports.  Placed before private-range reject rules
-    so it cannot be blocked by RFC 1918 filtering.
+    References ``@gateway_v4`` and ``@gateway_v6`` sets, which are populated
+    at container creation by the OCI hook reading ``/proc/{pid}/net/route``.
+    Placed before private-range reject rules so gateway traffic (e.g. to
+    slirp4netns 10.0.2.2) is not blocked by RFC 1918 filtering.
+    Returns empty string if *ports* is empty.
     """
-    if not gateway or not ports:
+    if not ports:
         return ""
-    af = "ip" if _is_v4(gateway) else "ip6"
-    return "\n".join(f"        tcp dport {p} {af} daddr {gateway} accept" for p in ports)
+    lines = []
+    for p in ports:
+        lines.append(f"        tcp dport {p} ip daddr @gateway_v4 accept")
+        lines.append(f"        tcp dport {p} ip6 daddr @gateway_v6 accept")
+    return "\n".join(lines)
 
 
 # ── RulesetBuilder ───────────────────────────────────────
@@ -179,17 +167,15 @@ class RulesetBuilder:
         *,
         dns: str = PASTA_DNS,
         loopback_ports: tuple[int, ...] = (),
-        gateway: str = "",
         set_timeout: str = "",
     ) -> None:
-        """Create a builder with validated DNS, gateway, and loopback port config.
+        """Create a builder with validated DNS and loopback port config.
 
         Args:
             dns: DNS server address (pasta default forwarder).
             loopback_ports: TCP ports to allow on the loopback interface.
-            gateway: Network gateway IP (e.g. slirp4netns 10.0.2.2).
-                When set with loopback_ports, generates accept rules for
-                the gateway before private-range reject rules.
+                When set, gateway port rules reference ``@gateway_v4``/
+                ``@gateway_v6`` sets populated at runtime by the OCI hook.
             set_timeout: nft set element timeout (e.g. ``30m``).  When set,
                 allow sets use ``flags interval, timeout`` so dnsmasq-populated
                 IPs expire and are refreshed on the next DNS query.
@@ -197,13 +183,10 @@ class RulesetBuilder:
         dns = safe_ip(dns)
         for p in loopback_ports:
             _safe_port(p)
-        if gateway:
-            gateway = _safe_host_ip(gateway)
         if set_timeout:
             _safe_timeout(set_timeout)
         self._dns = dns
         self._loopback_ports = loopback_ports
-        self._gateway = gateway
         self._set_timeout = set_timeout
 
     def build_hook(self) -> str:
@@ -211,7 +194,6 @@ class RulesetBuilder:
         return hook_ruleset(
             dns=self._dns,
             loopback_ports=self._loopback_ports,
-            gateway=self._gateway,
             set_timeout=self._set_timeout,
         )
 
@@ -220,7 +202,6 @@ class RulesetBuilder:
         return bypass_ruleset(
             dns=self._dns,
             loopback_ports=self._loopback_ports,
-            gateway=self._gateway,
             allow_all=allow_all,
             set_timeout=self._set_timeout,
         )
@@ -264,13 +245,17 @@ def _set_declaration(name: str, family: str, set_timeout: str = "") -> str:
 def hook_ruleset(
     dns: str = PASTA_DNS,
     loopback_ports: tuple[int, ...] = (),
-    gateway: str = "",
     set_timeout: str = "",
 ) -> str:
     """Generate a per-container nftables ruleset for hook mode.
 
     Applied by the OCI hook into the container's own netns.
     Dual-stack: both IPv4 and IPv6 use deny-all + allowlist.
+
+    ``gateway_v4`` and ``gateway_v6`` sets are always defined but start
+    empty.  The OCI hook populates them from ``/proc/{pid}/net/route``
+    after applying this ruleset; ``shield_up()`` repopulates them from
+    the persisted ``state/gateway`` file.
 
     Chain order (output):
         loopback -> established -> DNS -> gateway ports -> loopback ports
@@ -279,18 +264,15 @@ def hook_ruleset(
     Args:
         dns: DNS server address (pasta default forwarder).
         loopback_ports: TCP ports to allow on the loopback interface.
-        gateway: Network gateway IP for loopback port access (slirp4netns).
         set_timeout: nft set element timeout (e.g. ``30m``).
     """
     dns = safe_ip(dns)
-    if gateway:
-        gateway = _safe_host_ip(gateway)
     if set_timeout:
         _safe_timeout(set_timeout)
     for p in loopback_ports:
         _safe_port(p)
     port_rules = _loopback_port_rules(loopback_ports)
-    gw_rules = _gateway_port_rules(gateway, loopback_ports)
+    gw_rules = _gateway_port_rules(loopback_ports)
     infra_block = ""
     if gw_rules:
         infra_block += f"\n{gw_rules}"
@@ -304,6 +286,8 @@ def hook_ruleset(
         table {NFT_TABLE} {{
             {set_v4}
             {set_v6}
+            set gateway_v4 {{ type ipv4_addr; }}
+            set gateway_v6 {{ type ipv6_addr; }}
 
             chain output {{
                 type filter hook output priority filter; policy drop;
@@ -331,7 +315,6 @@ def hook_ruleset(
 def bypass_ruleset(
     dns: str = PASTA_DNS,
     loopback_ports: tuple[int, ...] = (),
-    gateway: str = "",
     *,
     allow_all: bool = False,
     set_timeout: str = "",
@@ -346,19 +329,16 @@ def bypass_ruleset(
     Args:
         dns: DNS server address (pasta default forwarder).
         loopback_ports: TCP ports to allow on the loopback interface.
-        gateway: Network gateway IP for loopback port access (slirp4netns).
         allow_all: If True, remove private-range reject rules.
         set_timeout: nft set element timeout (e.g. ``30m``).
     """
     dns = safe_ip(dns)
-    if gateway:
-        gateway = _safe_host_ip(gateway)
     if set_timeout:
         _safe_timeout(set_timeout)
     for p in loopback_ports:
         _safe_port(p)
     port_rules = _loopback_port_rules(loopback_ports)
-    gw_rules = _gateway_port_rules(gateway, loopback_ports)
+    gw_rules = _gateway_port_rules(loopback_ports)
     infra_block = ""
     if gw_rules:
         infra_block += f"\n{gw_rules}"
@@ -374,6 +354,8 @@ def bypass_ruleset(
         table {NFT_TABLE} {{
             {set_v4}
             {set_v6}
+            set gateway_v4 {{ type ipv4_addr; }}
+            set gateway_v6 {{ type ipv6_addr; }}
 
             chain output {{
                 type filter hook output priority filter; policy accept;

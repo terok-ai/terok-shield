@@ -36,7 +36,7 @@ from .config import (
 )
 from .nft import RulesetBuilder
 from .nft_constants import NFT_SET_TIMEOUT_DNSMASQ
-from .podman_info import parse_proc_net_route, parse_resolv_conf
+from .podman_info import parse_resolv_conf
 from .run import ExecError, SubprocessRunner
 
 if TYPE_CHECKING:
@@ -316,20 +316,6 @@ def _read_container_dns(pid: str) -> str:
     return dns
 
 
-def _read_container_gateway(pid: str) -> str:
-    """Read the default gateway from a container's routing table.
-
-    Returns empty string if the route table is unreadable or has no
-    default route (e.g. pasta mode).
-    """
-    route_path = Path(f"/proc/{pid}/net/route")
-    try:
-        text = route_path.read_text()
-    except OSError:
-        return ""
-    return parse_proc_net_route(text)
-
-
 # ── Entry point ──────────────────────────────────────────
 
 
@@ -409,7 +395,7 @@ def hook_main(stdin_data: str | None = None, stage: str = "createRuntime") -> in
         raw_audit = annotations.get(ANNOTATION_AUDIT_ENABLED_KEY, "true").strip().lower()
         audit_enabled = raw_audit not in ("false", "0")
 
-        # DNS tier and upstream DNS from annotations
+        # DNS tier and upstream DNS from annotations (written by pre_start)
         upstream_dns = annotations.get(ANNOTATION_UPSTREAM_DNS_KEY, "")
         dns_tier_str = annotations.get(ANNOTATION_DNS_TIER_KEY, "")
 
@@ -418,22 +404,13 @@ def hook_main(stdin_data: str | None = None, stage: str = "createRuntime") -> in
             dns = upstream_dns
         else:
             dns = _read_container_dns(pid)
-        gateway = _read_container_gateway(pid)
 
-        # Validate before persisting — don't write unvalidated annotation data to disk.
-        # safe_ip() validates dns; dns_tier_str is checked against the enum.
+        # Validate annotation data before use
         from .nft import safe_ip
 
         safe_ip(dns)
         if dns_tier_str and dns_tier_str not in {t.value for t in DnsTier}:
             raise RuntimeError(f"Invalid dns_tier annotation: {dns_tier_str!r}")
-
-        # Persist upstream DNS so shield_up/shield_down can rebuild rules correctly
-        # (resolv.conf will be rewritten to 127.0.0.1 when dnsmasq is active)
-        state.upstream_dns_path(sd).write_text(f"{dns}\n")
-
-        # Persist DNS tier so _container_ruleset() can set nft timeouts correctly
-        state.dns_tier_path(sd).write_text(f"{dns_tier_str}\n")
 
         # dnsmasq tier: nft sets get timeout for auto-expiry
         set_timeout = NFT_SET_TIMEOUT_DNSMASQ if dns_tier_str == DnsTier.DNSMASQ.value else ""
@@ -446,7 +423,6 @@ def hook_main(stdin_data: str | None = None, stage: str = "createRuntime") -> in
         ruleset = RulesetBuilder(
             dns=dns,
             loopback_ports=loopback_ports,
-            gateway=gateway,
             set_timeout=set_timeout,
         )
         executor = HookExecutor(

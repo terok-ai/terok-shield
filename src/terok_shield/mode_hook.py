@@ -16,9 +16,7 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
 import stat
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -44,7 +42,6 @@ from .podman_info import (
     global_hooks_hint,
     has_global_hooks,
     parse_podman_info,
-    parse_proc_net_route,
     parse_resolv_conf,
 )
 from .run import ExecError, ShieldNeedsSetup
@@ -93,12 +90,13 @@ def _split_domains_ips(entries: list[str]) -> tuple[list[str], list[str]]:
 
 
 def _generate_entrypoint() -> str:
-    """Generate the OCI hook entrypoint shell script.
+    """Return the self-contained OCI hook entrypoint script.
 
-    Uses the current Python interpreter so the hook runs in the
-    same environment where terok-shield is installed.
+    The script uses ``#!/usr/bin/env python3`` so it resolves Python at
+    execution time — no virtualenv path is baked in at setup time.
+    Works for all install methods: pip, pipx, Poetry, system package.
     """
-    return f'#!/bin/sh\nexec {shlex.quote(sys.executable)} -m terok_shield.oci_hook "$@"\n'
+    return (Path(__file__).parent / "resources" / "hook_entrypoint.py").read_text()
 
 
 def _generate_hook_json(entrypoint: str, stage: str) -> str:
@@ -277,6 +275,28 @@ class HookMode:
         else:
             # dig/getent tier: resolve everything to IPs at pre-start time.
             self._dns.resolve_and_cache(entries, state.profile_allowed_path(sd))
+
+        # Persist runtime params before container starts (hook reads from state dir)
+        state.upstream_dns_path(sd).write_text(f"{upstream_dns}\n")
+        state.dns_tier_path(sd).write_text(f"{tier.value}\n")
+
+        # Pre-generate complete nft ruleset (gateway sets start empty; hook populates them)
+        set_timeout = NFT_SET_TIMEOUT_DNSMASQ if tier == DnsTier.DNSMASQ else ""
+        ruleset_builder = RulesetBuilder(
+            dns=upstream_dns,
+            loopback_ports=self._config.loopback_ports,
+            set_timeout=set_timeout,
+        )
+        ips = state.read_effective_ips(sd)
+        state.ruleset_path(sd).write_text(
+            ruleset_builder.build_hook() + ruleset_builder.add_elements_dual(ips)
+        )
+
+        # Pre-generate dnsmasq config if using dnsmasq tier
+        if tier == DnsTier.DNSMASQ:
+            domains = dnsmasq.read_merged_domains(sd)
+            conf = dnsmasq.generate_config(upstream_dns, domains, state.dnsmasq_pid_path(sd))
+            state.dnsmasq_conf_path(sd).write_text(conf)
 
         # Build podman args
         args: list[str] = []
@@ -523,15 +543,6 @@ class HookMode:
             )
         return dns
 
-    def _read_container_gateway(self, container: str) -> str:
-        """Read default gateway from a running container's routing table."""
-        pid = self._runner.podman_inspect(container, "{{.State.Pid}}")
-        output = self._runner.run(
-            ["podman", "unshare", "cat", f"/proc/{pid}/net/route"],
-            check=False,
-        )
-        return parse_proc_net_route(output)
-
     def _read_upstream_dns(self) -> str | None:
         """Read persisted upstream DNS from state (written by the OCI hook).
 
@@ -546,15 +557,14 @@ class HookMode:
         return value or None
 
     def _container_ruleset(self, container: str) -> RulesetBuilder:
-        """Build a RulesetBuilder with the container's actual DNS and gateway.
+        """Build a RulesetBuilder with the container's actual DNS settings.
 
-        Prefers persisted upstream DNS (from OCI hook) over resolv.conf,
+        Prefers persisted upstream DNS (from pre_start) over resolv.conf,
         because dnsmasq mode rewrites resolv.conf to ``127.0.0.1``.
         Reads persisted DNS tier to set nft element timeouts for dnsmasq mode.
         """
         upstream = self._read_upstream_dns()
         dns = upstream if upstream else self._read_container_dns(container)
-        gateway = self._read_container_gateway(container)
 
         # Read persisted DNS tier to determine if set timeouts are needed
         sd = self._config.state_dir.resolve()
@@ -568,7 +578,6 @@ class HookMode:
         return RulesetBuilder(
             dns=dns,
             loopback_ports=self._config.loopback_ports,
-            gateway=gateway,
             set_timeout=set_timeout,
         )
 
@@ -606,6 +615,22 @@ class HookMode:
             elements_cmd = ruleset.add_elements_dual(unique_ips)
             if elements_cmd:
                 self._runner.nft_via_nsenter(container, stdin=elements_cmd)
+
+        # Repopulate gateway set from persisted discovery (hook wrote it at container start)
+        gw_path = state.gateway_path(sd)
+        if gw_path.is_file():
+            gw = gw_path.read_text().strip()
+            if gw:
+                set_name = "gateway_v4" if "." in gw else "gateway_v6"
+                self._runner.nft_via_nsenter(
+                    container,
+                    "add",
+                    "element",
+                    "inet",
+                    "terok_shield",
+                    set_name,
+                    f"{{ {gw} }}",
+                )
 
         output = self._runner.nft_via_nsenter(container, "list", "ruleset")
         errors = ruleset.verify_hook(output)

@@ -93,7 +93,6 @@ def hook_main_harness(monkeypatch: pytest.MonkeyPatch) -> HookMainHarness:
     monkeypatch.setattr("terok_shield.oci_hook.RulesetBuilder", ruleset_builder_cls)
     monkeypatch.setattr("terok_shield.oci_hook.SubprocessRunner", mock.MagicMock)
     monkeypatch.setattr("terok_shield.oci_hook._read_container_dns", lambda pid: "169.254.1.1")
-    monkeypatch.setattr("terok_shield.oci_hook._read_container_gateway", lambda pid: "")
     monkeypatch.setattr("terok_shield.oci_hook.dnsmasq", mock.MagicMock())
     return HookMainHarness(
         executor_cls=executor_cls,
@@ -242,7 +241,6 @@ def test_hook_main_success(hook_main_harness: HookMainHarness, tmp_path: Path) -
     hook_main_harness.ruleset_builder_cls.assert_called_once_with(
         dns="169.254.1.1",
         loopback_ports=(1234,),
-        gateway="",
         set_timeout="",
     )
     hook_main_harness.executor.apply.assert_called_once_with("test-ctr", "42")
@@ -417,21 +415,6 @@ def test_hook_main_dnsmasq_tier_launches_dnsmasq(
 
     mock_dnsmasq.launch.assert_called_once()
     mock_dnsmasq.write_resolv_conf.assert_called_once()
-
-
-def test_hook_main_persists_upstream_dns(
-    hook_main_harness: HookMainHarness,
-    tmp_path: Path,
-) -> None:
-    """hook_main() writes upstream DNS to state for shield_up/shield_down."""
-    from terok_shield import state as st
-
-    annotations = _valid_annotations(tmp_path)
-    assert hook_main(_oci_state(annotations=annotations)) == 0
-
-    upstream_path = st.upstream_dns_path(tmp_path)
-    assert upstream_path.is_file()
-    assert upstream_path.read_text().strip() == "169.254.1.1"
 
 
 def test_hook_main_dnsmasq_launch_failure_returns_1(
