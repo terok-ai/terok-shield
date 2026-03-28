@@ -23,7 +23,12 @@ from terok_shield import Shield, ShieldConfig, state
 from terok_shield.config import DnsTier, detect_dns_tier
 from terok_shield.dnsmasq import generate_config, nftset_entry, read_domains
 from terok_shield.nft_constants import DNSMASQ_BIND, PASTA_DNS
-from tests.testnet import ALLOWED_TARGET_HTTP, BLOCKED_TARGET_HTTP
+from tests.testnet import (
+    ALLOWED_TARGET_HTTP,
+    BLOCKED_TARGET_HTTP,
+    GOOGLE_DNS_DOMAIN,
+    GOOGLE_DNS_IP,
+)
 
 from ..conftest import (
     CTR_PREFIX,
@@ -272,6 +277,24 @@ class TestDnsmasqInContainer:
         name, _sd, _shield = dnsmasq_container
         assert_blocked(name, BLOCKED_TARGET_HTTP)
 
+    def test_poststop_kills_dnsmasq(self, dnsmasq_container) -> None:
+        """Container stop triggers the poststop hook, which kills dnsmasq."""
+        name, sd, _shield = dnsmasq_container
+
+        pid_str = state.dnsmasq_pid_path(sd).read_text().strip()
+        assert Path(f"/proc/{pid_str}/cmdline").exists(), (
+            "dnsmasq should be running before container stop"
+        )
+
+        subprocess.run(
+            ["podman", "stop", "--time=5", name], capture_output=True, check=True, timeout=30
+        )
+
+        assert not Path(f"/proc/{pid_str}").exists(), (
+            f"dnsmasq PID {pid_str} still in /proc after container stop — "
+            "poststop hook may not have run"
+        )
+
 
 # ── Story 5: live domain allow/deny ─────────────────────
 
@@ -311,17 +334,40 @@ class TestLiveDomainAllowDeny:
     def test_allow_domain_updates_live_domains(self, shielded) -> None:
         """shield.allow(domain) adds the domain to live.domains."""
         name, sd, shield = shielded
-        shield.allow(name, "dns.google")
+        shield.allow(name, GOOGLE_DNS_DOMAIN)
         domains = read_domains(state.live_domains_path(sd))
-        assert "dns.google" in domains
+        assert GOOGLE_DNS_DOMAIN in domains
 
     def test_deny_domain_adds_to_denied_domains(self, shielded) -> None:
         """shield.deny(domain) adds the domain to denied.domains."""
         name, sd, shield = shielded
-        shield.allow(name, "dns.google")
-        shield.deny(name, "dns.google")
+        shield.allow(name, GOOGLE_DNS_DOMAIN)
+        shield.deny(name, GOOGLE_DNS_DOMAIN)
         denied = read_domains(state.denied_domains_path(sd))
-        assert "dns.google" in denied
+        assert GOOGLE_DNS_DOMAIN in denied
+
+    def test_allow_domain_populates_nft_set(self, shielded) -> None:
+        """Allowing a domain and querying it causes dnsmasq to populate the nft allow set."""
+        name, _sd, shield = shielded
+
+        shield.allow(name, GOOGLE_DNS_DOMAIN)
+
+        # DNS query inside the container — dnsmasq resolves and fires --nftset
+        exec_in_container(name, "nslookup", GOOGLE_DNS_DOMAIN)
+
+        pid = subprocess.run(
+            ["podman", "inspect", "--format", "{{.State.Pid}}", name],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        ).stdout.strip()
+
+        r = nsenter_nft(pid, "list", "set", "inet", "terok_shield", "allow_v4")
+        assert r.returncode == 0
+        assert GOOGLE_DNS_IP in r.stdout, (
+            f"{GOOGLE_DNS_IP} not found in allow_v4 set after resolving {GOOGLE_DNS_DOMAIN}; "
+            f"set contents: {r.stdout!r}"
+        )
 
 
 # ── Story 6: graceful degradation (dig fallback) ─────────
@@ -363,3 +409,69 @@ class TestGracefulDegradation:
         assert tier is not None, "dns_tier annotation not found"
         assert tier == expected_tier.value
         assert tier != "dnsmasq"
+
+
+# ── Story 7: state dir reuse across container lifecycle ───
+
+
+@pytest.mark.needs_podman
+@pytest.mark.needs_internet
+@pytest.mark.needs_hooks
+@podman_missing
+@nft_missing
+@dnsmasq_missing
+@pytest.mark.usefixtures("nft_in_netns")
+class TestRestartWithReusedStateDir:
+    """Stop+remove a container and re-create it with the same state dir.
+
+    Verifies that dnsmasq starts cleanly on the second run — no stale PID
+    file from the previous lifecycle fools the post-launch existence check.
+    This directly exercises the ``_clear_pid_file()`` call added to
+    ``dnsmasq.launch()`` to guard against reused state directories.
+    """
+
+    def test_dnsmasq_restarts_cleanly_on_reuse(
+        self, _pull_image: None, shield_env: Path
+    ) -> None:
+        """dnsmasq gets a fresh PID when the container is re-created with the same state dir."""
+        name = f"{CTR_PREFIX}-restart-{id(self)}"
+        sd = shield_env / "containers" / name
+        shield = Shield(ShieldConfig(state_dir=sd))
+
+        _podman_rm(name)
+        try:
+            # First run
+            extra_args = shield.pre_start(name)
+            tier = _tier_from_args(extra_args)
+            if tier != "dnsmasq":
+                pytest.skip(f"dnsmasq tier not selected (got '{tier}')")
+
+            start_shielded_container(name, extra_args, IMAGE)
+
+            first_pid = state.dnsmasq_pid_path(sd).read_text().strip()
+            assert first_pid.isdigit()
+
+            # Stop and remove — poststop hook kills dnsmasq, PID file remains on disk
+            subprocess.run(
+                ["podman", "stop", "--time=5", name], capture_output=True, timeout=30
+            )
+            subprocess.run(["podman", "rm", name], capture_output=True, timeout=15)
+
+            assert not Path(f"/proc/{first_pid}").exists(), (
+                "dnsmasq should be gone after container stop"
+            )
+
+            # Second run with the same state dir — pre_start is idempotent
+            extra_args2 = shield.pre_start(name)
+            start_shielded_container(name, extra_args2, IMAGE)
+
+            second_pid = state.dnsmasq_pid_path(sd).read_text().strip()
+            assert second_pid.isdigit()
+            assert second_pid != first_pid, (
+                "dnsmasq should have a new PID after re-creation with same state dir"
+            )
+
+            r = exec_in_container(name, "cat", "/etc/resolv.conf")
+            assert "127.0.0.1" in r.stdout
+        finally:
+            _podman_rm(name)
