@@ -103,7 +103,7 @@ def _poststop(sd: Path) -> None:
     if pid_file.exists():
         try:
             os.kill(int(pid_file.read_text().strip()), 15)
-        except (ProcessLookupError, ValueError, OSError):
+        except (ValueError, OSError):
             pass
 
 
@@ -112,7 +112,7 @@ def main() -> int:
     stage = sys.argv[1] if len(sys.argv) > 1 else "createRuntime"
     try:
         oci = json.load(sys.stdin)
-    except (json.JSONDecodeError, ValueError) as exc:
+    except ValueError as exc:
         print(f"terok-shield hook: bad OCI state: {exc}", file=sys.stderr)
         return 1
 
