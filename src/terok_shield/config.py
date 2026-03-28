@@ -40,7 +40,10 @@ class DnsTier(enum.Enum):
     GETENT = "getent"
 
 
-def detect_dns_tier(has: Callable[[str], bool]) -> DnsTier:
+def detect_dns_tier(
+    has: Callable[[str], bool],
+    dnsmasq_nftset_ok: Callable[[], bool] = lambda: True,
+) -> DnsTier:
     """Detect the best available DNS resolution tier.
 
     Uses *has* to probe for executables on ``PATH``.  Shared by
@@ -49,8 +52,12 @@ def detect_dns_tier(has: Callable[[str], bool]) -> DnsTier:
     Args:
         has: Callable that returns True if the named executable exists
             (e.g. ``CommandRunner.has``).
+        dnsmasq_nftset_ok: Callable that returns True if the installed
+            dnsmasq supports ``--nftset``.  Defaults to ``lambda: True``
+            (skip capability probe); production callers with a live runner
+            should pass :func:`~terok_shield.dnsmasq.has_nftset_support`.
     """
-    if has("dnsmasq"):
+    if has("dnsmasq") and dnsmasq_nftset_ok():
         return DnsTier.DNSMASQ
     if has("dig"):
         return DnsTier.DIG

@@ -26,7 +26,7 @@ except PackageNotFoundError:
 
 from dataclasses import dataclass, field
 
-from . import state
+from . import dnsmasq, state
 from .audit import AuditLogger
 from .config import DnsTier, ShieldConfig, ShieldMode, ShieldState, detect_dns_tier
 from .dns import DnsResolver
@@ -158,7 +158,7 @@ class Shield:
         hooks = "per-container"
         health = "ok"
 
-        tier = detect_dns_tier(self.runner.has)
+        tier = detect_dns_tier(self.runner.has, lambda: dnsmasq.has_nftset_support(self.runner))
         dns_tier = tier.value
         if tier == DnsTier.DIG:
             issues.append(

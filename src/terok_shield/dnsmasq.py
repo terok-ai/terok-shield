@@ -18,20 +18,38 @@ import os
 import re
 import signal
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from . import state
 from .nft_constants import DNSMASQ_BIND, NFT_TABLE_NAME
-from .run import ExecError
-
-if TYPE_CHECKING:
-    from .run import CommandRunner
+from .run import CommandRunner, ExecError
 
 # ── Constants ────────────────────────────────────────────
 
 # Strict domain label validation (RFC 1035 + wildcards).
 # Allows: a-z, 0-9, hyphens, dots, leading wildcard (*.).
 _DOMAIN_RE = re.compile(r"^(\*\.)?([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$")
+
+
+# ── Capability probing ───────────────────────────────────
+
+
+def has_nftset_support(runner: CommandRunner) -> bool:
+    """Return True if the installed dnsmasq supports ``--nftset``.
+
+    Parses the ``dnsmasq --version`` compile-time options line for the
+    ``nftset`` feature flag.  Returns False if dnsmasq is not installed
+    or its version output contains ``no-nftset`` (explicitly disabled).
+
+    Example output with support::
+
+        Compile time options: IPv6 GNU-getopt ... nftset auth ...
+
+    Example output without support::
+
+        Compile time options: IPv6 GNU-getopt ... no-nftset auth ...
+    """
+    out = runner.run(["dnsmasq", "--version"], check=False)
+    return bool(re.search(r"\bnftset\b", out)) and not bool(re.search(r"\bno-nftset\b", out))
 
 
 # ── Config generation ────────────────────────────────────

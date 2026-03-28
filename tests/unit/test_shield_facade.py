@@ -378,6 +378,21 @@ def _podman_info_json(version: str = "5.8.0", **host_extra: object) -> str:
     return json.dumps({"host": {**host_extra}, "version": {"Version": version}})
 
 
+def _run_side_effect(podman_version: str = "5.8.0"):
+    """Return a runner.run side_effect that handles both podman info and dnsmasq version.
+
+    Needed because check_environment() calls runner.run() for both podman info
+    and dnsmasq --version (nftset capability probe).
+    """
+
+    def _effect(cmd: list[str], **_kw: object) -> str:
+        if cmd[0] == "dnsmasq":
+            return "Dnsmasq version 2.92\nCompile time options: nftset\n"
+        return _podman_info_json(podman_version)
+
+    return _effect
+
+
 class TestCheckEnvironment:
     """Tests for Shield.check_environment()."""
 
@@ -450,7 +465,7 @@ class TestCheckEnvironment:
     ) -> None:
         """System global hooks → ok/global-system."""
         harness = make_shield()
-        harness.runner.run.return_value = _podman_info_json("5.8.0")
+        harness.runner.run.side_effect = _run_side_effect("5.8.0")
         env = harness.shield.check_environment()
         assert env.ok
         assert env.health == "ok"
@@ -466,7 +481,7 @@ class TestCheckEnvironment:
     ) -> None:
         """User global hooks (not system) → ok/global-user."""
         harness = make_shield()
-        harness.runner.run.return_value = _podman_info_json("5.8.0")
+        harness.runner.run.side_effect = _run_side_effect("5.8.0")
 
         # First call (hooks_dirs from find_hooks_dirs) -> True (hooks exist)
         # Second call ([sys_dir]) -> False (not in system dir)

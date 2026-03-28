@@ -14,6 +14,7 @@ import tempfile
 from pathlib import Path
 
 from terok_shield import Shield, ShieldConfig
+from terok_shield.podman_info import HOOK_JSON_FILENAME, find_hooks_dirs
 
 _DISPOSABLE_DIRS: list[tempfile.TemporaryDirectory] = []
 """Managed temp dirs for nft-only tests (cleaned up at process exit)."""
@@ -30,23 +31,42 @@ def disposable_shield() -> Shield:
     return Shield(ShieldConfig(state_dir=Path(td.name)))
 
 
-def _hook_diagnostics(extra_args: list[str]) -> str:
-    """Gather OCI hook file diagnostics from extra_args (called only on failure)."""
+def _diag_hook_json(hook_json: Path) -> str:
+    """Return diagnostic info for a single hook JSON file."""
+    if not hook_json.exists():
+        return f"hook JSON missing: {hook_json}"
     try:
-        idx = extra_args.index("--hooks-dir")
-        hooks_dir = Path(extra_args[idx + 1])
-        hook_json = hooks_dir / "terok-shield-createRuntime.json"
-        if not hook_json.exists():
-            return f"\n  [diag] hook JSON missing: {hook_json}"
         data = json.loads(hook_json.read_text())
         ep = Path(data["hook"]["path"])
         parts = [f"entrypoint={ep}", f"exists={ep.exists()}"]
         if ep.exists():
             parts.append(f"executable={os.access(ep, os.X_OK)}")
             parts.append(f"content={ep.read_text().strip()!r}")
-        return f"\n  [diag] {', '.join(parts)}"
+        return ", ".join(parts)
     except Exception as exc:
-        return f"\n  [diag] error: {exc}"
+        return f"parse error: {exc}"
+
+
+def _hook_diagnostics(extra_args: list[str]) -> str:
+    """Gather OCI hook file diagnostics from extra_args (called only on failure)."""
+    # Per-container hooks: --hooks-dir in extra_args
+    try:
+        idx = extra_args.index("--hooks-dir")
+        hooks_dir = Path(extra_args[idx + 1])
+        hook_json = hooks_dir / HOOK_JSON_FILENAME
+        return f"\n  [diag/per-container] {_diag_hook_json(hook_json)}"
+    except ValueError:
+        pass  # global hooks in use
+
+    # Global hooks: search well-known hook directories
+    parts: list[str] = []
+    for d in find_hooks_dirs():
+        hook_json = d / HOOK_JSON_FILENAME
+        if hook_json.exists():
+            parts.append(f"{d}: {_diag_hook_json(hook_json)}")
+    if parts:
+        return "\n  [diag/global] " + "\n  [diag/global] ".join(parts)
+    return "\n  [diag] no hook JSON found in any hooks directory"
 
 
 def start_shielded_container(

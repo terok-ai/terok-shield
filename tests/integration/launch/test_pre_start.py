@@ -37,14 +37,26 @@ class TestShieldPreStart:
     @pytest.mark.needs_internet
     @mock.patch("terok_shield.mode_hook.has_global_hooks", return_value=True)
     def test_pre_start_resolves_dns(self, _hgh: mock.Mock, shield_env: Path) -> None:
-        """The profile.allowed file is created after ``Shield.pre_start()``."""
+        """DNS preparation files are written after ``Shield.pre_start()``.
+
+        On the dnsmasq tier, domains go to ``profile.domains`` (not
+        ``profile.allowed``).  On the dig/getent tier, resolved IPs go to
+        ``profile.allowed``.  At least one of the two must have content.
+        """
         sd = shield_env / "containers" / "dns-test-ctr"
         shield = Shield(ShieldConfig(state_dir=sd))
         shield.pre_start("dns-test-ctr")
 
         allowed = state.profile_allowed_path(sd)
+        domains = state.profile_domains_path(sd)
         assert allowed.is_file(), "profile.allowed should be created"
-        assert allowed.stat().st_size > 0, "profile.allowed should have content"
+        dns_prepared = (allowed.stat().st_size > 0) or (
+            domains.is_file() and domains.stat().st_size > 0
+        )
+        assert dns_prepared, (
+            "DNS preparation should write IPs to profile.allowed (dig/getent tier) "
+            "or domains to profile.domains (dnsmasq tier)"
+        )
 
 
 # -- Firewall applied via public API lifecycle ----------------

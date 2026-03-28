@@ -30,6 +30,12 @@ from .helpers import write_lines
 _MODERN_PODMAN_INFO = json.dumps(
     {"host": {"rootlessNetworkCmd": "pasta"}, "version": {"Version": "5.8.0"}}
 )
+# dnsmasq --version output with nftset support compiled in
+_DNSMASQ_VERSION_NFTSET = (
+    "Dnsmasq version 2.92  Copyright (c) 2000-2025 Simon Kelley\n"
+    "Compile time options: IPv6 GNU-getopt DBus no-UBus i18n IDN2 DHCP DHCPv6 "
+    "no-Lua TFTP conntrack ipset nftset auth DNSSEC loop-detect inotify dumpfile\n"
+)
 
 ConfigFactory = Callable[..., ShieldConfig]
 
@@ -828,8 +834,10 @@ class TestPreStartDnsTierBranches:
         """When tier is DNSMASQ, pre_start splits entries: domains to file, IPs to cache."""
         _set_euid(monkeypatch, 0)
         harness = make_hook_mode()
-        harness.runner.run.return_value = _MODERN_PODMAN_INFO
-        harness.runner.has.return_value = True  # dnsmasq available
+        harness.runner.run.side_effect = lambda cmd, **_kw: (
+            _DNSMASQ_VERSION_NFTSET if cmd[0] == "dnsmasq" else _MODERN_PODMAN_INFO
+        )
+        harness.runner.has.return_value = True  # dnsmasq available (nftset probed via run)
         harness.profiles.compose_profiles.return_value = [TEST_DOMAIN, TEST_IP1]
 
         args = harness.mode.pre_start("test", ["dev-standard"])

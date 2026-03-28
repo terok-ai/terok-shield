@@ -13,6 +13,7 @@ from terok_shield.dnsmasq import (
     _validate_domain,
     add_domain,
     generate_config,
+    has_nftset_support,
     kill,
     launch,
     nftset_entry,
@@ -474,6 +475,40 @@ def test_generate_config_rejects_invalid_upstream(tmp_path: Path) -> None:
     """generate_config() raises ValueError for non-IP upstream."""
     with pytest.raises(ValueError):
         generate_config("not-an-ip", [], tmp_path / "dnsmasq.pid")
+
+
+# ── has_nftset_support ───────────────────────────────────
+
+
+def test_has_nftset_support_detects_support() -> None:
+    """has_nftset_support() returns True when version output lists 'nftset'."""
+    runner = mock.MagicMock()
+    runner.run.return_value = (
+        "Dnsmasq version 2.92  Copyright (c) 2000-2025 Simon Kelley\n"
+        "Compile time options: IPv6 GNU-getopt DBus no-UBus i18n IDN2 DHCP DHCPv6 "
+        "no-Lua TFTP conntrack ipset nftset auth DNSSEC loop-detect inotify dumpfile\n"
+    )
+    assert has_nftset_support(runner) is True
+
+
+def test_has_nftset_support_detects_no_support() -> None:
+    """has_nftset_support() returns False when version output lists 'no-nftset'."""
+    runner = mock.MagicMock()
+    runner.run.return_value = (
+        "Dnsmasq version 2.90\n"
+        "Compile time options: IPv6 GNU-getopt DBus no-UBus i18n IDN2 DHCP DHCPv6 "
+        "no-Lua TFTP conntrack ipset no-nftset auth DNSSEC loop-detect inotify dumpfile\n"
+    )
+    assert has_nftset_support(runner) is False
+
+
+def test_has_nftset_support_missing_dnsmasq() -> None:
+    """has_nftset_support() returns False when dnsmasq is not installed."""
+    runner = mock.MagicMock()
+    runner.run.return_value = (
+        ""  # SubprocessRunner returns "" on FileNotFoundError with check=False
+    )
+    assert has_nftset_support(runner) is False
 
 
 # ── write_resolv_conf ────────────────────────────────────

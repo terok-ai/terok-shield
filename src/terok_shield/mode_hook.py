@@ -354,12 +354,10 @@ class HookMode:
         """Detect the best available DNS resolution tier.
 
         Delegates to the shared :func:`detect_dns_tier` helper.
-        If dnsmasq is installed, assumes nftset support (all supported
-        distros ship dnsmasq >= 2.87 with nftset).  If dnsmasq lacks
-        nftset, the launch will fail with a clear "bad option" error
-        (fail-closed).
+        Probes the installed dnsmasq for ``--nftset`` support before
+        selecting the dnsmasq tier.
         """
-        return detect_dns_tier(self._runner.has)
+        return detect_dns_tier(self._runner.has, lambda: dnsmasq.has_nftset_support(self._runner))
 
     def _get_podman_info(self) -> PodmanInfo:
         """Get podman info, caching the result for the lifetime of this instance."""
