@@ -264,7 +264,7 @@ def test_allow_ip_uses_timeout_zero_in_dnsmasq_tier(
     harness.mode.allow_ip("test-ctr", TEST_IP1)
 
     element_arg = harness.runner.nft_via_nsenter.call_args.args[-1]
-    assert "timeout 0" in element_arg
+    assert "timeout 0s" in element_arg
 
 
 def test_allow_ip_no_timeout_zero_without_dnsmasq_tier(
@@ -279,7 +279,7 @@ def test_allow_ip_no_timeout_zero_without_dnsmasq_tier(
     harness.mode.allow_ip("test-ctr", TEST_IP1)
 
     element_arg = harness.runner.nft_via_nsenter.call_args.args[-1]
-    assert "timeout 0" not in element_arg
+    assert "timeout 0s" not in element_arg
 
 
 @pytest.mark.parametrize(

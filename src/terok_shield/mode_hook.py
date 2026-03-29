@@ -439,7 +439,7 @@ class HookMode:
         # 'timeout 0' so they are never evicted by the set's per-element expiry clock.
         tier_path = state.dns_tier_path(sd)
         if tier_path.is_file() and tier_path.read_text().strip() == DnsTier.DNSMASQ.value:
-            element = f"{{ {ip} timeout 0 }}"
+            element = f"{{ {ip} timeout 0s }}"
         else:
             element = f"{{ {ip} }}"
 

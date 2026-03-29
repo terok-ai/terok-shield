@@ -12,8 +12,11 @@ The primary entry point is the ``Shield`` facade class:
     >>> shield.pre_start("my-container", ["dev-standard"])
 """
 
+import logging
 from collections.abc import Iterator
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 __version__: str = "0.0.0"  # placeholder; replaced at build time
 
@@ -230,7 +233,8 @@ class Shield:
         for ip in ips:
             try:
                 self._mode.allow_ip(container, ip)
-            except (ExecError, OSError):
+            except (ExecError, OSError) as exc:
+                logger.warning("allow_ip failed for %s on %s: %s", ip, container, exc)
                 continue
             allowed.append(ip)
             self.audit.log_event(container, "allowed", dest=ip, detail=f"target={target}")
@@ -247,7 +251,8 @@ class Shield:
         for ip in ips:
             try:
                 self._mode.deny_ip(container, ip)
-            except (ExecError, OSError):
+            except (ExecError, OSError) as exc:
+                logger.warning("deny_ip failed for %s on %s: %s", ip, container, exc)
                 continue
             denied.append(ip)
             self.audit.log_event(container, "denied", dest=ip, detail=f"target={target}")
