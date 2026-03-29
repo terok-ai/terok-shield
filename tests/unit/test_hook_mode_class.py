@@ -964,7 +964,7 @@ class TestPreStartDnsTierBranches:
         assert "--dns" not in args
         assert "--volume" in args
         volume_args = [args[i + 1] for i, a in enumerate(args) if a == "--volume"]
-        assert any("/etc/resolv.conf:ro,z" in v for v in volume_args)
+        assert any("/etc/resolv.conf:ro,Z" in v for v in volume_args)
         # The resolv.conf source file exists and points to dnsmasq
         sd = harness.config.state_dir.resolve()
         resolv = state.resolv_conf_path(sd)

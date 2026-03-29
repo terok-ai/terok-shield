@@ -374,11 +374,13 @@ class HookMode:
         # and skips its own resolv.conf generation entirely — pasta's DNS proxy
         # never appears in the container's resolver list.  The :ro flag prevents
         # the container payload from redirecting DNS away from dnsmasq, which would
-        # silently break dynamic domain allowlisting.  The :z flag relabels the
-        # file with the shared container SELinux type so that container_t can read
-        # it even when the state directory is labeled data_home_t.
+        # silently break dynamic domain allowlisting.  The :Z flag relabels the
+        # file with this container's private MCS label so that container_t can read
+        # it even when the state directory is labeled data_home_t.  :Z (private)
+        # is correct here because each container has its own state directory and
+        # its own resolv.conf — there is no cross-container sharing.
         if tier == DnsTier.DNSMASQ:
-            args += ["--volume", f"{state.resolv_conf_path(sd)}:/etc/resolv.conf:ro,z"]
+            args += ["--volume", f"{state.resolv_conf_path(sd)}:/etc/resolv.conf:ro,Z"]
 
         # Annotations: profiles, name, state_dir, loopback_ports, version, dns
         ports_str = ",".join(str(p) for p in self._config.loopback_ports)
