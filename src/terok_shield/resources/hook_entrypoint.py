@@ -194,7 +194,9 @@ def _createruntime(pid: str, sd: Path) -> None:
     if dnsmasq_conf.exists():
         _nsenter(pid, _find_dnsmasq(), f"--conf-file={dnsmasq_conf}")
         try:
-            Path(f"/proc/{pid}/root/etc/resolv.conf").write_text("nameserver 127.0.0.1\nndots:0\n")
+            Path(f"/proc/{pid}/root/etc/resolv.conf").write_text(
+                "nameserver 127.0.0.1\noptions ndots:0\n"
+            )
         except OSError:
             pass  # non-fatal: container DNS may still work via default
 

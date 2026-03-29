@@ -462,7 +462,7 @@ def test_createruntime_starts_dnsmasq_when_conf_present(tmp_path: Path) -> None:
     assert mock_ns.call_count == 2
     dnsmasq_call_args = mock_ns.call_args_list[1].args
     assert any("dnsmasq" in str(a) or "conf-file" in str(a) for a in dnsmasq_call_args)
-    assert fake_resolv.read_text() == "nameserver 127.0.0.1\nndots:0\n"
+    assert fake_resolv.read_text() == "nameserver 127.0.0.1\noptions ndots:0\n"
 
 
 def test_createruntime_ignores_oserror_writing_resolv_conf(tmp_path: Path) -> None:
@@ -632,16 +632,17 @@ def test_poststop_ignores_invalid_pid_content(tmp_path: Path) -> None:
 
 
 def _run_main(json_str: str, *, stage: str = "createRuntime") -> int:
-    """Call hook_entrypoint.main() with mocked argv and stdin."""
-    with mock.patch(
-        "terok_shield.resources.hook_entrypoint.sys.argv",
-        ["hook", stage],
+    """Call hook_entrypoint.main() with mocked argv, stdin, and _log.
+
+    _log is suppressed so error paths do not write real files (its fallback
+    path is /tmp/terok-hook-error.log which would escape the tmp_path sandbox).
+    """
+    with (
+        mock.patch("terok_shield.resources.hook_entrypoint.sys.argv", ["hook", stage]),
+        mock.patch("terok_shield.resources.hook_entrypoint.sys.stdin", io.StringIO(json_str)),
+        mock.patch("terok_shield.resources.hook_entrypoint._log"),
     ):
-        with mock.patch(
-            "terok_shield.resources.hook_entrypoint.sys.stdin",
-            io.StringIO(json_str),
-        ):
-            return hook_entrypoint.main()
+        return hook_entrypoint.main()
 
 
 def test_main_returns_1_for_bad_json() -> None:
