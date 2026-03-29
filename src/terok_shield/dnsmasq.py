@@ -382,9 +382,14 @@ def write_resolv_conf(pid: str, nameserver: str = DNSMASQ_BIND) -> None:
     to ``/proc/{pid}/root/etc/resolv.conf`` from the host side.
 
     Raises:
-        ValueError: If *pid* is not a numeric string.
+        ValueError: If *pid* is not a numeric string or *nameserver* is not
+            a valid IPv4 or IPv6 address.
     """
     if not pid.isdigit():
         raise ValueError(f"pid must be numeric, got {pid!r}")
+    try:
+        ipaddress.ip_address(nameserver)
+    except ValueError:
+        raise ValueError(f"nameserver must be a valid IP address, got {nameserver!r}") from None
     resolv_path = Path(f"/proc/{pid}/root/etc/resolv.conf")
     resolv_path.write_text(f"nameserver {nameserver}\n")

@@ -531,21 +531,3 @@ def test_load_and_add_ips_logs_broad_cidr(tmp_path: Path) -> None:
     assert any("broad range" in d for d in detail_args), (
         f"Expected 'broad range' audit event; got: {detail_args}"
     )
-
-
-def test_hook_main_reads_stdin_when_no_stdin_data_second(
-    hook_main_harness: HookMainHarness,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """hook_main(stdin_data=None) defaults to 'createRuntime' stage from argv."""
-    import io
-    import sys
-
-    monkeypatch.setattr(sys, "argv", ["oci_hook"])
-    monkeypatch.setattr(
-        sys,
-        "stdin",
-        io.StringIO(_oci_state(annotations=_valid_annotations(tmp_path))),
-    )
-    assert hook_main(stdin_data=None) == 0

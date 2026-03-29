@@ -22,6 +22,13 @@ import subprocess  # nosec B404
 import sys
 from pathlib import Path
 
+# These constants are intentionally duplicated from src/terok_shield/state.py
+# so this script stays stdlib-only (no terok_shield imports).  Keep in sync:
+#   _BUNDLE_VERSION  ↔  state.BUNDLE_VERSION
+#   "ruleset.nft"    ↔  state.ruleset_path()
+#   "gateway"        ↔  state.gateway_path()
+#   "dnsmasq.conf"   ↔  state.dnsmasq_conf_path()
+#   "dnsmasq.pid"    ↔  state.dnsmasq_pid_path()
 _ANN_STATE_DIR = "terok.shield.state_dir"
 _ANN_VERSION = "terok.shield.version"
 _BUNDLE_VERSION = 3

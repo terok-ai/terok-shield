@@ -538,3 +538,9 @@ def test_write_resolv_conf_rejects_non_numeric_pid() -> None:
     """write_resolv_conf() raises ValueError for non-numeric PID."""
     with pytest.raises(ValueError, match="numeric"):
         write_resolv_conf("../../etc")
+
+
+def test_write_resolv_conf_rejects_invalid_nameserver() -> None:
+    """write_resolv_conf() raises ValueError for a non-IP nameserver."""
+    with pytest.raises(ValueError, match="valid IP address"):
+        write_resolv_conf("42", nameserver="not-an-ip")
