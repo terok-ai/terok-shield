@@ -5,7 +5,7 @@
 
 Pure functions with no internal dependencies -- safe to import from any module.
 Eliminates ``_SAFE_NAME`` / ``_SAFE_CONTAINER`` regex duplication across
-audit.py, dns.py, profiles.py, and oci_hook.py.
+audit.py, dns.py, and profiles.py.
 """
 
 import re

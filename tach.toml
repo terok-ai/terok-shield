@@ -89,20 +89,6 @@ depends_on = [
     "terok_shield.state",
 ]
 
-# OCI hook entry point — depends on audit, config, dnsmasq, nft, run, state
-[[modules]]
-path = "terok_shield.oci_hook"
-depends_on = [
-    "terok_shield.audit",
-    "terok_shield.config",
-    "terok_shield.dnsmasq",
-    "terok_shield.nft",
-    "terok_shield.nft_constants",
-    "terok_shield.podman_info",
-    "terok_shield.run",
-    "terok_shield.state",
-]
-
 # Hook mode — OCI hooks, per-container netns
 [[modules]]
 path = "terok_shield.mode_hook"

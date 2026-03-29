@@ -5,8 +5,9 @@
 
 Uses OCI hooks to apply per-container nftables rules inside each
 container's network namespace.  No root required -- only podman and nft.
-The OCI hook (``oci_hook.py``) applies the ruleset at container creation;
-this module handles setup, DNS pre-resolution, and live allow/deny.
+The stdlib-only ``hook_entrypoint.py`` applies the pre-generated ruleset at
+container creation; this module handles setup, DNS pre-resolution, and live
+allow/deny.
 
 Provides ``HookMode`` (Strategy pattern, implements ``ShieldModeBackend``)
 and ``install_hooks()`` for OCI hook file installation.
@@ -36,7 +37,7 @@ from .config import (
     detect_dns_tier,
 )
 from .nft import NFT_TABLE, RulesetBuilder
-from .nft_constants import DNSMASQ_BIND, NFT_SET_TIMEOUT_DNSMASQ, PASTA_DNS, SLIRP4NETNS_DNS
+from .nft_constants import NFT_SET_TIMEOUT_DNSMASQ, PASTA_DNS, SLIRP4NETNS_DNS
 from .podman_info import (
     PodmanInfo,
     global_hooks_hint,
