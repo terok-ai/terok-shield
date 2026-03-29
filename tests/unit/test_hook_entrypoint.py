@@ -96,6 +96,20 @@ def test_find_dnsmasq_falls_back_to_default() -> None:
         assert hook_entrypoint._find_dnsmasq() == "/usr/sbin/dnsmasq"
 
 
+def test_find_podman_uses_which_when_available() -> None:
+    """_find_podman() returns the path from shutil.which when found."""
+    with mock.patch(
+        "terok_shield.resources.hook_entrypoint.shutil.which", return_value="/usr/bin/podman"
+    ):
+        assert hook_entrypoint._find_podman() == "/usr/bin/podman"
+
+
+def test_find_podman_falls_back_to_default() -> None:
+    """_find_podman() falls back to /usr/bin/podman when shutil.which returns None."""
+    with mock.patch("terok_shield.resources.hook_entrypoint.shutil.which", return_value=None):
+        assert hook_entrypoint._find_podman() == "/usr/bin/podman"
+
+
 # ── _read_gateway ─────────────────────────────────────────────────────────────
 
 
@@ -143,16 +157,22 @@ def test_read_gateway_returns_empty_on_malformed_hex() -> None:
 
 
 def test_nsenter_runs_subprocess_in_netns() -> None:
-    """_nsenter() invokes nsenter via subprocess.run inside the container's netns."""
+    """_nsenter() invokes podman unshare + nsenter inside the container's netns."""
     with mock.patch("terok_shield.resources.hook_entrypoint.subprocess.run") as mock_run:
-        with mock.patch(
-            "terok_shield.resources.hook_entrypoint._find_nsenter",
-            return_value="/usr/bin/nsenter",
+        with (
+            mock.patch(
+                "terok_shield.resources.hook_entrypoint._find_podman",
+                return_value="/usr/bin/podman",
+            ),
+            mock.patch(
+                "terok_shield.resources.hook_entrypoint._find_nsenter",
+                return_value="/usr/bin/nsenter",
+            ),
         ):
             hook_entrypoint._nsenter("99", "nft", "-f", "/tmp/r.nft")
 
     mock_run.assert_called_once_with(
-        ["/usr/bin/nsenter", "-t", "99", "-n", "--", "nft", "-f", "/tmp/r.nft"],
+        ["/usr/bin/podman", "unshare", "/usr/bin/nsenter", "-t", "99", "-n", "--", "nft", "-f", "/tmp/r.nft"],
         input=None,
         text=False,
         check=True,
@@ -162,9 +182,15 @@ def test_nsenter_runs_subprocess_in_netns() -> None:
 def test_nsenter_passes_stdin_as_text() -> None:
     """_nsenter() passes stdin string and text=True when stdin is provided."""
     with mock.patch("terok_shield.resources.hook_entrypoint.subprocess.run") as mock_run:
-        with mock.patch(
-            "terok_shield.resources.hook_entrypoint._find_nsenter",
-            return_value="/usr/bin/nsenter",
+        with (
+            mock.patch(
+                "terok_shield.resources.hook_entrypoint._find_podman",
+                return_value="/usr/bin/podman",
+            ),
+            mock.patch(
+                "terok_shield.resources.hook_entrypoint._find_nsenter",
+                return_value="/usr/bin/nsenter",
+            ),
         ):
             hook_entrypoint._nsenter("99", "nft", "-f", "-", stdin="table inet x {}")
 
