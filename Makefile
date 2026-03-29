@@ -30,7 +30,6 @@ format:
 test-unit:
 	mkdir -p $(REPORTS_DIR)
 	poetry run pytest tests/unit/ --cov=terok_shield --cov-report=term-missing --cov-report=xml:$(COVERAGE_XML) --junitxml=$(UNIT_JUNIT_XML) -o junit_family=legacy
-	@echo "NOTE: This security-critical package targets 100% test coverage."
 
 # Write Ruff's JSON report without failing on findings.
 ruff-report:
