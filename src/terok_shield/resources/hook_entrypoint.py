@@ -121,16 +121,22 @@ def main() -> int:
     if not sd_str:
         print("terok-shield hook: missing state_dir annotation", file=sys.stderr)
         return 1
+    try:
+        _p = Path(sd_str)
+        if not _p.is_absolute():
+            raise ValueError(f"state_dir must be absolute: {sd_str!r}")
+        sd = _p.resolve()
+    except (ValueError, OSError) as exc:
+        print(f"terok-shield hook: invalid state_dir: {exc}", file=sys.stderr)
+        return 1
 
     ver = ann.get(_ANN_VERSION, "")
-    if ver and str(ver) != str(_BUNDLE_VERSION):
+    if not ver or str(ver) != str(_BUNDLE_VERSION):
         print(
             f"terok-shield hook: bundle version {ver!r} != {_BUNDLE_VERSION}. Re-run pre_start().",
             file=sys.stderr,
         )
         return 1
-
-    sd = Path(sd_str)
     try:
         if stage == "poststop":
             _poststop(sd)

@@ -292,11 +292,16 @@ class HookMode:
             ruleset_builder.build_hook() + ruleset_builder.add_elements_dual(ips)
         )
 
-        # Pre-generate dnsmasq config if using dnsmasq tier
+        # Pre-generate dnsmasq config if using dnsmasq tier; otherwise scrub
+        # stale artifacts so hook_entrypoint.py does not launch dnsmasq when
+        # the tier has changed on a reused state directory.
         if tier == DnsTier.DNSMASQ:
             domains = dnsmasq.read_merged_domains(sd)
             conf = dnsmasq.generate_config(upstream_dns, domains, state.dnsmasq_pid_path(sd))
             state.dnsmasq_conf_path(sd).write_text(conf)
+        else:
+            for stale in (state.dnsmasq_conf_path(sd), state.dnsmasq_pid_path(sd)):
+                stale.unlink(missing_ok=True)
 
         # Build podman args
         args: list[str] = []
@@ -471,11 +476,12 @@ class HookMode:
     def allow_domain(self, domain: str) -> None:
         """Add a domain to the dnsmasq config and signal reload.
 
-        Always persists the domain to ``profile.domains`` for future
-        container starts.  When dnsmasq is running, sends SIGHUP so the
-        domain takes effect immediately.  When dnsmasq is not running
-        (dig/getent tier), the domain is still persisted but only takes
-        effect on the next container start with dnsmasq tier.
+        Delegates to ``dnsmasq.add_domain()``, which persists the domain to
+        ``live.domains`` (not ``profile.domains``) and removes any matching
+        entry from ``denied.domains``.  When dnsmasq is running, a SIGHUP is
+        sent so the change takes effect immediately without a container restart.
+        These entries are runtime additions: they survive dnsmasq reloads but
+        are separate from the pre-start ``profile.domains`` list.
 
         The IP-level allow (nft set update) is handled separately by
         ``allow_ip()`` — this method is the domain-tracking counterpart

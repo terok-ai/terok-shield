@@ -256,12 +256,16 @@ class TestDnsmasqInContainer:
     def test_nft_sets_have_timeout(self, dnsmasq_container) -> None:
         """nft allow sets have timeout flag when dnsmasq is active."""
         name, _sd, _shield = dnsmasq_container
-        pid = subprocess.run(
+        result = subprocess.run(
             ["podman", "inspect", "--format", "{{.State.Pid}}", name],
             capture_output=True,
             text=True,
             timeout=10,
-        ).stdout.strip()
+            check=True,
+        )
+        pid = result.stdout.strip()
+        if not pid:
+            pytest.fail(f"podman inspect returned empty PID for container {name!r}")
 
         r = nsenter_nft(pid, "list", "ruleset")
         assert r.returncode == 0
@@ -355,12 +359,16 @@ class TestLiveDomainAllowDeny:
         # DNS query inside the container — dnsmasq resolves and fires --nftset
         exec_in_container(name, "nslookup", GOOGLE_DNS_DOMAIN)
 
-        pid = subprocess.run(
+        result = subprocess.run(
             ["podman", "inspect", "--format", "{{.State.Pid}}", name],
             capture_output=True,
             text=True,
             timeout=10,
-        ).stdout.strip()
+            check=True,
+        )
+        pid = result.stdout.strip()
+        if not pid:
+            pytest.fail(f"podman inspect returned empty PID for container {name!r}")
 
         r = nsenter_nft(pid, "list", "set", "inet", "terok_shield", "allow_v4")
         assert r.returncode == 0
@@ -395,6 +403,10 @@ class TestGracefulDegradation:
 
         with tempfile.TemporaryDirectory() as tmp:
             shield = Shield(ShieldConfig(state_dir=Path(tmp)))
+            # The Shield constructor pre-populates shield.runner._has_cache before
+            # the monkeypatch above overrides shield.runner.has.  Clear the cache
+            # so that detect_dns_tier(shield.runner.has) uses the patched lookup
+            # rather than returning the cached pre-patch result.
             shield.runner._has_cache.clear()
 
             # Determine expected tier with dnsmasq hidden

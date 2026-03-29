@@ -421,8 +421,8 @@ def test_main_returns_1_on_createruntime_exception(tmp_path: Path) -> None:
         assert _run_main(oci) == 1
 
 
-def test_main_skips_version_check_when_annotation_absent(tmp_path: Path) -> None:
-    """main() proceeds without version check when terok.shield.version annotation is absent."""
+def test_main_returns_1_when_version_annotation_absent(tmp_path: Path) -> None:
+    """main() returns 1 (fail-closed) when terok.shield.version annotation is absent."""
     sd = tmp_path / "sd"
     sd.mkdir()
     oci = json.dumps(
@@ -431,9 +431,18 @@ def test_main_skips_version_check_when_annotation_absent(tmp_path: Path) -> None
             "annotations": {"terok.shield.state_dir": str(sd)},
         }
     )
+    assert _run_main(oci) == 1
 
-    with mock.patch("terok_shield.resources.hook_entrypoint._createruntime") as mock_cr:
-        rc = _run_main(oci)
 
-    assert rc == 0
-    mock_cr.assert_called_once()
+def test_main_returns_1_for_relative_state_dir() -> None:
+    """main() returns 1 when state_dir annotation is a relative path."""
+    oci = json.dumps(
+        {
+            "pid": 42,
+            "annotations": {
+                "terok.shield.state_dir": "relative/path",
+                "terok.shield.version": "3",
+            },
+        }
+    )
+    assert _run_main(oci) == 1

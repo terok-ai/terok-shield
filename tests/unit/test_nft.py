@@ -690,3 +690,8 @@ class TestSetTimeout:
         """Invalid timeout in hook_ruleset is rejected."""
         with pytest.raises(ValueError):
             hook_ruleset(set_timeout="bad")
+
+    def test_bypass_ruleset_rejects_invalid_timeout(self) -> None:
+        """Invalid timeout in bypass_ruleset is rejected by _safe_timeout."""
+        with pytest.raises(ValueError):
+            bypass_ruleset(set_timeout="bad")
