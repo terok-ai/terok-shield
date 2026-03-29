@@ -72,7 +72,7 @@ class EnvironmentCheck:
         setup_hint: Setup instructions (empty if not needed).
     """
 
-    dns_tier: str
+    dns_tier: str = ""
     ok: bool = True
     podman_version: tuple[int, ...] = (0,)
     hooks: str = "per-container"
