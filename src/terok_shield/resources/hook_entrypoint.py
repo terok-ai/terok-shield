@@ -23,6 +23,7 @@ then enters that network namespace.  This mirrors
 import ipaddress
 import json
 import os
+import pwd
 import shutil
 import socket
 import struct
@@ -41,6 +42,33 @@ _ANN_STATE_DIR = "terok.shield.state_dir"
 _ANN_VERSION = "terok.shield.version"
 _BUNDLE_VERSION = 3
 _TABLE = "inet terok_shield"
+
+
+def _bootstrap_env() -> None:
+    """Ensure critical environment variables are set before running podman unshare.
+
+    OCI hooks (crun/runc) may be invoked with a stripped environment — no HOME,
+    no XDG_RUNTIME_DIR, and sometimes no PATH.  ``podman unshare`` reads
+    ``/etc/subuid``, ``~/.config/containers/``, and the rootless podman socket
+    via these variables.  Without them it exits 1 silently.
+
+    Only sets variables that are absent; never overrides values the runtime did
+    pass through.
+    """
+    uid = os.getuid()
+
+    if not os.environ.get("HOME"):
+        try:
+            home = pwd.getpwuid(uid).pw_dir
+        except KeyError:
+            home = "/root" if uid == 0 else f"/home/{uid}"
+        os.environ["HOME"] = home
+
+    if not os.environ.get("XDG_RUNTIME_DIR"):
+        os.environ["XDG_RUNTIME_DIR"] = f"/run/user/{uid}"
+
+    if not os.environ.get("PATH"):
+        os.environ["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 
 def _find_podman() -> str:
@@ -211,6 +239,7 @@ def _log(msg: str, log_path: Path | None = None) -> None:
 
 def main() -> int:
     """OCI hook entry point: dispatch to createRuntime or poststop handler."""
+    _bootstrap_env()
     stage = sys.argv[1] if len(sys.argv) > 1 else "createRuntime"
     try:
         oci = json.load(sys.stdin)

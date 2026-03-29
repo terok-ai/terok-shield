@@ -10,6 +10,7 @@ hook_entrypoint``) even though it is installed verbatim as a hook binary.
 
 import io
 import json
+import os
 import socket
 import struct
 from pathlib import Path
@@ -49,6 +50,53 @@ def _oci_json(pid: int = 42, state_dir: str = "/tmp/sd", version: int = 3) -> st
             },
         }
     )
+
+
+# ── _bootstrap_env ───────────────────────────────────────────────────────────
+
+
+def test_bootstrap_env_sets_home_when_absent() -> None:
+    """_bootstrap_env() sets HOME from pwd when the variable is not present."""
+    import pwd as _pwd
+
+    env = {"XDG_RUNTIME_DIR": "/run/user/1000", "PATH": "/usr/bin"}
+    fake_entry = _pwd.struct_passwd(("testuser", "x", 1000, 1000, "", "/home/testuser", "/bin/bash"))
+    with mock.patch.dict("os.environ", env, clear=True):
+        with mock.patch("terok_shield.resources.hook_entrypoint.pwd.getpwuid", return_value=fake_entry):
+            hook_entrypoint._bootstrap_env()
+        assert os.environ["HOME"] == "/home/testuser"
+
+
+def test_bootstrap_env_sets_xdg_runtime_dir_when_absent() -> None:
+    """_bootstrap_env() sets XDG_RUNTIME_DIR to /run/user/<uid> when absent."""
+    env = {"HOME": "/home/testuser", "PATH": "/usr/bin"}
+    with mock.patch.dict("os.environ", env, clear=True):
+        with mock.patch("terok_shield.resources.hook_entrypoint.os.getuid", return_value=1000):
+            hook_entrypoint._bootstrap_env()
+        assert os.environ["XDG_RUNTIME_DIR"] == "/run/user/1000"
+
+
+def test_bootstrap_env_sets_path_when_absent() -> None:
+    """_bootstrap_env() sets a sane PATH when the variable is not present."""
+    env = {"HOME": "/home/testuser", "XDG_RUNTIME_DIR": "/run/user/1000"}
+    with mock.patch.dict("os.environ", env, clear=True):
+        hook_entrypoint._bootstrap_env()
+        assert os.environ["PATH"]
+        assert "/usr/bin" in os.environ["PATH"]
+
+
+def test_bootstrap_env_does_not_override_existing_vars() -> None:
+    """_bootstrap_env() leaves already-set environment variables unchanged."""
+    env = {
+        "HOME": "/custom/home",
+        "XDG_RUNTIME_DIR": "/custom/xdg",
+        "PATH": "/custom/bin",
+    }
+    with mock.patch.dict("os.environ", env, clear=True):
+        hook_entrypoint._bootstrap_env()
+        assert os.environ["HOME"] == "/custom/home"
+        assert os.environ["XDG_RUNTIME_DIR"] == "/custom/xdg"
+        assert os.environ["PATH"] == "/custom/bin"
 
 
 # ── _find_* helpers ──────────────────────────────────────────────────────────
