@@ -143,3 +143,44 @@ def test_read_effective_ips_ignores_denied_entries_not_in_allowed_set(tmp_path: 
     profile_allowed_path(tmp_path).write_text(f"{TEST_IP1}\n")
     deny_path(tmp_path).write_text(f"{TEST_IP3}\n")
     assert read_effective_ips(tmp_path) == [TEST_IP1]
+
+
+# ── hook_entrypoint sync contract ────────────────────────────────────────────
+
+
+def test_hook_entrypoint_bundle_version_matches_state() -> None:
+    """hook_entrypoint._BUNDLE_VERSION must equal state.BUNDLE_VERSION.
+
+    The stdlib-only script cannot import state.py, so it duplicates the
+    constant.  This test is the enforcement mechanism.
+    """
+    from terok_shield.resources import hook_entrypoint as _ep
+
+    assert _ep._BUNDLE_VERSION == BUNDLE_VERSION, (
+        f"hook_entrypoint._BUNDLE_VERSION={_ep._BUNDLE_VERSION!r} "
+        f"!= state.BUNDLE_VERSION={BUNDLE_VERSION!r}. "
+        "Update the duplicate in hook_entrypoint.py."
+    )
+
+
+def test_hook_entrypoint_path_strings_match_state_functions() -> None:
+    """Path-name literals in hook_entrypoint.py must match state path helpers.
+
+    The stdlib-only script uses inline string literals for filenames that
+    state.py derives via path functions.  This test reads the script source
+    and checks each expected name appears, so a rename in state.py triggers
+    a failure here rather than a silent mismatch at runtime.
+    """
+    from terok_shield.resources import hook_entrypoint as _ep
+    from terok_shield.state import dnsmasq_conf_path, dnsmasq_pid_path, gateway_path, ruleset_path
+
+    source = Path(_ep.__file__).read_text()
+    root = Path("x")
+
+    for fn in (ruleset_path, gateway_path, dnsmasq_conf_path, dnsmasq_pid_path):
+        filename = fn(root).name
+        assert f'"{filename}"' in source or f"'{filename}'" in source, (
+            f"hook_entrypoint.py does not reference {filename!r} but "
+            f"state.{fn.__name__}() returns that filename. "
+            "Update hook_entrypoint.py to match."
+        )
