@@ -12,6 +12,7 @@ import io
 import json
 import socket
 import struct
+import subprocess
 from pathlib import Path
 from unittest import mock
 
@@ -144,7 +145,11 @@ def test_read_gateway_returns_empty_on_malformed_hex() -> None:
 
 def test_nsenter_runs_subprocess_in_netns() -> None:
     """_nsenter() invokes nsenter -U -n -t inside the container's user+network namespace."""
-    with mock.patch("terok_shield.resources.hook_entrypoint.subprocess.run") as mock_run:
+    mock_result = mock.MagicMock()
+    mock_result.returncode = 0
+    with mock.patch(
+        "terok_shield.resources.hook_entrypoint.subprocess.run", return_value=mock_result
+    ) as mock_run:
         with mock.patch(
             "terok_shield.resources.hook_entrypoint._find_nsenter",
             return_value="/usr/bin/nsenter",
@@ -154,14 +159,18 @@ def test_nsenter_runs_subprocess_in_netns() -> None:
     mock_run.assert_called_once_with(
         ["/usr/bin/nsenter", "-U", "-n", "-t", "99", "--", "nft", "-f", "/tmp/r.nft"],
         input=None,
-        text=False,
-        check=True,
+        text=True,
+        stderr=subprocess.PIPE,
     )
 
 
 def test_nsenter_passes_stdin_as_text() -> None:
     """_nsenter() passes stdin string and text=True when stdin is provided."""
-    with mock.patch("terok_shield.resources.hook_entrypoint.subprocess.run") as mock_run:
+    mock_result = mock.MagicMock()
+    mock_result.returncode = 0
+    with mock.patch(
+        "terok_shield.resources.hook_entrypoint.subprocess.run", return_value=mock_result
+    ) as mock_run:
         with mock.patch(
             "terok_shield.resources.hook_entrypoint._find_nsenter",
             return_value="/usr/bin/nsenter",
@@ -171,6 +180,22 @@ def test_nsenter_passes_stdin_as_text() -> None:
     _, kwargs = mock_run.call_args
     assert kwargs["input"] == "table inet x {}"
     assert kwargs["text"] is True
+
+
+def test_nsenter_raises_runtime_error_with_stderr_on_failure() -> None:
+    """_nsenter() raises RuntimeError containing the subprocess stderr on failure."""
+    mock_result = mock.MagicMock()
+    mock_result.returncode = 1
+    mock_result.stderr = "Error: syntax error in ruleset"
+    with mock.patch(
+        "terok_shield.resources.hook_entrypoint.subprocess.run", return_value=mock_result
+    ):
+        with mock.patch(
+            "terok_shield.resources.hook_entrypoint._find_nsenter",
+            return_value="/usr/bin/nsenter",
+        ):
+            with pytest.raises(RuntimeError, match="syntax error in ruleset"):
+                hook_entrypoint._nsenter("99", "nft", "-f", "/tmp/r.nft")
 
 
 # ── _createruntime ────────────────────────────────────────────────────────────

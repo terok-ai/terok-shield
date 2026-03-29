@@ -64,13 +64,22 @@ def _nsenter(pid: str, *cmd: str, stdin: str | None = None) -> None:
     ``CAP_NET_ADMIN`` and ``CAP_NET_BIND_SERVICE`` without requiring ``podman``
     to be in PATH.  ``-n`` enters the network namespace itself.  Both use the
     target process PID (``-t <pid>``).
+
+    Captures stderr so error details appear in the hook's log rather than
+    being silently swallowed by the OCI runtime (crun/runc).
     """
-    subprocess.run(  # nosec B603
+    result = subprocess.run(  # nosec B603
         [_find_nsenter(), "-U", "-n", "-t", pid, "--", *cmd],
         input=stdin,
-        text=stdin is not None,
-        check=True,
+        text=True,
+        stderr=subprocess.PIPE,
     )
+    if result.returncode != 0:
+        stderr = result.stderr.strip()
+        raise RuntimeError(
+            f"nsenter command failed (exit {result.returncode})"
+            + (f":\n{stderr}" if stderr else "")
+        )
 
 
 def _read_gateway(pid: str) -> str:
