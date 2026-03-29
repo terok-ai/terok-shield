@@ -324,10 +324,6 @@ class HookMode:
                     "host.containers.internal:127.0.0.1",
                 ]
 
-        # Point container DNS to per-container dnsmasq when active
-        if tier == DnsTier.DNSMASQ:
-            args += ["--dns", DNSMASQ_BIND]
-
         # Annotations: profiles, name, state_dir, loopback_ports, version, dns
         ports_str = ",".join(str(p) for p in self._config.loopback_ports)
         args += [
