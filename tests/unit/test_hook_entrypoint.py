@@ -103,6 +103,19 @@ def test_bootstrap_env_does_not_override_existing_vars() -> None:
         assert os.environ["PATH"] == "/custom/bin"
 
 
+def test_bootstrap_env_falls_back_when_getpwuid_raises() -> None:
+    """_bootstrap_env() falls back to /home/<uid> when getpwuid raises KeyError."""
+    env = {"XDG_RUNTIME_DIR": "/run/user/1234", "PATH": "/usr/bin"}
+    with mock.patch.dict("os.environ", env, clear=True):
+        with mock.patch(
+            "terok_shield.resources.hook_entrypoint.pwd.getpwuid",
+            side_effect=KeyError("uid not found"),
+        ):
+            with mock.patch("terok_shield.resources.hook_entrypoint.os.getuid", return_value=1234):
+                hook_entrypoint._bootstrap_env()
+        assert os.environ["HOME"] == "/home/1234"
+
+
 # ── _find_* helpers ──────────────────────────────────────────────────────────
 
 
@@ -340,6 +353,35 @@ def test_createruntime_raises_when_namespace_files_missing(tmp_path: Path) -> No
         hook_entrypoint._createruntime("99999999", sd)
 
 
+def test_createruntime_treats_permission_error_as_ns_exists(tmp_path: Path) -> None:
+    """_createruntime() continues when stat(/proc/pid/ns/net) raises PermissionError.
+
+    Non-root callers on CI cannot stat /proc/1/ns/net but the namespace does exist;
+    PermissionError must not be treated as 'namespace missing'.
+    """
+    sd = tmp_path / "sd"
+    sd.mkdir()
+    (sd / "ruleset.nft").write_text("table inet terok_shield {}")
+
+    real_exists = Path.exists
+
+    def _selective_permission_error(self: Path) -> bool:
+        if "ns/net" in str(self):
+            raise PermissionError("no access")
+        return real_exists(self)
+
+    with (
+        mock.patch(
+            "terok_shield.resources.hook_entrypoint.Path.exists",
+            _selective_permission_error,
+        ),
+        mock.patch("terok_shield.resources.hook_entrypoint._nsenter"),
+        mock.patch("terok_shield.resources.hook_entrypoint._read_gateway", return_value=""),
+    ):
+        # Must not raise — PermissionError is treated as "probably exists"
+        hook_entrypoint._createruntime("1", sd)
+
+
 def test_createruntime_raises_when_ruleset_missing(tmp_path: Path) -> None:
     """_createruntime() raises RuntimeError when ruleset.nft is absent."""
     sd = tmp_path / "sd"
@@ -477,6 +519,15 @@ def test_is_our_dnsmasq_returns_false_when_cmdline_missing(tmp_path: Path) -> No
         assert hook_entrypoint._is_our_dnsmasq(9999, conf) is False
 
 
+def test_is_our_dnsmasq_returns_false_for_empty_args(tmp_path: Path) -> None:
+    """_is_our_dnsmasq() returns False when cmdline parsing yields an empty arg list."""
+    conf = tmp_path / "dnsmasq.conf"
+    mock_bytes = mock.MagicMock()
+    mock_bytes.rstrip.return_value.split.return_value = []
+    with mock.patch.object(hook_entrypoint.Path, "read_bytes", return_value=mock_bytes):
+        assert hook_entrypoint._is_our_dnsmasq(1234, conf) is False
+
+
 def test_is_our_dnsmasq_returns_false_when_conf_path_differs(tmp_path: Path) -> None:
     """_is_our_dnsmasq() returns False when --conf-file= points to a different path."""
     conf = tmp_path / "dnsmasq.conf"
@@ -529,6 +580,19 @@ def test_poststop_skips_stale_pid(tmp_path: Path) -> None:
 
     mock_kill.assert_not_called()
     assert not pid_file.exists(), "stale PID file must be removed when identity check fails"
+
+
+def test_poststop_ignores_oserror_on_stale_pid_unlink(tmp_path: Path) -> None:
+    """_poststop() swallows OSError when removing a stale PID file fails."""
+    sd = tmp_path / "sd"
+    sd.mkdir()
+    (sd / "dnsmasq.pid").write_text("12345\n")
+
+    with (
+        mock.patch("terok_shield.resources.hook_entrypoint._is_our_dnsmasq", return_value=False),
+        mock.patch("terok_shield.resources.hook_entrypoint.Path.unlink", side_effect=OSError),
+    ):
+        hook_entrypoint._poststop(sd)  # must not raise
 
 
 def test_poststop_is_noop_when_pid_file_absent(tmp_path: Path) -> None:
@@ -714,3 +778,24 @@ def test_main_returns_1_for_relative_state_dir() -> None:
         }
     )
     assert _run_main(oci) == 1
+
+
+def test_main_returns_1_for_unknown_stage(tmp_path: Path) -> None:
+    """main() returns 1 and logs a message for an unrecognised hook stage."""
+    sd = tmp_path / "sd"
+    sd.mkdir()
+    oci = _oci_json(pid=42, state_dir=str(sd))
+    assert _run_main(oci, stage="prestart") == 1
+
+
+def test_main_returns_1_when_poststop_raises(tmp_path: Path) -> None:
+    """main() returns 1 when _poststop() raises an unexpected exception."""
+    sd = tmp_path / "sd"
+    sd.mkdir()
+    oci = _oci_json(pid=0, state_dir=str(sd))
+
+    with mock.patch(
+        "terok_shield.resources.hook_entrypoint._poststop",
+        side_effect=RuntimeError("disk full"),
+    ):
+        assert _run_main(oci, stage="poststop") == 1

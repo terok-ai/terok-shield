@@ -244,6 +244,17 @@ def test_is_our_dnsmasq_false_missing_proc(tmp_path: Path) -> None:
     assert _is_our_dnsmasq(999999999, tmp_path) is False
 
 
+def test_is_our_dnsmasq_false_empty_args(tmp_path: Path) -> None:
+    """_is_our_dnsmasq returns False when cmdline parsing yields an empty arg list."""
+    from terok_shield.dnsmasq import _is_our_dnsmasq
+
+    mock_path_instance = mock.MagicMock()
+    mock_path_instance.read_bytes.return_value.rstrip.return_value.split.return_value = []
+
+    with mock.patch("terok_shield.dnsmasq.Path", return_value=mock_path_instance):
+        assert _is_our_dnsmasq(12345, tmp_path) is False
+
+
 def test_clear_pid_file_removes_file(tmp_path: Path) -> None:
     """_clear_pid_file removes the PID file."""
     from terok_shield.dnsmasq import _clear_pid_file
