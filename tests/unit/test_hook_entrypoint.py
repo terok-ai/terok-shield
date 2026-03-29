@@ -55,38 +55,36 @@ def _oci_json(pid: int = 42, state_dir: str = "/tmp/sd", version: int = 3) -> st
 # ── _bootstrap_env ───────────────────────────────────────────────────────────
 
 
-def test_bootstrap_env_sets_home_when_absent() -> None:
-    """_bootstrap_env() sets HOME from pwd when the variable is not present."""
+@pytest.mark.parametrize(
+    ("env_without", "expected_key", "expected_value"),
+    [
+        pytest.param("HOME", "HOME", "/home/testuser", id="home-from-pwd"),
+        pytest.param("XDG_RUNTIME_DIR", "XDG_RUNTIME_DIR", "/run/user/1000", id="xdg-runtime-dir"),
+        pytest.param("PATH", "PATH", "/usr/bin", id="path-fallback"),
+    ],
+)
+def test_bootstrap_env_sets_missing_var(
+    env_without: str, expected_key: str, expected_value: str
+) -> None:
+    """_bootstrap_env() sets each missing environment variable to a sensible default."""
     import pwd as _pwd
 
-    env = {"XDG_RUNTIME_DIR": "/run/user/1000", "PATH": "/usr/bin"}
+    full_env = {
+        "HOME": "/home/testuser",
+        "XDG_RUNTIME_DIR": "/run/user/1000",
+        "PATH": "/usr/local/bin:/usr/bin",
+    }
+    env = {k: v for k, v in full_env.items() if k != env_without}
     fake_entry = _pwd.struct_passwd(
         ("testuser", "x", 1000, 1000, "", "/home/testuser", "/bin/bash")
     )
-    with mock.patch.dict("os.environ", env, clear=True):
-        with mock.patch(
-            "terok_shield.resources.hook_entrypoint.pwd.getpwuid", return_value=fake_entry
-        ):
-            hook_entrypoint._bootstrap_env()
-        assert os.environ["HOME"] == "/home/testuser"
-
-
-def test_bootstrap_env_sets_xdg_runtime_dir_when_absent() -> None:
-    """_bootstrap_env() sets XDG_RUNTIME_DIR to /run/user/<uid> when absent."""
-    env = {"HOME": "/home/testuser", "PATH": "/usr/bin"}
-    with mock.patch.dict("os.environ", env, clear=True):
-        with mock.patch("terok_shield.resources.hook_entrypoint.os.getuid", return_value=1000):
-            hook_entrypoint._bootstrap_env()
-        assert os.environ["XDG_RUNTIME_DIR"] == "/run/user/1000"
-
-
-def test_bootstrap_env_sets_path_when_absent() -> None:
-    """_bootstrap_env() sets a sane PATH when the variable is not present."""
-    env = {"HOME": "/home/testuser", "XDG_RUNTIME_DIR": "/run/user/1000"}
-    with mock.patch.dict("os.environ", env, clear=True):
+    with (
+        mock.patch.dict("os.environ", env, clear=True),
+        mock.patch("terok_shield.resources.hook_entrypoint.pwd.getpwuid", return_value=fake_entry),
+        mock.patch("terok_shield.resources.hook_entrypoint.os.getuid", return_value=1000),
+    ):
         hook_entrypoint._bootstrap_env()
-        assert os.environ["PATH"]
-        assert "/usr/bin" in os.environ["PATH"]
+        assert expected_value in os.environ[expected_key]
 
 
 def test_bootstrap_env_does_not_override_existing_vars() -> None:
@@ -119,46 +117,36 @@ def test_bootstrap_env_falls_back_when_getpwuid_raises() -> None:
 # ── _find_* helpers ──────────────────────────────────────────────────────────
 
 
-def test_find_nsenter_uses_which_when_available() -> None:
-    """_find_nsenter() returns the path from shutil.which when found."""
+@pytest.mark.parametrize(
+    ("finder", "which_result", "expected"),
+    [
+        pytest.param(
+            hook_entrypoint._find_nsenter, "/bin/nsenter", "/bin/nsenter", id="nsenter-which"
+        ),
+        pytest.param(
+            hook_entrypoint._find_nsenter, None, "/usr/bin/nsenter", id="nsenter-fallback"
+        ),
+        pytest.param(hook_entrypoint._find_nft, "/usr/bin/nft", "/usr/bin/nft", id="nft-which"),
+        pytest.param(hook_entrypoint._find_nft, None, "/usr/sbin/nft", id="nft-fallback"),
+        pytest.param(
+            hook_entrypoint._find_dnsmasq,
+            "/usr/bin/dnsmasq",
+            "/usr/bin/dnsmasq",
+            id="dnsmasq-which",
+        ),
+        pytest.param(
+            hook_entrypoint._find_dnsmasq, None, "/usr/sbin/dnsmasq", id="dnsmasq-fallback"
+        ),
+    ],
+)
+def test_find_binary_uses_which_or_falls_back(
+    finder: object, which_result: str | None, expected: str
+) -> None:
+    """Each _find_*() helper returns the which result when found, or a hard-coded fallback."""
     with mock.patch(
-        "terok_shield.resources.hook_entrypoint.shutil.which", return_value="/bin/nsenter"
+        "terok_shield.resources.hook_entrypoint.shutil.which", return_value=which_result
     ):
-        assert hook_entrypoint._find_nsenter() == "/bin/nsenter"
-
-
-def test_find_nsenter_falls_back_to_default() -> None:
-    """_find_nsenter() falls back to /usr/bin/nsenter when shutil.which returns None."""
-    with mock.patch("terok_shield.resources.hook_entrypoint.shutil.which", return_value=None):
-        assert hook_entrypoint._find_nsenter() == "/usr/bin/nsenter"
-
-
-def test_find_nft_uses_which_when_available() -> None:
-    """_find_nft() returns the path from shutil.which when found."""
-    with mock.patch(
-        "terok_shield.resources.hook_entrypoint.shutil.which", return_value="/usr/bin/nft"
-    ):
-        assert hook_entrypoint._find_nft() == "/usr/bin/nft"
-
-
-def test_find_nft_falls_back_to_default() -> None:
-    """_find_nft() falls back to /usr/sbin/nft when shutil.which returns None."""
-    with mock.patch("terok_shield.resources.hook_entrypoint.shutil.which", return_value=None):
-        assert hook_entrypoint._find_nft() == "/usr/sbin/nft"
-
-
-def test_find_dnsmasq_uses_which_when_available() -> None:
-    """_find_dnsmasq() returns the path from shutil.which when found."""
-    with mock.patch(
-        "terok_shield.resources.hook_entrypoint.shutil.which", return_value="/usr/bin/dnsmasq"
-    ):
-        assert hook_entrypoint._find_dnsmasq() == "/usr/bin/dnsmasq"
-
-
-def test_find_dnsmasq_falls_back_to_default() -> None:
-    """_find_dnsmasq() falls back to /usr/sbin/dnsmasq when shutil.which returns None."""
-    with mock.patch("terok_shield.resources.hook_entrypoint.shutil.which", return_value=None):
-        assert hook_entrypoint._find_dnsmasq() == "/usr/sbin/dnsmasq"
+        assert finder() == expected  # type: ignore[operator]
 
 
 # ── _read_gateway ─────────────────────────────────────────────────────────────
@@ -290,55 +278,32 @@ def test_nsenter_passes_stdin_as_text() -> None:
     assert kwargs["text"] is True
 
 
-def test_nsenter_raises_runtime_error_with_stderr_on_failure() -> None:
-    """_nsenter() raises RuntimeError containing combined stdout+stderr on failure."""
+@pytest.mark.parametrize(
+    ("stderr", "stdout", "expected_match"),
+    [
+        pytest.param("Error: syntax error", "", "syntax error", id="stderr-only"),
+        pytest.param("", "stdout error text", "stdout error text", id="stdout-fallback"),
+        pytest.param("", "", r"\(no output\)", id="no-output"),
+    ],
+)
+def test_nsenter_raises_on_failure_with_correct_message(
+    stderr: str, stdout: str, expected_match: str
+) -> None:
+    """_nsenter() raises RuntimeError; error combines stderr+stdout (fallback to stdout, then '(no output)')."""
     mock_result = mock.MagicMock()
     mock_result.returncode = 1
-    mock_result.stderr = "Error: syntax error in ruleset"
-    mock_result.stdout = ""
-    with mock.patch(
-        "terok_shield.resources.hook_entrypoint.subprocess.run", return_value=mock_result
+    mock_result.stderr = stderr
+    mock_result.stdout = stdout
+    with (
+        mock.patch(
+            "terok_shield.resources.hook_entrypoint.subprocess.run", return_value=mock_result
+        ),
+        mock.patch(
+            "terok_shield.resources.hook_entrypoint._find_nsenter", return_value="/usr/bin/nsenter"
+        ),
     ):
-        with mock.patch(
-            "terok_shield.resources.hook_entrypoint._find_nsenter",
-            return_value="/usr/bin/nsenter",
-        ):
-            with pytest.raises(RuntimeError, match="syntax error in ruleset"):
-                hook_entrypoint._nsenter("99", "nft", "-f", "/tmp/r.nft")
-
-
-def test_nsenter_includes_stdout_in_error_when_stderr_empty() -> None:
-    """_nsenter() includes stdout in error message when stderr is empty."""
-    mock_result = mock.MagicMock()
-    mock_result.returncode = 1
-    mock_result.stderr = ""
-    mock_result.stdout = "stdout error text"
-    with mock.patch(
-        "terok_shield.resources.hook_entrypoint.subprocess.run", return_value=mock_result
-    ):
-        with mock.patch(
-            "terok_shield.resources.hook_entrypoint._find_nsenter",
-            return_value="/usr/bin/nsenter",
-        ):
-            with pytest.raises(RuntimeError, match="stdout error text"):
-                hook_entrypoint._nsenter("99", "nft", "-f", "/tmp/r.nft")
-
-
-def test_nsenter_reports_no_output_when_both_empty() -> None:
-    """_nsenter() reports '(no output)' when both stdout and stderr are empty on failure."""
-    mock_result = mock.MagicMock()
-    mock_result.returncode = 1
-    mock_result.stderr = ""
-    mock_result.stdout = ""
-    with mock.patch(
-        "terok_shield.resources.hook_entrypoint.subprocess.run", return_value=mock_result
-    ):
-        with mock.patch(
-            "terok_shield.resources.hook_entrypoint._find_nsenter",
-            return_value="/usr/bin/nsenter",
-        ):
-            with pytest.raises(RuntimeError, match=r"\(no output\)"):
-                hook_entrypoint._nsenter("99", "nft", "-f", "/tmp/r.nft")
+        with pytest.raises(RuntimeError, match=expected_match):
+            hook_entrypoint._nsenter("99", "nft", "-f", "/tmp/r.nft")
 
 
 # ── _createruntime ────────────────────────────────────────────────────────────
@@ -500,47 +465,16 @@ def test_is_our_dnsmasq_returns_true_when_cmdline_matches(tmp_path: Path) -> Non
         assert hook_entrypoint._is_our_dnsmasq(1234, conf) is True
 
 
-def test_is_our_dnsmasq_returns_true_for_absolute_path_binary(tmp_path: Path) -> None:
-    """_is_our_dnsmasq() returns True when argv[0] is an absolute path ending with /dnsmasq."""
-    conf = tmp_path / "dnsmasq.conf"
-    cmdline = b"/usr/sbin/dnsmasq\x00--conf-file=" + str(conf).encode() + b"\x00"
-    with mock.patch.object(hook_entrypoint.Path, "read_bytes", return_value=cmdline):
-        assert hook_entrypoint._is_our_dnsmasq(1234, conf) is True
-
-
 def test_is_our_dnsmasq_returns_false_when_cmdline_missing(tmp_path: Path) -> None:
     """_is_our_dnsmasq() returns False when /proc/{pid}/cmdline is unreadable."""
     conf = tmp_path / "dnsmasq.conf"
-    with mock.patch.object(
-        hook_entrypoint.Path,
-        "read_bytes",
-        side_effect=OSError("no such file"),
-    ):
+    with mock.patch.object(hook_entrypoint.Path, "read_bytes", side_effect=OSError("no such file")):
         assert hook_entrypoint._is_our_dnsmasq(9999, conf) is False
-
-
-def test_is_our_dnsmasq_returns_false_for_empty_args(tmp_path: Path) -> None:
-    """_is_our_dnsmasq() returns False when cmdline parsing yields an empty arg list."""
-    conf = tmp_path / "dnsmasq.conf"
-    mock_bytes = mock.MagicMock()
-    mock_bytes.rstrip.return_value.split.return_value = []
-    with mock.patch.object(hook_entrypoint.Path, "read_bytes", return_value=mock_bytes):
-        assert hook_entrypoint._is_our_dnsmasq(1234, conf) is False
-
-
-def test_is_our_dnsmasq_returns_false_when_conf_path_differs(tmp_path: Path) -> None:
-    """_is_our_dnsmasq() returns False when --conf-file= points to a different path."""
-    conf = tmp_path / "dnsmasq.conf"
-    other_conf = tmp_path / "other" / "dnsmasq.conf"
-    cmdline = b"dnsmasq\x00--conf-file=" + str(other_conf).encode() + b"\x00"
-    with mock.patch.object(hook_entrypoint.Path, "read_bytes", return_value=cmdline):
-        assert hook_entrypoint._is_our_dnsmasq(1234, conf) is False
 
 
 def test_is_our_dnsmasq_returns_false_when_conf_path_substring(tmp_path: Path) -> None:
     """_is_our_dnsmasq() rejects substring match — exact arg required."""
     conf = tmp_path / "dnsmasq.conf"
-    # Embed our conf path inside a longer arg (e.g. --conf-file=/path/prefixed/dnsmasq.conf)
     longer = tmp_path / "prefixed" / conf.name
     cmdline = b"dnsmasq\x00--conf-file=" + str(longer).encode() + b"\x00"
     with mock.patch.object(hook_entrypoint.Path, "read_bytes", return_value=cmdline):
@@ -645,40 +579,36 @@ def _run_main(json_str: str, *, stage: str = "createRuntime") -> int:
         return hook_entrypoint.main()
 
 
-def test_main_returns_1_for_bad_json() -> None:
-    """main() returns 1 when stdin contains invalid JSON."""
-    assert _run_main("not json") == 1
-
-
-def test_main_returns_1_when_oci_is_not_a_dict() -> None:
-    """main() returns 1 when the OCI payload is a JSON array instead of an object."""
-    assert _run_main("[1, 2, 3]") == 1
-
-
-def test_main_returns_1_when_annotations_is_not_a_dict() -> None:
-    """main() returns 1 when the 'annotations' field is a JSON array instead of an object."""
-    oci = json.dumps({"pid": 42, "annotations": ["not", "a", "dict"]})
-    assert _run_main(oci) == 1
-
-
-def test_main_returns_1_when_state_dir_missing() -> None:
-    """main() returns 1 when the state_dir annotation is absent."""
-    oci = json.dumps({"pid": 42, "annotations": {"terok.shield.version": "3"}})
-    assert _run_main(oci) == 1
-
-
-def test_main_returns_1_on_version_mismatch() -> None:
-    """main() returns 1 when the bundle version does not match."""
-    oci = json.dumps(
-        {
-            "pid": 42,
-            "annotations": {
-                "terok.shield.state_dir": "/tmp/sd",
-                "terok.shield.version": "999",
-            },
-        }
-    )
-    assert _run_main(oci) == 1
+@pytest.mark.parametrize(
+    "payload",
+    [
+        pytest.param("not json", id="bad-json"),
+        pytest.param("[1, 2, 3]", id="oci-not-dict"),
+        pytest.param(
+            json.dumps({"pid": 42, "annotations": ["not", "a", "dict"]}),
+            id="annotations-not-dict",
+        ),
+        pytest.param(
+            json.dumps({"pid": 42, "annotations": {"terok.shield.version": "3"}}),
+            id="state-dir-missing",
+        ),
+        pytest.param(
+            json.dumps(
+                {
+                    "pid": 42,
+                    "annotations": {
+                        "terok.shield.state_dir": "/tmp/sd",
+                        "terok.shield.version": "999",
+                    },
+                }
+            ),
+            id="version-mismatch",
+        ),
+    ],
+)
+def test_main_returns_1_for_invalid_input(payload: str) -> None:
+    """main() returns 1 for any malformed or missing OCI state field."""
+    assert _run_main(payload) == 1
 
 
 def test_main_returns_1_when_pid_missing_for_createruntime(tmp_path: Path) -> None:

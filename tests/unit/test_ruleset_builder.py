@@ -118,17 +118,8 @@ class TestRulesetBuilderVerify:
         assert len(errors) > 0
 
 
-class TestRulesetBuilderStaticMethods:
-    """Test RulesetBuilder static methods."""
-
-    def test_safe_ip_valid(self) -> None:
-        """safe_ip accepts valid IP."""
-        assert RulesetBuilder.safe_ip(TEST_IP1) == TEST_IP1
-
-    def test_safe_ip_invalid(self) -> None:
-        """safe_ip rejects invalid input."""
-        with pytest.raises(ValueError):
-            RulesetBuilder.safe_ip("evil.com")
+class TestRulesetBuilderAddElementsDual:
+    """Test RulesetBuilder.add_elements_dual()."""
 
     def test_add_elements_dual_v4_only(self) -> None:
         """add_elements_dual with IPv4 only."""

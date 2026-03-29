@@ -214,11 +214,6 @@ class RulesetBuilder:
         """Check applied bypass ruleset invariants.  Returns errors (empty = OK)."""
         return verify_bypass_ruleset(nft_output, allow_all=allow_all)
 
-    @staticmethod
-    def safe_ip(value: str) -> str:
-        """Validate an IP address or CIDR -- delegates to module-level ``safe_ip``."""
-        return safe_ip(value)
-
     def add_elements_dual(self, ips: list[str]) -> str:
         """Classify IPs by family and generate add-element commands for both sets.
 

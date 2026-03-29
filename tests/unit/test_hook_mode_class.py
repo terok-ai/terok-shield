@@ -830,29 +830,26 @@ class TestDomainOperations:
         with pytest.raises(RuntimeError, match="upstream DNS not persisted"):
             harness.mode._reload_dnsmasq(sd)
 
-    def test_allow_domain_raises_for_non_dnsmasq_tier(
-        self, make_hook_mode: HookModeHarnessFactory
+    @pytest.mark.parametrize(
+        ("method_name", "tier"),
+        [
+            pytest.param("allow_domain", "dig", id="allow-dig"),
+            pytest.param("allow_domain", "getent", id="allow-getent"),
+            pytest.param("deny_domain", "dig", id="deny-dig"),
+            pytest.param("deny_domain", "getent", id="deny-getent"),
+        ],
+    )
+    def test_domain_method_raises_for_non_dnsmasq_tier(
+        self, method_name: str, tier: str, make_hook_mode: HookModeHarnessFactory
     ) -> None:
-        """allow_domain() raises RuntimeError when the active tier is not dnsmasq."""
+        """allow_domain() and deny_domain() raise RuntimeError when the active tier is not dnsmasq."""
         harness = make_hook_mode()
         sd = harness.config.state_dir.resolve()
         state.ensure_state_dirs(sd)
-        state.dns_tier_path(sd).write_text("dig\n")
+        state.dns_tier_path(sd).write_text(f"{tier}\n")
 
         with pytest.raises(RuntimeError, match="dnsmasq DNS tier"):
-            harness.mode.allow_domain(TEST_DOMAIN)
-
-    def test_deny_domain_raises_for_non_dnsmasq_tier(
-        self, make_hook_mode: HookModeHarnessFactory
-    ) -> None:
-        """deny_domain() raises RuntimeError when the active tier is not dnsmasq."""
-        harness = make_hook_mode()
-        sd = harness.config.state_dir.resolve()
-        state.ensure_state_dirs(sd)
-        state.dns_tier_path(sd).write_text("getent\n")
-
-        with pytest.raises(RuntimeError, match="dnsmasq DNS tier"):
-            harness.mode.deny_domain(TEST_DOMAIN)
+            getattr(harness.mode, method_name)(TEST_DOMAIN)
 
     def test_allow_domain_passes_when_tier_absent(
         self, make_hook_mode: HookModeHarnessFactory

@@ -140,25 +140,11 @@ def test_hook_ruleset_contains_required_fragments(fragment: str) -> None:
     assert fragment in hook_ruleset()
 
 
-@pytest.mark.parametrize(
-    "private_net",
-    [pytest.param(net, id=f"rfc1918-{index}") for index, net in enumerate(RFC1918, start=1)],
-)
-def test_hook_ruleset_blocks_each_rfc1918_range(private_net: str) -> None:
-    """Every IPv4 private/link-local range must be rejected in enforce mode."""
-    assert private_net in hook_ruleset()
-
-
-@pytest.mark.parametrize(
-    "private_net",
-    [
-        pytest.param(net, id=f"ipv6-private-{index}")
-        for index, net in enumerate(IPV6_PRIVATE, start=1)
-    ],
-)
-def test_hook_ruleset_blocks_each_ipv6_private_range(private_net: str) -> None:
-    """Every IPv6 private/link-local range must be rejected in enforce mode."""
-    assert private_net in hook_ruleset()
+def test_hook_ruleset_blocks_all_private_ranges() -> None:
+    """Every RFC1918 and IPv6 private/link-local range must be rejected in enforce mode."""
+    rs = hook_ruleset()
+    for net in PRIVATE_RANGES:
+        assert net in rs, f"Private range {net!r} missing from hook ruleset"
 
 
 def test_hook_ruleset_accepts_dns_to_the_configured_forwarder() -> None:
@@ -445,28 +431,18 @@ def test_bypass_ruleset_contains_required_fragments(fragment: str) -> None:
     assert fragment in bypass_ruleset()
 
 
-@pytest.mark.parametrize(
-    "private_net",
-    [
-        pytest.param(net, id=f"private-range-{index}")
-        for index, net in enumerate(PRIVATE_RANGES, start=1)
-    ],
-)
-def test_bypass_ruleset_blocks_private_ranges_by_default(private_net: str) -> None:
-    """Bypass mode still rejects private-range traffic unless allow_all=True."""
-    assert private_net in bypass_ruleset()
+def test_bypass_ruleset_blocks_all_private_ranges_by_default() -> None:
+    """Bypass mode still rejects all private-range traffic unless allow_all=True."""
+    rs = bypass_ruleset()
+    for net in PRIVATE_RANGES:
+        assert net in rs, f"Private range {net!r} missing from bypass ruleset"
 
 
-@pytest.mark.parametrize(
-    "private_net",
-    [
-        pytest.param(net, id=f"allow-all-omits-private-range-{index}")
-        for index, net in enumerate(PRIVATE_RANGES, start=1)
-    ],
-)
-def test_bypass_ruleset_allow_all_removes_private_range_rejects(private_net: str) -> None:
-    """allow_all=True removes both IPv4 and IPv6 private-range reject rules."""
-    assert private_net not in bypass_ruleset(allow_all=True)
+def test_bypass_ruleset_allow_all_removes_all_private_range_rejects() -> None:
+    """allow_all=True removes every RFC1918 and IPv6 private-range reject rule."""
+    rs = bypass_ruleset(allow_all=True)
+    for net in PRIVATE_RANGES:
+        assert net not in rs, f"Private range {net!r} should be absent when allow_all=True"
 
 
 def test_bypass_ruleset_does_not_include_the_enforce_deny_rule() -> None:
