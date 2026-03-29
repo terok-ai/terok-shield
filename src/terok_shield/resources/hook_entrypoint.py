@@ -289,13 +289,26 @@ def main() -> int:
         if not _p.is_absolute():
             raise ValueError(f"state_dir must be absolute: {sd_str!r}")
         sd = _p.resolve()
-    except (ValueError, OSError) as exc:
+    except (TypeError, ValueError, OSError) as exc:
         _log(f"terok-shield hook: invalid state_dir: {exc}")
         return 1
 
     # All subsequent errors go to <state_dir>/hook-error.log so they survive
     # even when the OCI runtime does not forward the hook's stderr.
     log_path = sd / "hook-error.log"
+
+    # poststop cleanup must run regardless of bundle-version — a container that was
+    # started before a terok-shield upgrade still needs its dnsmasq reaped on stop.
+    try:
+        if stage == "poststop":
+            _poststop(sd)
+            return 0
+        if stage != "createRuntime":
+            _log(f"terok-shield hook: unknown stage {stage!r}", log_path)
+            return 1
+    except Exception as exc:  # noqa: BLE001
+        _log(f"terok-shield hook: {exc}", log_path)
+        return 1
 
     ver = ann.get(_ANN_VERSION, "")
     if not ver or str(ver) != str(_BUNDLE_VERSION):
@@ -305,14 +318,11 @@ def main() -> int:
         )
         return 1
     try:
-        if stage == "poststop":
-            _poststop(sd)
-        else:
-            pid = str(oci.get("pid") or "")
-            if not pid:
-                _log("terok-shield hook: missing pid in OCI state", log_path)
-                return 1
-            _createruntime(pid, sd)
+        pid = str(oci.get("pid") or "")
+        if not pid:
+            _log("terok-shield hook: missing pid in OCI state", log_path)
+            return 1
+        _createruntime(pid, sd)
     except Exception as exc:  # noqa: BLE001
         _log(f"terok-shield hook: {exc}", log_path)
         return 1

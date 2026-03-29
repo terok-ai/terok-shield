@@ -151,11 +151,8 @@ def test_find_dnsmasq_falls_back_to_default() -> None:
 # ── _read_gateway ─────────────────────────────────────────────────────────────
 
 
-def test_read_gateway_returns_ip_for_default_route(tmp_path: Path) -> None:
+def test_read_gateway_returns_ip_for_default_route() -> None:
     """_read_gateway() parses the default gateway from a slirp4netns routing table."""
-    route_file = tmp_path / "route"
-    route_file.write_text(_ROUTE_WITH_DEFAULT)
-
     with mock.patch("terok_shield.resources.hook_entrypoint.Path") as mock_path_cls:
         mock_path_cls.return_value.read_text.return_value = _ROUTE_WITH_DEFAULT
         gw = hook_entrypoint._read_gateway("42")
@@ -654,6 +651,23 @@ def test_main_dispatches_poststop_and_returns_0(tmp_path: Path) -> None:
     sd.mkdir()
 
     oci = _oci_json(pid=0, state_dir=str(sd))
+
+    with mock.patch("terok_shield.resources.hook_entrypoint._poststop") as mock_ps:
+        rc = _run_main(oci, stage="poststop")
+
+    assert rc == 0
+    mock_ps.assert_called_once_with(sd)
+
+
+def test_main_dispatches_poststop_on_version_mismatch(tmp_path: Path) -> None:
+    """main() calls _poststop() even when bundle version has drifted.
+
+    poststop cleanup must not be gated on bundle version — a container started
+    before a terok-shield upgrade still needs its dnsmasq reaped on stop.
+    """
+    sd = tmp_path / "sd"
+    sd.mkdir()
+    oci = _oci_json(pid=0, state_dir=str(sd), version=999)
 
     with mock.patch("terok_shield.resources.hook_entrypoint._poststop") as mock_ps:
         rc = _run_main(oci, stage="poststop")

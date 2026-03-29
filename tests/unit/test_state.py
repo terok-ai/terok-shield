@@ -179,10 +179,22 @@ def test_hook_entrypoint_path_strings_match_state_functions() -> None:
 
     source = Path(_ep.__file__).read_text()
     tree = ast.parse(source)
+
+    # Collect the AST nodes that are docstrings (Expr wrapping a Constant string
+    # at the start of a module/class/function body) so we can exclude them.
+    docstring_nodes: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            body = node.body
+            if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant):
+                docstring_nodes.add(id(body[0].value))
+
     literals: set[str] = {
         node.value
         for node in ast.walk(tree)
-        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and id(node) not in docstring_nodes
     }
     root = Path("x")
 
