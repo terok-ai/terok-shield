@@ -230,7 +230,6 @@ def test_allow_and_deny_use_expected_nft_set(
 ) -> None:
     """allow_ip()/deny_ip() target the correct nft set for each address family."""
     harness = make_hook_mode()
-    harness.ruleset.safe_ip.return_value = ip
 
     getattr(harness.mode, method)("test-ctr", ip)
 
@@ -245,13 +244,42 @@ def test_allow_persists_and_deduplicates_live_allowed(
 ) -> None:
     """allow_ip() persists to live.allowed without duplicate lines."""
     harness = make_hook_mode(config=make_config())
-    harness.ruleset.safe_ip.return_value = TEST_IP1
 
     harness.mode.allow_ip("test-ctr", TEST_IP1)
     harness.mode.allow_ip("test-ctr", TEST_IP1)
 
     lines = state.live_allowed_path(harness.config.state_dir).read_text().splitlines()
     assert lines.count(TEST_IP1) == 1
+
+
+def test_allow_ip_uses_timeout_zero_in_dnsmasq_tier(
+    make_hook_mode: HookModeHarnessFactory,
+    make_config: ConfigFactory,
+) -> None:
+    """allow_ip() adds 'timeout 0' when dnsmasq tier is active so the element never expires."""
+    harness = make_hook_mode(config=make_config())
+    sd = harness.config.state_dir.resolve()
+    state.dns_tier_path(sd).write_text("dnsmasq\n")
+
+    harness.mode.allow_ip("test-ctr", TEST_IP1)
+
+    element_arg = harness.runner.nft_via_nsenter.call_args.args[-1]
+    assert "timeout 0" in element_arg
+
+
+def test_allow_ip_no_timeout_zero_without_dnsmasq_tier(
+    make_hook_mode: HookModeHarnessFactory,
+    make_config: ConfigFactory,
+) -> None:
+    """allow_ip() omits 'timeout 0' when dnsmasq tier is not active."""
+    harness = make_hook_mode(config=make_config())
+    sd = harness.config.state_dir.resolve()
+    state.dns_tier_path(sd).write_text("dig\n")
+
+    harness.mode.allow_ip("test-ctr", TEST_IP1)
+
+    element_arg = harness.runner.nft_via_nsenter.call_args.args[-1]
+    assert "timeout 0" not in element_arg
 
 
 @pytest.mark.parametrize(
@@ -283,7 +311,6 @@ def test_deny_updates_state_files(
     if live_lines:
         write_lines(state.live_allowed_path(harness.config.state_dir), live_lines)
     harness.runner.nft_via_nsenter.side_effect = nft_side_effect
-    harness.ruleset.safe_ip.return_value = TEST_IP1
 
     harness.mode.deny_ip("test-ctr", TEST_IP1)
 
@@ -304,7 +331,6 @@ def test_allow_after_deny_clears_deny_list(
     """allow_ip() removes the IP from deny.list when re-allowing it."""
     harness = make_hook_mode(config=make_config())
     write_lines(state.deny_path(harness.config.state_dir), [TEST_IP1, TEST_IP2])
-    harness.ruleset.safe_ip.return_value = TEST_IP1
 
     harness.mode.allow_ip("test-ctr", TEST_IP1)
     denied = state.read_denied_ips(harness.config.state_dir)
@@ -1118,7 +1144,7 @@ def test_shield_up_repopulates_gateway_v6_from_file(
     """shield_up() re-adds the persisted IPv6 gateway to the nft gateway_v6 set."""
     harness = make_hook_mode(config=make_config())
     sd = harness.config.state_dir
-    state.gateway_path(sd).write_text("fd00::1\n")
+    state.gateway_v6_path(sd).write_text("fd00::1\n")
 
     harness.mode._container_ruleset = lambda _c: harness.ruleset
     harness.runner.nft_via_nsenter.side_effect = [

@@ -36,7 +36,7 @@ from .config import (
     ShieldState,
     detect_dns_tier,
 )
-from .nft import NFT_TABLE, RulesetBuilder
+from .nft import NFT_TABLE, RulesetBuilder, safe_ip
 from .nft_constants import NFT_SET_TIMEOUT_DNSMASQ, PASTA_DNS, SLIRP4NETNS_DNS
 from .podman_info import (
     PodmanInfo,
@@ -428,7 +428,7 @@ class HookMode:
 
     def allow_ip(self, container: str, ip: str) -> None:
         """Live-allow an IP for a running container via nsenter."""
-        ip = self._ruleset.safe_ip(ip)
+        ip = safe_ip(ip)
 
         # Un-deny: remove from deny.list if present
         sd = self._config.state_dir.resolve()
@@ -439,6 +439,14 @@ class HookMode:
                 denied.discard(ip)
                 dp.write_text("".join(f"{d}\n" for d in sorted(denied)))
 
+        # When the dnsmasq set has a default timeout (30 m), permanent IPs must use
+        # 'timeout 0' so they are never evicted by the set's per-element expiry clock.
+        tier_path = state.dns_tier_path(sd)
+        if tier_path.is_file() and tier_path.read_text().strip() == DnsTier.DNSMASQ.value:
+            element = f"{{ {ip} timeout 0 }}"
+        else:
+            element = f"{{ {ip} }}"
+
         self._runner.nft_via_nsenter(
             container,
             "add",
@@ -446,7 +454,7 @@ class HookMode:
             "inet",
             "terok_shield",
             self._set_for_ip(ip),
-            f"{{ {ip} }}",
+            element,
         )
         # Persist to live.allowed (skip if already present)
         live_path = self._live_path()
@@ -463,7 +471,7 @@ class HookMode:
         If the IP appears in profile.allowed, persists to deny.list so the
         deny survives ``shield_up`` and container restarts.
         """
-        ip = self._ruleset.safe_ip(ip)
+        ip = safe_ip(ip)
         sd = self._config.state_dir.resolve()
 
         # Best-effort nft delete (IP may not be in the set)
@@ -658,21 +666,23 @@ class HookMode:
             if elements_cmd:
                 self._runner.nft_via_nsenter(container, stdin=elements_cmd)
 
-        # Repopulate gateway set from persisted discovery (hook wrote it at container start)
-        gw_path = state.gateway_path(sd)
-        if gw_path.is_file():
-            gw = gw_path.read_text().strip()
-            if gw:
-                set_name = "gateway_v4" if "." in gw else "gateway_v6"
-                self._runner.nft_via_nsenter(
-                    container,
-                    "add",
-                    "element",
-                    "inet",
-                    "terok_shield",
-                    set_name,
-                    f"{{ {gw} }}",
-                )
+        # Repopulate gateway sets from persisted discovery (hook wrote them at container start)
+        for gw_path, set_name in (
+            (state.gateway_path(sd), "gateway_v4"),
+            (state.gateway_v6_path(sd), "gateway_v6"),
+        ):
+            if gw_path.is_file():
+                gw = gw_path.read_text().strip()
+                if gw:
+                    self._runner.nft_via_nsenter(
+                        container,
+                        "add",
+                        "element",
+                        "inet",
+                        "terok_shield",
+                        set_name,
+                        f"{{ {gw} }}",
+                    )
 
         output = self._runner.nft_via_nsenter(container, "list", "ruleset")
         errors = ruleset.verify_hook(output)

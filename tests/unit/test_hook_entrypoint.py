@@ -13,6 +13,7 @@ import json
 import os
 import socket
 import struct
+import subprocess
 from pathlib import Path
 from unittest import mock
 
@@ -84,7 +85,10 @@ def test_bootstrap_env_sets_missing_var(
         mock.patch("terok_shield.resources.hook_entrypoint.os.getuid", return_value=1000),
     ):
         hook_entrypoint._bootstrap_env()
-        assert expected_value in os.environ[expected_key]
+        if expected_key == "PATH":
+            assert expected_value in os.environ[expected_key]
+        else:
+            assert os.environ[expected_key] == expected_value
 
 
 def test_bootstrap_env_does_not_override_existing_vars() -> None:
@@ -189,6 +193,43 @@ def test_read_gateway_returns_empty_on_malformed_hex() -> None:
     assert gw == ""
 
 
+# ── _read_gateway_v6 ─────────────────────────────────────────────────────────
+
+# Hex representation of the IPv6 default gateway fe80::1 in /proc/net/ipv6_route format
+# (128-bit big-endian: fe80::1 → fe800000 00000000 00000000 00000001)
+_IPV6_GW = "fe80::1"
+_IPV6_GW_HEX = "fe800000000000000000000000000001"
+
+_IPV6_ROUTE_WITH_DEFAULT = (
+    f"{'0' * 32} 00 {'0' * 32} 00 {_IPV6_GW_HEX} 00000100 00000001 00000000 00000001 eth0\n"
+)
+_IPV6_ROUTE_NO_DEFAULT = f"fe800000000000000000000000000000 80 {'0' * 32} 00 {'0' * 32} 00000100 00000001 00000000 00000001 eth0\n"
+
+
+def test_read_gateway_v6_returns_ip_for_default_route() -> None:
+    """_read_gateway_v6() parses the default IPv6 gateway from ipv6_route."""
+    with mock.patch("terok_shield.resources.hook_entrypoint.Path") as mock_path_cls:
+        mock_path_cls.return_value.read_text.return_value = _IPV6_ROUTE_WITH_DEFAULT
+        gw = hook_entrypoint._read_gateway_v6("42")
+    assert gw == _IPV6_GW
+
+
+def test_read_gateway_v6_returns_empty_when_no_default_route() -> None:
+    """_read_gateway_v6() returns '' when there is no all-zeros default route."""
+    with mock.patch("terok_shield.resources.hook_entrypoint.Path") as mock_path_cls:
+        mock_path_cls.return_value.read_text.return_value = _IPV6_ROUTE_NO_DEFAULT
+        gw = hook_entrypoint._read_gateway_v6("42")
+    assert gw == ""
+
+
+def test_read_gateway_v6_returns_empty_on_oserror() -> None:
+    """_read_gateway_v6() returns '' when /proc/{pid}/net/ipv6_route is unreadable."""
+    with mock.patch("terok_shield.resources.hook_entrypoint.Path") as mock_path_cls:
+        mock_path_cls.return_value.read_text.side_effect = OSError("no file")
+        gw = hook_entrypoint._read_gateway_v6("42")
+    assert gw == ""
+
+
 # ── _nsenter ─────────────────────────────────────────────────────────────────
 
 
@@ -216,6 +257,7 @@ def test_nsenter_uses_nsenter_directly_when_uid_is_zero() -> None:
         input=None,
         text=True,
         capture_output=True,
+        timeout=30,
     )
 
 
@@ -257,6 +299,7 @@ def test_nsenter_uses_podman_unshare_when_uid_is_nonzero() -> None:
         input=None,
         text=True,
         capture_output=True,
+        timeout=30,
     )
 
 
@@ -304,6 +347,21 @@ def test_nsenter_raises_on_failure_with_correct_message(
     ):
         with pytest.raises(RuntimeError, match=expected_match):
             hook_entrypoint._nsenter("99", "nft", "-f", "/tmp/r.nft")
+
+
+def test_nsenter_raises_on_timeout() -> None:
+    """_nsenter() raises RuntimeError when subprocess.run exceeds the 30-second timeout."""
+    with (
+        mock.patch(
+            "terok_shield.resources.hook_entrypoint.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd=["nft"], timeout=30),
+        ),
+        mock.patch(
+            "terok_shield.resources.hook_entrypoint._find_nsenter", return_value="/usr/bin/nsenter"
+        ),
+    ):
+        with pytest.raises(RuntimeError, match="timed out"):
+            hook_entrypoint._nsenter("99", "nft", "-f", "-")
 
 
 # ── _createruntime ────────────────────────────────────────────────────────────
@@ -712,11 +770,17 @@ def test_main_returns_1_for_relative_state_dir() -> None:
 
 
 def test_main_returns_1_for_unknown_stage(tmp_path: Path) -> None:
-    """main() returns 1 and logs a message for an unrecognised hook stage."""
+    """main() returns 1 for an unrecognised stage and never invokes any handler."""
     sd = tmp_path / "sd"
     sd.mkdir()
     oci = _oci_json(pid=42, state_dir=str(sd))
-    assert _run_main(oci, stage="prestart") == 1
+    with (
+        mock.patch("terok_shield.resources.hook_entrypoint._createruntime") as mock_cr,
+        mock.patch("terok_shield.resources.hook_entrypoint._poststop") as mock_ps,
+    ):
+        assert _run_main(oci, stage="prestart") == 1
+    mock_cr.assert_not_called()
+    mock_ps.assert_not_called()
 
 
 def test_main_returns_1_when_poststop_raises(tmp_path: Path) -> None:

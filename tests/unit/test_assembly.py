@@ -139,7 +139,6 @@ def test_allow_ip_writes_to_live_allowed(
     """allow_ip() persists live allowlist updates to live.allowed."""
     harness = make_hook_mode(state_dir=tmp_path)
     harness.runner.nft_via_nsenter.return_value = ""
-    harness.ruleset.safe_ip.return_value = TEST_IP1
 
     harness.mode.allow_ip("test-ctr", TEST_IP1)
     assert TEST_IP1 in state.live_allowed_path(tmp_path).read_text()
@@ -152,7 +151,6 @@ def test_deny_ip_removes_from_live_allowed(
     live_path = write_lines(state.live_allowed_path(tmp_path), [TEST_IP1, TEST_IP2])
     harness = make_hook_mode(state_dir=tmp_path)
     harness.runner.nft_via_nsenter.return_value = ""
-    harness.ruleset.safe_ip.return_value = TEST_IP1
 
     harness.mode.deny_ip("test-ctr", TEST_IP1)
     content = live_path.read_text()

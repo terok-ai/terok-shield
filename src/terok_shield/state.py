@@ -92,8 +92,13 @@ def ruleset_path(state_dir: Path) -> Path:
 
 
 def gateway_path(state_dir: Path) -> Path:
-    """Return the path to the persisted discovered gateway IP."""
+    """Return the path to the persisted discovered IPv4 gateway IP."""
     return state_dir / "gateway"
+
+
+def gateway_v6_path(state_dir: Path) -> Path:
+    """Return the path to the persisted discovered IPv6 gateway IP."""
+    return state_dir / "gateway_v6"
 
 
 def upstream_dns_path(state_dir: Path) -> Path:
