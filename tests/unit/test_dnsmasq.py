@@ -184,12 +184,23 @@ def test_launch_maps_exec_error_to_runtime_error(tmp_path: Path) -> None:
 
 
 def test_is_our_dnsmasq_true(tmp_path: Path) -> None:
-    """_is_our_dnsmasq returns True when cmdline contains dnsmasq + our conf-file."""
+    """_is_our_dnsmasq returns True when argv[0]=='dnsmasq' and --conf-file= matches exactly."""
     from terok_shield.dnsmasq import _is_our_dnsmasq
 
     conf_path = str(state.dnsmasq_conf_path(tmp_path))
     fake_proc = tmp_path / "cmdline"
     fake_proc.write_bytes(f"dnsmasq\x00--conf-file={conf_path}\x00".encode())
+    with mock.patch("terok_shield.dnsmasq.Path", return_value=fake_proc):
+        assert _is_our_dnsmasq(12345, tmp_path) is True
+
+
+def test_is_our_dnsmasq_true_absolute_path_binary(tmp_path: Path) -> None:
+    """_is_our_dnsmasq returns True when argv[0] is an absolute path ending with /dnsmasq."""
+    from terok_shield.dnsmasq import _is_our_dnsmasq
+
+    conf_path = str(state.dnsmasq_conf_path(tmp_path))
+    fake_proc = tmp_path / "cmdline"
+    fake_proc.write_bytes(f"/usr/sbin/dnsmasq\x00--conf-file={conf_path}\x00".encode())
     with mock.patch("terok_shield.dnsmasq.Path", return_value=fake_proc):
         assert _is_our_dnsmasq(12345, tmp_path) is True
 
@@ -204,8 +215,20 @@ def test_is_our_dnsmasq_false_different_container(tmp_path: Path) -> None:
         assert _is_our_dnsmasq(12345, tmp_path) is False
 
 
+def test_is_our_dnsmasq_false_conf_path_as_substring(tmp_path: Path) -> None:
+    """_is_our_dnsmasq returns False when our conf path is embedded inside a longer arg."""
+    from terok_shield.dnsmasq import _is_our_dnsmasq
+
+    conf_path = str(state.dnsmasq_conf_path(tmp_path))
+    longer_path = f"/other{conf_path}"
+    fake_proc = tmp_path / "cmdline"
+    fake_proc.write_bytes(f"dnsmasq\x00--conf-file={longer_path}\x00".encode())
+    with mock.patch("terok_shield.dnsmasq.Path", return_value=fake_proc):
+        assert _is_our_dnsmasq(12345, tmp_path) is False
+
+
 def test_is_our_dnsmasq_false_different_process(tmp_path: Path) -> None:
-    """_is_our_dnsmasq returns False when cmdline is not dnsmasq."""
+    """_is_our_dnsmasq returns False when argv[0] is not dnsmasq."""
     from terok_shield.dnsmasq import _is_our_dnsmasq
 
     fake_proc = tmp_path / "cmdline"

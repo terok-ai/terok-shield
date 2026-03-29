@@ -284,14 +284,18 @@ def test_createruntime_ignores_oserror_writing_resolv_conf(tmp_path: Path) -> No
 
 
 def test_is_our_dnsmasq_returns_true_when_cmdline_matches(tmp_path: Path) -> None:
-    """_is_our_dnsmasq() returns True when cmdline contains 'dnsmasq' and our conf path."""
+    """_is_our_dnsmasq() returns True when argv[0]=='dnsmasq' and --conf-file= matches."""
     conf = tmp_path / "dnsmasq.conf"
     cmdline = b"dnsmasq\x00--conf-file=" + str(conf).encode() + b"\x00"
-    with mock.patch.object(
-        hook_entrypoint.Path,
-        "read_bytes",
-        return_value=cmdline,
-    ):
+    with mock.patch.object(hook_entrypoint.Path, "read_bytes", return_value=cmdline):
+        assert hook_entrypoint._is_our_dnsmasq(1234, conf) is True
+
+
+def test_is_our_dnsmasq_returns_true_for_absolute_path_binary(tmp_path: Path) -> None:
+    """_is_our_dnsmasq() returns True when argv[0] is an absolute path ending with /dnsmasq."""
+    conf = tmp_path / "dnsmasq.conf"
+    cmdline = b"/usr/sbin/dnsmasq\x00--conf-file=" + str(conf).encode() + b"\x00"
+    with mock.patch.object(hook_entrypoint.Path, "read_bytes", return_value=cmdline):
         assert hook_entrypoint._is_our_dnsmasq(1234, conf) is True
 
 
@@ -307,15 +311,21 @@ def test_is_our_dnsmasq_returns_false_when_cmdline_missing(tmp_path: Path) -> No
 
 
 def test_is_our_dnsmasq_returns_false_when_conf_path_differs(tmp_path: Path) -> None:
-    """_is_our_dnsmasq() returns False when the conf file path doesn't match."""
+    """_is_our_dnsmasq() returns False when --conf-file= points to a different path."""
     conf = tmp_path / "dnsmasq.conf"
     other_conf = tmp_path / "other" / "dnsmasq.conf"
     cmdline = b"dnsmasq\x00--conf-file=" + str(other_conf).encode() + b"\x00"
-    with mock.patch.object(
-        hook_entrypoint.Path,
-        "read_bytes",
-        return_value=cmdline,
-    ):
+    with mock.patch.object(hook_entrypoint.Path, "read_bytes", return_value=cmdline):
+        assert hook_entrypoint._is_our_dnsmasq(1234, conf) is False
+
+
+def test_is_our_dnsmasq_returns_false_when_conf_path_substring(tmp_path: Path) -> None:
+    """_is_our_dnsmasq() rejects substring match — exact arg required."""
+    conf = tmp_path / "dnsmasq.conf"
+    # Embed our conf path inside a longer arg (e.g. --conf-file=/path/prefixed/dnsmasq.conf)
+    longer = tmp_path / "prefixed" / conf.name
+    cmdline = b"dnsmasq\x00--conf-file=" + str(longer).encode() + b"\x00"
+    with mock.patch.object(hook_entrypoint.Path, "read_bytes", return_value=cmdline):
         assert hook_entrypoint._is_our_dnsmasq(1234, conf) is False
 
 
@@ -338,10 +348,11 @@ def test_poststop_sends_sigterm_to_dnsmasq(tmp_path: Path) -> None:
 
 
 def test_poststop_skips_stale_pid(tmp_path: Path) -> None:
-    """_poststop() does not signal when the PID belongs to an unrelated process."""
+    """_poststop() skips signalling and removes the stale PID file on identity mismatch."""
     sd = tmp_path / "sd"
     sd.mkdir()
-    (sd / "dnsmasq.pid").write_text("12345\n")
+    pid_file = sd / "dnsmasq.pid"
+    pid_file.write_text("12345\n")
 
     with (
         mock.patch("terok_shield.resources.hook_entrypoint._is_our_dnsmasq", return_value=False),
@@ -350,6 +361,7 @@ def test_poststop_skips_stale_pid(tmp_path: Path) -> None:
         hook_entrypoint._poststop(sd)
 
     mock_kill.assert_not_called()
+    assert not pid_file.exists(), "stale PID file must be removed when identity check fails"
 
 
 def test_poststop_is_noop_when_pid_file_absent(tmp_path: Path) -> None:
@@ -404,6 +416,17 @@ def _run_main(json_str: str, *, stage: str = "createRuntime") -> int:
 def test_main_returns_1_for_bad_json() -> None:
     """main() returns 1 when stdin contains invalid JSON."""
     assert _run_main("not json") == 1
+
+
+def test_main_returns_1_when_oci_is_not_a_dict() -> None:
+    """main() returns 1 when the OCI payload is a JSON array instead of an object."""
+    assert _run_main("[1, 2, 3]") == 1
+
+
+def test_main_returns_1_when_annotations_is_not_a_dict() -> None:
+    """main() returns 1 when the 'annotations' field is a JSON array instead of an object."""
+    oci = json.dumps({"pid": 42, "annotations": ["not", "a", "dict"]})
+    assert _run_main(oci) == 1
 
 
 def test_main_returns_1_when_state_dir_missing() -> None:

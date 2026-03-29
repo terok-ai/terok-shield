@@ -115,15 +115,21 @@ def _createruntime(pid: str, sd: Path) -> None:
 def _is_our_dnsmasq(pid_int: int, conf_path: Path) -> bool:
     """Return True if pid_int is a dnsmasq process using our conf file.
 
+    Parses ``/proc/{pid}/cmdline`` as a NUL-separated argv vector.
+    Requires argv[0] to be the dnsmasq binary (exact name or absolute path)
+    and ``--conf-file=<our-conf>`` to be present as a separate argument.
     Mirrors ``terok_shield.dnsmasq._is_our_dnsmasq()`` without any imports.
-    Prevents sending SIGTERM to an unrelated process after PID recycling.
     """
-    marker = str(conf_path).encode()
+    conf_arg = b"--conf-file=" + str(conf_path).encode()
     try:
-        cmdline = Path(f"/proc/{pid_int}/cmdline").read_bytes()
+        raw = Path(f"/proc/{pid_int}/cmdline").read_bytes()
     except OSError:
         return False
-    return b"dnsmasq" in cmdline and marker in cmdline
+    args = raw.rstrip(b"\x00").split(b"\x00")
+    if not args:
+        return False
+    exe = args[0]
+    return (exe == b"dnsmasq" or exe.endswith(b"/dnsmasq")) and conf_arg in args
 
 
 def _poststop(sd: Path) -> None:
@@ -142,6 +148,10 @@ def _poststop(sd: Path) -> None:
     except (ValueError, OSError):
         return
     if not _is_our_dnsmasq(pid_int, conf_path):
+        try:
+            pid_file.unlink()
+        except OSError:
+            pass
         return
     try:
         os.kill(pid_int, 15)
@@ -158,7 +168,15 @@ def main() -> int:
         print(f"terok-shield hook: bad OCI state: {exc}", file=sys.stderr)
         return 1
 
+    if not isinstance(oci, dict):
+        print("terok-shield hook: OCI state must be a JSON object", file=sys.stderr)
+        return 1
+
     ann = oci.get("annotations", {})
+    if not isinstance(ann, dict):
+        print("terok-shield hook: annotations must be a JSON object", file=sys.stderr)
+        return 1
+
     sd_str = ann.get(_ANN_STATE_DIR, "")
     if not sd_str:
         print("terok-shield hook: missing state_dir annotation", file=sys.stderr)

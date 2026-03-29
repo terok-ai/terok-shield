@@ -191,17 +191,22 @@ def _read_pid(state_dir: Path) -> int | None:
 def _is_our_dnsmasq(pid_int: int, state_dir: Path) -> bool:
     """Return True if the PID belongs to *this container's* dnsmasq.
 
-    Checks ``/proc/{pid}/cmdline`` for both the ``dnsmasq`` binary name
-    AND the ``--conf-file=`` path pointing to our state directory.
-    This prevents accidentally signaling a host-level dnsmasq or another
-    container's dnsmasq instance after PID recycling.
+    Parses ``/proc/{pid}/cmdline`` as a NUL-separated argv vector and
+    checks that argv[0] is the ``dnsmasq`` binary (exact name or absolute
+    path) and that ``--conf-file=<our-conf>`` is present as a separate
+    argument.  Substring matching is not used, preventing false positives
+    from monitoring tools that embed these strings in their own arguments.
     """
-    conf_marker = str(state.dnsmasq_conf_path(state_dir)).encode()
+    conf_arg = b"--conf-file=" + str(state.dnsmasq_conf_path(state_dir)).encode()
     try:
-        cmdline = Path(f"/proc/{pid_int}/cmdline").read_bytes()
+        raw = Path(f"/proc/{pid_int}/cmdline").read_bytes()
     except OSError:
         return False
-    return b"dnsmasq" in cmdline and conf_marker in cmdline
+    args = raw.rstrip(b"\x00").split(b"\x00")
+    if not args:
+        return False
+    exe = args[0]
+    return (exe == b"dnsmasq" or exe.endswith(b"/dnsmasq")) and conf_arg in args
 
 
 def _clear_pid_file(state_dir: Path) -> None:

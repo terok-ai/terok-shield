@@ -167,20 +167,29 @@ def test_hook_entrypoint_path_strings_match_state_functions() -> None:
     """Path-name literals in hook_entrypoint.py must match state path helpers.
 
     The stdlib-only script uses inline string literals for filenames that
-    state.py derives via path functions.  This test reads the script source
-    and checks each expected name appears, so a rename in state.py triggers
-    a failure here rather than a silent mismatch at runtime.
+    state.py derives via path functions.  This test parses the script with
+    ``ast`` to collect only *code* string constants (not comment text), so
+    a rename in state.py triggers a failure here rather than a silent
+    mismatch at runtime.
     """
+    import ast
+
     from terok_shield.resources import hook_entrypoint as _ep
     from terok_shield.state import dnsmasq_conf_path, dnsmasq_pid_path, gateway_path, ruleset_path
 
     source = Path(_ep.__file__).read_text()
+    tree = ast.parse(source)
+    literals: set[str] = {
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
     root = Path("x")
 
     for fn in (ruleset_path, gateway_path, dnsmasq_conf_path, dnsmasq_pid_path):
         filename = fn(root).name
-        assert f'"{filename}"' in source or f"'{filename}'" in source, (
-            f"hook_entrypoint.py does not reference {filename!r} but "
+        assert filename in literals, (
+            f"hook_entrypoint.py has no code string literal {filename!r} but "
             f"state.{fn.__name__}() returns that filename. "
             "Update hook_entrypoint.py to match."
         )
