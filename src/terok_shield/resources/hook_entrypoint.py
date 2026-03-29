@@ -11,13 +11,12 @@ Zero ``terok_shield.*`` imports — only ``python3`` (stdlib), ``podman``,
 ``nft``, ``nsenter``, and optionally ``dnsmasq`` are required.  This makes
 the hook independent of any specific Python virtualenv or install method.
 
-``podman unshare nsenter -n -t <pid>`` is used to enter the container's
-network namespace.  The OCI hook runs as the login user (uid 1000) in the
-initial user namespace with no elevated capabilities.  ``podman unshare``
-enters the rootless user namespace (NS_ROOTLESS) where the hook gains
-``CAP_NET_ADMIN`` over the container's network namespace; ``nsenter -n``
-then enters that network namespace.  This mirrors
-``SubprocessRunner.nft_via_nsenter()`` in ``run.py``.
+The hook is invoked by crun, which runs inside podman's rootless user
+namespace (NS_ROOTLESS).  Inside NS_ROOTLESS ``os.getuid() == 0`` and
+``CAP_NET_ADMIN`` is already available, so ``nsenter -n -t <pid>`` is used
+directly.  When the hook is run from a normal shell (NS_INIT, uid != 0),
+``podman unshare nsenter -n -t <pid>`` is used instead to enter NS_ROOTLESS
+first — mirroring ``SubprocessRunner.nft_via_nsenter()`` in ``run.py``.
 """
 
 import ipaddress
@@ -92,19 +91,32 @@ def _find_dnsmasq() -> str:
 
 
 def _nsenter(pid: str, *cmd: str, stdin: str | None = None) -> None:
-    """Run *cmd* inside the container's network namespace via podman unshare + nsenter.
+    """Run *cmd* inside the container's network namespace.
 
-    The OCI hook runs as the login user (uid 1000) in the initial user namespace
-    (NS_INIT) with no elevated capabilities.  ``podman unshare`` enters the
-    rootless user namespace (NS_ROOTLESS) where the hook gets ``CAP_NET_ADMIN``
-    over the container's network namespace (created by pasta/slirp4netns inside
-    NS_ROOTLESS).  ``nsenter -n -t <pid>`` then enters the container's network
-    namespace.  This mirrors ``SubprocessRunner.nft_via_nsenter()`` in run.py.
+    Two execution contexts are handled automatically:
+
+    **OCI hook context (crun invokes the hook)** — crun runs inside podman's
+    rootless user namespace (NS_ROOTLESS, where ``os.getuid() == 0`` and
+    ``CAP_NET_ADMIN`` is available).  The hook inherits that namespace, so
+    ``nsenter -n -t <pid>`` is sufficient: no ``podman unshare`` is needed and
+    calling it from NS_ROOTLESS would fail (cannot nest into the same namespace).
+
+    **Shell / manual invocation context** — the caller is in the initial user
+    namespace (NS_INIT, uid != 0, no elevated capabilities).  ``podman unshare``
+    enters NS_ROOTLESS first to gain ``CAP_NET_ADMIN``, then ``nsenter -n``
+    enters the container's network namespace.  This mirrors
+    ``SubprocessRunner.nft_via_nsenter()`` in run.py.
 
     Captures both stdout and stderr — some nft versions write errors to stdout.
     """
+    if os.getuid() == 0:
+        # Already in NS_ROOTLESS (crun hook context): CAP_NET_ADMIN is available.
+        ns_cmd = [_find_nsenter(), "-n", "-t", pid, "--", *cmd]
+    else:
+        # In NS_INIT (shell): enter NS_ROOTLESS first via podman unshare.
+        ns_cmd = [_find_podman(), "unshare", _find_nsenter(), "-n", "-t", pid, "--", *cmd]
     result = subprocess.run(  # nosec B603
-        [_find_podman(), "unshare", _find_nsenter(), "-n", "-t", pid, "--", *cmd],
+        ns_cmd,
         input=stdin,
         text=True,
         capture_output=True,

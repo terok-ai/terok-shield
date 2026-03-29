@@ -190,27 +190,54 @@ def test_read_gateway_returns_empty_on_malformed_hex() -> None:
 # ── _nsenter ─────────────────────────────────────────────────────────────────
 
 
-def test_nsenter_runs_subprocess_in_netns() -> None:
-    """_nsenter() uses 'podman unshare nsenter -n -t' to enter the container's netns.
+def test_nsenter_uses_nsenter_directly_when_uid_is_zero() -> None:
+    """_nsenter() calls nsenter directly when uid==0 (already in NS_ROOTLESS / crun context).
 
-    The hook runs as uid 1000 in the initial user namespace with no elevated
-    capabilities.  podman unshare enters NS_ROOTLESS (granting CAP_NET_ADMIN);
-    nsenter -n -t <pid> then enters the container's network namespace.
+    crun runs inside NS_ROOTLESS where CAP_NET_ADMIN is already available.
+    Calling podman unshare from NS_ROOTLESS would try to re-enter the same
+    namespace and fail.
     """
     mock_result = mock.MagicMock()
     mock_result.returncode = 0
     with mock.patch(
         "terok_shield.resources.hook_entrypoint.subprocess.run", return_value=mock_result
     ) as mock_run:
-        with mock.patch(
-            "terok_shield.resources.hook_entrypoint._find_podman",
-            return_value="/usr/bin/podman",
-        ):
+        with mock.patch("terok_shield.resources.hook_entrypoint.os.getuid", return_value=0):
             with mock.patch(
                 "terok_shield.resources.hook_entrypoint._find_nsenter",
                 return_value="/usr/bin/nsenter",
             ):
                 hook_entrypoint._nsenter("99", "nft", "-f", "/tmp/r.nft")
+
+    mock_run.assert_called_once_with(
+        ["/usr/bin/nsenter", "-n", "-t", "99", "--", "nft", "-f", "/tmp/r.nft"],
+        input=None,
+        text=True,
+        capture_output=True,
+    )
+
+
+def test_nsenter_uses_podman_unshare_when_uid_is_nonzero() -> None:
+    """_nsenter() uses 'podman unshare nsenter -n -t' when uid != 0 (NS_INIT / shell context).
+
+    From the initial user namespace the hook has no elevated capabilities.
+    podman unshare enters NS_ROOTLESS to gain CAP_NET_ADMIN first.
+    """
+    mock_result = mock.MagicMock()
+    mock_result.returncode = 0
+    with mock.patch(
+        "terok_shield.resources.hook_entrypoint.subprocess.run", return_value=mock_result
+    ) as mock_run:
+        with mock.patch("terok_shield.resources.hook_entrypoint.os.getuid", return_value=1000):
+            with mock.patch(
+                "terok_shield.resources.hook_entrypoint._find_podman",
+                return_value="/usr/bin/podman",
+            ):
+                with mock.patch(
+                    "terok_shield.resources.hook_entrypoint._find_nsenter",
+                    return_value="/usr/bin/nsenter",
+                ):
+                    hook_entrypoint._nsenter("99", "nft", "-f", "/tmp/r.nft")
 
     mock_run.assert_called_once_with(
         ["/usr/bin/podman", "unshare", "/usr/bin/nsenter", "-n", "-t", "99", "--", "nft", "-f", "/tmp/r.nft"],
