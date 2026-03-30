@@ -9,8 +9,11 @@ network namespace. Each container gets an isolated firewall. Works with pasta
 (rootless default) and slirp4netns.
 
 Lifecycle: `Shield.pre_start()` installs the OCI hook (idempotent), resolves DNS,
-writes `profile.allowed`, and returns podman args with annotations. On each
-container start, the OCI hook reads those annotations and applies the ruleset.
+writes `profile.allowed`, pre-generates the complete nft ruleset to `ruleset.nft`,
+and returns podman args with annotations. On each container start, the OCI hook
+reads `state_dir` from annotations, applies the pre-generated `ruleset.nft` inside
+the container's network namespace, discovers the gateway from `/proc/{pid}/net/route`,
+and optionally starts a per-container dnsmasq instance.
 
 ## Allowlisting
 
@@ -18,9 +21,18 @@ Allowlists are `.txt` files with one entry per line — domain names or raw
 IP/CIDRs. Lines starting with `#` are comments.
 
 Bundled defaults use domain names because they're stable across IP rotations and
-easy to audit. Resolution happens via `dig +short A` at pre-start time. Resolved
-IPs are cached in `profile.allowed` with `st_mtime`-based freshness (default
-1 hour).
+easy to audit. DNS resolution uses the best available tier:
+
+1. **dnsmasq** (preferred) — a per-container dnsmasq instance is started by the OCI
+   hook with `--nftset=allow_v4,allow_v6`, automatically populating the nft allow sets
+   on every resolution at runtime. Handles IP rotation without manual intervention.
+   Container DNS is redirected to `127.0.0.1:53` via a `resolv.conf` volume mount.
+2. **dig** — pre-start `dig +short A/AAAA` resolution; IPs cached in `profile.allowed`
+   with `st_mtime`-based freshness (default 1 hour).
+3. **getent** — fallback when `dig` is also absent.
+
+`detect_dns_tier()` selects the tier automatically based on available binaries and
+dnsmasq compile-time nftset support.
 
 ### Bundled profiles
 
@@ -66,10 +78,20 @@ across state files are reliable regardless of input notation (e.g.
 ├── hooks/
 │   ├── terok-shield-createRuntime.json
 │   └── terok-shield-poststop.json
-├── terok-shield-hook              # entrypoint script
+├── terok-shield-hook              # entrypoint script (stdlib-only Python)
+├── ruleset.nft                    # pre-generated nft ruleset (written by pre_start)
+├── gateway                        # discovered gateway IP (written by OCI hook)
 ├── profile.allowed                # IPs from DNS resolution (preset)
+├── profile.domains                # domain names for dnsmasq config
 ├── live.allowed                   # IPs from manual allow/deny
+├── live.domains                   # domains added at runtime via allow_domain
 ├── deny.list                      # persistent deny overrides
+├── denied.domains                 # domains denied at runtime via deny_domain
+├── dnsmasq.conf                   # generated dnsmasq configuration (dnsmasq tier)
+├── dnsmasq.pid                    # dnsmasq PID (dnsmasq tier)
+├── resolv.conf                    # bind-mounted over /etc/resolv.conf (dnsmasq tier)
+├── upstream.dns                   # persisted upstream DNS address
+├── dns.tier                       # persisted active DNS tier
 └── audit.jsonl                    # per-container audit log
 ```
 
@@ -197,11 +219,12 @@ directly — never the CLI.
 | `__init__.py` | `Shield` facade — public API entry point |
 | `nft.py` | **Security boundary** — ruleset generation, input validation, self-verification |
 | `nft_constants.py` | Shared literals (`NFT_TABLE`, `RFC1918`) — no logic |
-| `config.py` | `ShieldConfig`, `ShieldMode`, `ShieldState`, `ShieldModeBackend` protocol, annotation constants |
+| `config.py` | `ShieldConfig`, `ShieldMode`, `ShieldState`, `DnsTier`, `ShieldModeBackend` protocol, annotation constants |
 | `state.py` | Per-container state bundle layout — path derivation, effective IP merging |
-| `mode_hook.py` | Hook mode strategy (OCI hooks, per-container netns) |
+| `mode_hook.py` | Hook mode strategy (OCI hooks, per-container netns, dnsmasq lifecycle) |
 | `oci_hook.py` | OCI hook entry point — fail-closed firewall application |
-| `dns.py` | Stateless DNS resolution via `dig`, file-based caching |
+| `dnsmasq.py` | dnsmasq config generation, launch/kill lifecycle, domain add/remove |
+| `dns.py` | DNS resolution via `dig` / `getent`, file-based caching |
 | `profiles.py` | Profile loading and composition |
 | `audit.py` | JSON-lines audit logging (single file per container) |
 | `run.py` | Subprocess wrappers (`nft`, `nsenter`, `dig`, `podman`) |
@@ -209,6 +232,7 @@ directly — never the CLI.
 | `util.py` | Small shared utilities |
 | `registry.py` | Command registry — subcommand definitions, metadata, and reusable handlers |
 | `cli.py` | Standalone CLI entry point + config construction from env/YAML |
+| `resources/hook_entrypoint.py` | Stdlib-only OCI hook script — installed verbatim, no terok_shield imports |
 
 Module boundaries are enforced by [tach](https://github.com/gauge-sh/tach)
 (`tach.toml`). The critical constraint: `nft.py` may only import from

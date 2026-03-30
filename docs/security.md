@@ -63,16 +63,16 @@ policy present, reject type present, deny log prefix present, all private ranges
 │  │  │  nftables rules               │  │   │
 │  │  │  (applied by OCI hook)        │  │   │
 │  │  │                               │  │   │
-│  │  │  policy: DROP                 │  │   │
-│  │  │  allow: DNS, lo, @allow_v4/v6  │  │   │
-│  │  │  reject: RFC1918, RFC4193     │  │   │
+│  │  │  policy: DROP                        │  │   │
+│  │  │  allow: DNS, lo, @allow_v4/v6        │  │   │
+│  │  │  gateway: @gateway_v4/v6 (loopback)  │  │   │
+│  │  │  reject: RFC1918, RFC4193            │  │   │
 │  │  └────────────────────────────────┘  │   │
 │  │                                      │   │
 │  │  ┌────────────────────────────────┐  │   │
 │  │  │  Workload (untrusted)         │  │   │
 │  │  │  CAP_NET_ADMIN dropped        │  │   │
 │  │  │  CAP_NET_RAW dropped          │  │   │
-│  │  │  no-new-privileges            │  │   │
 │  │  └────────────────────────────────┘  │   │
 │  └──────────────────────────────────────┘   │
 │                                             │
@@ -80,15 +80,15 @@ policy present, reject type present, deny log prefix present, all private ranges
 └─────────────────────────────────────────────┘
 ```
 
-The workload cannot modify nftables rules because `CAP_NET_ADMIN` is dropped,
-`CAP_NET_RAW` is dropped, and `no-new-privileges` is set.
+The workload cannot modify nftables rules because `CAP_NET_ADMIN` and
+`CAP_NET_RAW` are dropped.
 
 ## Chain evaluation order
 
 **Hook mode** (per-container netns, output chain):
 
 ```text
-loopback → established → DNS → loopback ports → allow_v4/v6 → private-range reject → deny all
+loopback → established → DNS → gateway ports → loopback ports → allow_v4/v6 → private-range reject → deny all
 ```
 
 **Rule ordering rationale:** the allow sets (`@allow_v4`, `@allow_v6`) are
