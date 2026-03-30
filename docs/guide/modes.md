@@ -101,5 +101,8 @@ the container adds the resolved IPs to `allow_v4`/`allow_v6` automatically.
 To watch the sets grow in real time:
 
 ```bash
-watch terokctl shield rules my-container
+watch terok-shield rules my-container
 ```
+
+!!! note "Future modes"
+    Additional modes for different network topologies may be added in the future.
