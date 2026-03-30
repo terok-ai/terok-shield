@@ -69,8 +69,9 @@ terok-shield run my-container -- --rm -it -e FOO=bar alpine:latest sh
 5. If any step fails, the container is torn down (fail-closed)
 
 From inside the container, only the allowed destinations are reachable.
-All other outbound traffic is dropped. Allowlisting private-range addresses
-(RFC 1918, RFC 4193) or large CIDRs generates a notice in the audit log.
+All other outbound traffic is rejected with an ICMP error. Allowlisting
+private-range addresses (RFC 1918, RFC 4193) or large CIDRs generates a
+notice in the audit log.
 
 ## Allow or deny destinations at runtime
 
@@ -97,6 +98,9 @@ so both survive `down`/`up` bypass cycles and container restarts.
 ```bash
 # Show active nftables rules for a container
 terok-shield rules my-container
+
+# Watch the allow sets grow in real time as dnsmasq resolves domains
+watch terok-shield rules my-container
 
 # Show recent audit log entries
 terok-shield logs --container my-container -n 10

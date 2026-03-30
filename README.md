@@ -11,12 +11,12 @@ nftables-based egress firewalling for rootless Podman containers.
 
 terok-shield enforces **default-deny outbound** network filtering on Podman
 containers using nftables. Containers can only reach explicitly allowed
-destinations — everything else is dropped.
+destinations — everything else is rejected with an ICMP error.
 
 ### Features
 
 - **Default-deny egress** with curated allowlists (domains and IPs)
-- **DNS-based allowlisting** — domain names resolved before container start, cached automatically
+- **Dynamic DNS allowlisting** — per-container dnsmasq with `--nftset` auto-populates allow sets on every DNS resolution, handling IP rotation at runtime; falls back to static pre-start resolution via `dig` or `getent` when dnsmasq is unavailable
 - **Live allow/deny** at runtime for individual containers
 - **Per-container isolation** — each container gets its own state bundle, hooks, and audit log
 - **Connection audit logging** (JSON-lines lifecycle logs + kernel-level per-packet nftables logs)
@@ -28,7 +28,7 @@ destinations — everything else is dropped.
   - Tested on Fedora 43, Debian 12 and 13, and Ubuntu 24.04, probably also works on other modern Linux distros.
 - Podman (rootless, recommended > 5.6.0, untested < 4.3.1)
 - Python 3.12+
-- `dig` (from `dnsutils` / `bind-utils`) for DNS resolution
+- `dnsmasq` (recommended) for dynamic DNS-based egress control; `dig` (`dnsutils` / `bind-utils`) as fallback
 
 ## Installation
 
