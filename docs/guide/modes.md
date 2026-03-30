@@ -74,10 +74,14 @@ Each container's hooks and state are isolated in its own directory:
 ├── profile.allowed                         # IPs from pre-start DNS resolution
 ├── profile.domains                         # Domain names for dnsmasq config
 ├── live.allowed                            # IPs from allow/deny
+├── live.domains                            # Domains added at runtime
 ├── deny.list                               # Persistent deny overrides
+├── denied.domains                          # Domains denied at runtime
 ├── dnsmasq.conf                            # Generated dnsmasq config (dnsmasq tier)
 ├── dnsmasq.pid                             # dnsmasq PID (dnsmasq tier)
 ├── resolv.conf                             # Bind-mounted /etc/resolv.conf (dnsmasq tier)
+├── upstream.dns                            # Persisted upstream DNS address
+├── dns.tier                                # Persisted active DNS tier
 └── audit.jsonl                             # Per-container audit log
 ```
 
