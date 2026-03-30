@@ -24,7 +24,14 @@ from terok_shield.nft_constants import PASTA_HOST_LOOPBACK_MAP
 from terok_shield.run import ExecError
 
 from ..testfs import BIN_DIR_NAME, HOOK_ENTRYPOINT_NAME, HOOKS_DIR_NAME
-from ..testnet import CONTAINER_HOSTNAME, IPV6_CLOUDFLARE, TEST_DOMAIN, TEST_IP1, TEST_IP2
+from ..testnet import (
+    CONTAINER_HOSTNAME,
+    IPV6_CLOUDFLARE,
+    SLIRP4NETNS_GATEWAY,
+    TEST_DOMAIN,
+    TEST_IP1,
+    TEST_IP2,
+)
 from .helpers import write_lines
 
 # Modern podman info JSON — hooks-dir persists (>= 5.6.0), pasta default
@@ -644,7 +651,7 @@ def test_pre_start_slirp4netns_network_args(
     assert "--network" in args
     net_arg = args[args.index("--network") + 1]
     assert net_arg == "slirp4netns:allow_host_loopback=true"
-    assert f"{CONTAINER_HOSTNAME}:10.0.2.2" in args
+    assert f"{CONTAINER_HOSTNAME}:{SLIRP4NETNS_GATEWAY}" in args
 
 
 def test_pre_start_with_global_hooks_skips_hooks_dir(

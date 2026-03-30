@@ -204,10 +204,10 @@ class TestDnsmasqInContainer:
     """End-to-end: dnsmasq launches inside a container's netns via OCI hook.
 
     This is the full story:
-    1. pre_start() detects dnsmasq, adds --dns 127.0.0.1
-    2. Container starts, OCI hook fires
+    1. pre_start() detects dnsmasq, mounts a resolv.conf volume (127.0.0.1)
+    2. Container starts with the mounted resolv.conf, OCI hook fires
     3. Hook applies nft ruleset + launches dnsmasq in the netns
-    4. Container's resolv.conf points to 127.0.0.1
+    4. Container's resolv.conf already points to 127.0.0.1 via the mount
     5. DNS queries inside container go through dnsmasq
     6. dnsmasq auto-populates nft allow sets via --nftset
     7. Container stop kills dnsmasq (poststop hook)
