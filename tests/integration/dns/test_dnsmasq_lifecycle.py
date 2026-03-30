@@ -139,18 +139,28 @@ class TestDnsmasqConfigGeneration:
 class TestPreStartDnsmasqTier:
     """pre_start() detects dnsmasq tier and sets correct podman args."""
 
-    def test_pre_start_adds_dns_flag(self) -> None:
-        """When dnsmasq tier is selected, pre_start() adds --dns 127.0.0.1."""
+    def test_pre_start_mounts_resolv_conf(self) -> None:
+        """When dnsmasq tier is selected, pre_start() volume-mounts resolv.conf.
+
+        The code cannot use ``--dns 127.0.0.1`` because podman passes it to
+        pasta as a DNS-splice target, causing pasta to bind host port 53
+        (privileged, fails rootless).  Instead it writes a custom resolv.conf
+        and mounts it read-only into the container.
+        """
         with tempfile.TemporaryDirectory() as tmp:
-            shield = Shield(ShieldConfig(state_dir=Path(tmp)))
+            sd = Path(tmp)
+            shield = Shield(ShieldConfig(state_dir=sd))
             args = shield.pre_start("test-ctr")
 
         tier = _tier_from_args(args)
         if tier != "dnsmasq":
             pytest.skip(f"pre_start selected tier '{tier}', not dnsmasq")
-        assert "--dns" in args
-        dns_idx = args.index("--dns")
-        assert args[dns_idx + 1] == DNSMASQ_BIND
+        # resolv.conf volume mount replaces the old --dns flag
+        assert "--volume" in args
+        vol_args = [args[i + 1] for i, v in enumerate(args) if v == "--volume"]
+        resolv_mounts = [v for v in vol_args if "/etc/resolv.conf:" in v]
+        assert resolv_mounts, "expected a resolv.conf volume mount for dnsmasq tier"
+        assert ":ro" in resolv_mounts[0]
 
     def test_pre_start_writes_profile_domains(self) -> None:
         """pre_start() writes profile domains to state for the OCI hook."""
