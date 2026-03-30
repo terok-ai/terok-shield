@@ -454,10 +454,11 @@ def test_bypass_ruleset_does_not_include_the_enforce_deny_rule() -> None:
 
 
 def test_bypass_ruleset_emits_loopback_port_rules() -> None:
-    """Host-loopback-proxy port exceptions survive in bypass mode."""
-    assert f"tcp dport 9418 ip daddr {PASTA_HOST_LOOPBACK_MAP} accept" in bypass_ruleset(
-        loopback_ports=(9418,)
-    )
+    """Host-loopback-proxy port exceptions survive in bypass mode, before private-range reject."""
+    ruleset = bypass_ruleset(loopback_ports=(9418,))
+    accept_rule = f"tcp dport 9418 ip daddr {PASTA_HOST_LOOPBACK_MAP} accept"
+    assert accept_rule in ruleset
+    assert ruleset.index(accept_rule) < ruleset.index("169.254.0.0/16")
 
 
 def test_bypass_ruleset_accepts_dns_to_the_configured_forwarder() -> None:

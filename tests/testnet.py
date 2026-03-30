@@ -12,6 +12,11 @@ verify real network connectivity.  Centralizing them here means SonarCloud only
 flags the constant definition, not every usage.
 """
 
+# ── Container networking constants ──
+
+CONTAINER_HOSTNAME = "host.containers.internal"
+"""Hostname Podman exposes for reaching services on the host."""
+
 # ── Test domains (used as mock compose_profiles return value) ──
 
 TEST_DOMAIN = "github.com"
