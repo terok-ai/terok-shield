@@ -343,19 +343,16 @@ class HookMode:
                     "host.containers.internal:10.0.2.2",
                 ]
             else:
-                # Use pasta --map-host-loopback to forward container traffic
-                # destined for PASTA_HOST_LOOPBACK_MAP (169.254.1.2) to the
-                # host's 127.0.0.1.  This avoids the pasta 2.x "two loopbacks"
-                # splice bug: the old -T,{port} approach made pasta splice a
-                # connection from container-loopback (127.0.0.1) to host-loopback
-                # (127.0.0.1), which newer pasta resets with ECONNRESET.
-                if self._config.loopback_ports:
-                    pasta_arg = f"pasta:--map-host-loopback,{PASTA_HOST_LOOPBACK_MAP}"
-                else:
-                    pasta_arg = "pasta"
+                # Use pasta --map-host-loopback unconditionally so that
+                # host.containers.internal always resolves to an address
+                # pasta actually forwards to the host's 127.0.0.1.
+                # Without --map-host-loopback, traffic to 169.254.1.2
+                # is not translated and the gate server is unreachable.
+                # This also avoids the pasta 2.x "two loopbacks" splice
+                # bug that broke the old -T,{port} approach.
                 args += [
                     "--network",
-                    pasta_arg,
+                    f"pasta:--map-host-loopback,{PASTA_HOST_LOOPBACK_MAP}",
                     "--add-host",
                     f"host.containers.internal:{PASTA_HOST_LOOPBACK_MAP}",
                 ]

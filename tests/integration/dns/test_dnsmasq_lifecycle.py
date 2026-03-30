@@ -152,15 +152,17 @@ class TestPreStartDnsmasqTier:
             shield = Shield(ShieldConfig(state_dir=sd))
             args = shield.pre_start("test-ctr")
 
-        tier = _tier_from_args(args)
-        if tier != "dnsmasq":
-            pytest.skip(f"pre_start selected tier '{tier}', not dnsmasq")
-        # resolv.conf volume mount replaces the old --dns flag
-        assert "--volume" in args
-        vol_args = [args[i + 1] for i, v in enumerate(args) if v == "--volume"]
-        resolv_mounts = [v for v in vol_args if "/etc/resolv.conf:" in v]
-        assert resolv_mounts, "expected a resolv.conf volume mount for dnsmasq tier"
-        assert ":ro" in resolv_mounts[0]
+            tier = _tier_from_args(args)
+            if tier != "dnsmasq":
+                pytest.skip(f"pre_start selected tier '{tier}', not dnsmasq")
+            # --dns must NOT be used (causes pasta to bind host port 53)
+            assert "--dns" not in args
+            # resolv.conf volume mount replaces the old --dns flag
+            vol_args = [args[i + 1] for i, v in enumerate(args) if v == "--volume"]
+            expected_mount = f"{state.resolv_conf_path(sd)}:/etc/resolv.conf:ro,Z"
+            assert expected_mount in vol_args, (
+                f"expected exact resolv.conf mount {expected_mount!r}, got: {vol_args!r}"
+            )
 
     def test_pre_start_writes_profile_domains(self) -> None:
         """pre_start() writes profile domains to state for the OCI hook."""

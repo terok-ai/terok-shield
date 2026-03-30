@@ -161,6 +161,9 @@ def test_pre_start_uses_pasta_for_rootless_mode(
     assert PASTA_HOST_LOOPBACK_MAP in network_arg
     assert "-T," not in network_arg
 
+    add_host_arg = args[args.index("--add-host") + 1]
+    assert add_host_arg == f"host.containers.internal:{PASTA_HOST_LOOPBACK_MAP}"
+
 
 @mock.patch("terok_shield.mode_hook.has_global_hooks", return_value=True)
 def test_pre_start_installs_hooks_and_creates_state_dirs(

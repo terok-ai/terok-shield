@@ -186,10 +186,12 @@ def test_hook_ruleset_emits_one_rule_per_loopback_port(
     ports: tuple[int, ...],
     expected_rules: list[str],
 ) -> None:
-    """Each configured loopback port gets its own accept rule."""
+    """Each configured loopback port gets its own accept rule before private-range reject."""
     ruleset = hook_ruleset(loopback_ports=ports)
     for rule in expected_rules:
         assert rule in ruleset
+        # Loopback port rules must fire before the 169.254.0.0/16 private-range reject
+        assert ruleset.index(rule) < ruleset.index("169.254.0.0/16")
 
 
 def test_hook_ruleset_places_allow_sets_before_private_range_rejects() -> None:
@@ -453,9 +455,8 @@ def test_bypass_ruleset_does_not_include_the_enforce_deny_rule() -> None:
 
 def test_bypass_ruleset_emits_loopback_port_rules() -> None:
     """Host-loopback-proxy port exceptions survive in bypass mode."""
-    assert (
-        f"tcp dport 9418 ip daddr {PASTA_HOST_LOOPBACK_MAP} accept"
-        in bypass_ruleset(loopback_ports=(9418,))
+    assert f"tcp dport 9418 ip daddr {PASTA_HOST_LOOPBACK_MAP} accept" in bypass_ruleset(
+        loopback_ports=(9418,)
     )
 
 
