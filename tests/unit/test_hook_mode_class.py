@@ -20,6 +20,7 @@ from terok_shield.config import (
 )
 from terok_shield.mode_hook import HookMode, install_hooks
 from terok_shield.nft import bypass_ruleset, hook_ruleset
+from terok_shield.nft_constants import PASTA_HOST_LOOPBACK_MAP
 from terok_shield.run import ExecError
 
 from ..testfs import BIN_DIR_NAME, HOOK_ENTRYPOINT_NAME, HOOKS_DIR_NAME
@@ -156,7 +157,9 @@ def test_pre_start_uses_pasta_for_rootless_mode(
 
     network_arg = args[args.index("--network") + 1]
     assert network_arg.startswith("pasta:")
-    assert "-T,8080" in network_arg
+    assert "--map-host-loopback" in network_arg
+    assert PASTA_HOST_LOOPBACK_MAP in network_arg
+    assert "-T," not in network_arg
 
 
 @mock.patch("terok_shield.mode_hook.has_global_hooks", return_value=True)

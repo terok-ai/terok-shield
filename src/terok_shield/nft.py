@@ -20,6 +20,7 @@ from .nft_constants import (
     BYPASS_LOG_PREFIX,
     NFT_TABLE,
     PASTA_DNS,
+    PASTA_HOST_LOOPBACK_MAP,
     PRIVATE_RANGES,
 )
 
@@ -127,8 +128,18 @@ def _audit_allow_rules() -> str:
 
 
 def _loopback_port_rules(ports: tuple[int, ...]) -> str:
-    """Generate nft accept rules for loopback ports (lo interface only)."""
-    return "\n".join(f'            tcp dport {p} oifname "lo" accept' for p in ports)
+    """Generate nft accept rules for host-loopback-proxy ports.
+
+    Traffic to ``PASTA_HOST_LOOPBACK_MAP`` (169.254.1.2) goes via pasta's
+    virtual interface, not ``lo``.  pasta's ``--map-host-loopback`` translates
+    this address to ``127.0.0.1`` on the host, enabling container→host
+    loopback access without the pasta 2.x "two loopbacks" splice bug.
+    These rules are placed before the private-range reject block so that
+    link-local traffic to 169.254.1.2 is accepted for the allowed ports.
+    """
+    return "\n".join(
+        f"            tcp dport {p} ip daddr {PASTA_HOST_LOOPBACK_MAP} accept" for p in ports
+    )
 
 
 def _gateway_port_rules(ports: tuple[int, ...]) -> str:

@@ -27,6 +27,7 @@ from terok_shield.nft_constants import (
     BYPASS_LOG_PREFIX,
     IPV6_PRIVATE,
     NFT_TABLE,
+    PASTA_HOST_LOOPBACK_MAP,
     PRIVATE_RANGES,
     RFC1918,
 )
@@ -168,14 +169,14 @@ def test_hook_ruleset_default_tcp_rules_are_dns_only() -> None:
     [
         pytest.param(
             (9418,),
-            ['tcp dport 9418 oifname "lo" accept'],
+            [f"tcp dport 9418 ip daddr {PASTA_HOST_LOOPBACK_MAP} accept"],
             id="single-loopback-port",
         ),
         pytest.param(
             (8080, 9090),
             [
-                'tcp dport 8080 oifname "lo" accept',
-                'tcp dport 9090 oifname "lo" accept',
+                f"tcp dport 8080 ip daddr {PASTA_HOST_LOOPBACK_MAP} accept",
+                f"tcp dport 9090 ip daddr {PASTA_HOST_LOOPBACK_MAP} accept",
             ],
             id="multiple-loopback-ports",
         ),
@@ -451,8 +452,11 @@ def test_bypass_ruleset_does_not_include_the_enforce_deny_rule() -> None:
 
 
 def test_bypass_ruleset_emits_loopback_port_rules() -> None:
-    """Loopback port exceptions survive in bypass mode."""
-    assert 'tcp dport 9418 oifname "lo" accept' in bypass_ruleset(loopback_ports=(9418,))
+    """Host-loopback-proxy port exceptions survive in bypass mode."""
+    assert (
+        f"tcp dport 9418 ip daddr {PASTA_HOST_LOOPBACK_MAP} accept"
+        in bypass_ruleset(loopback_ports=(9418,))
+    )
 
 
 def test_bypass_ruleset_accepts_dns_to_the_configured_forwarder() -> None:

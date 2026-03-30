@@ -15,6 +15,12 @@ NFT_TABLE_NAME = "terok_shield"
 
 PASTA_DNS = "169.254.1.1"  # pasta default DNS forwarder (link-local)
 
+# pasta --map-host-loopback address: container traffic to this link-local
+# address is translated by pasta to 127.0.0.1 on the host.  Using a
+# non-loopback address avoids the pasta 2.x "two loopbacks" splice bug
+# where container→127.0.0.1 + pasta→127.0.0.1 causes Connection reset.
+PASTA_HOST_LOOPBACK_MAP = "169.254.1.2"
+
 # RFC 1918 private ranges + RFC 3927 link-local: rejected by default,
 # access attempts and whitelisting logged with a notice.
 RFC1918: tuple[str, ...] = (
