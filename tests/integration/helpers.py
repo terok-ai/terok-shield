@@ -47,14 +47,29 @@ def _diag_hook_json(hook_json: Path) -> str:
         return f"parse error: {exc}"
 
 
+def _hook_error_log(extra_args: list[str]) -> str:
+    """Read hook-error.log from the state_dir annotation (if it exists)."""
+    key = "terok.shield.state_dir="
+    for arg in extra_args:
+        if key in arg:
+            sd = arg.split(key, 1)[1]
+            log = Path(sd) / "hook-error.log"
+            if log.is_file():
+                return f"\n  [diag/hook-error.log] {log.read_text().strip()}"
+            return f"\n  [diag/hook-error.log] (not found: {log})"
+    return ""
+
+
 def _hook_diagnostics(extra_args: list[str]) -> str:
     """Gather OCI hook file diagnostics from extra_args (called only on failure)."""
+    diag = _hook_error_log(extra_args)
+
     # Per-container hooks: --hooks-dir in extra_args
     try:
         idx = extra_args.index("--hooks-dir")
         hooks_dir = Path(extra_args[idx + 1])
         hook_json = hooks_dir / HOOK_JSON_FILENAME
-        return f"\n  [diag/per-container] {_diag_hook_json(hook_json)}"
+        return f"{diag}\n  [diag/per-container] {_diag_hook_json(hook_json)}"
     except ValueError:
         pass  # global hooks in use
 
@@ -65,8 +80,8 @@ def _hook_diagnostics(extra_args: list[str]) -> str:
         if hook_json.exists():
             parts.append(f"{d}: {_diag_hook_json(hook_json)}")
     if parts:
-        return "\n  [diag/global] " + "\n  [diag/global] ".join(parts)
-    return "\n  [diag] no hook JSON found in any hooks directory"
+        return f"{diag}\n  [diag/global] " + "\n  [diag/global] ".join(parts)
+    return f"{diag}\n  [diag] no hook JSON found in any hooks directory"
 
 
 def start_shielded_container(
