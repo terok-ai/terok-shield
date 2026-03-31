@@ -94,7 +94,7 @@ def _safe_timeout(value: str) -> str:
 # ── Private helpers ──────────────────────────────────────
 
 
-def _private_range_rules(prefix: str = PRIVATE_LOG_PREFIX) -> str:
+def _private_range_rules() -> str:
     """Generate private-range reject rules (RFC 1918 + RFC 4193/4291).
 
     Auto-detects address family for the ``daddr`` selector and uses
@@ -102,7 +102,7 @@ def _private_range_rules(prefix: str = PRIVATE_LOG_PREFIX) -> str:
     """
     return "\n".join(
         f"        {'ip' if _is_v4(net) else 'ip6'} daddr {net}"
-        f' log group {NFLOG_GROUP} prefix "{prefix}: " reject with icmpx admin-prohibited'
+        f' log group {NFLOG_GROUP} prefix "{PRIVATE_LOG_PREFIX}: " reject with icmpx admin-prohibited'
         for net in PRIVATE_RANGES
     )
 

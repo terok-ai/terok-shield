@@ -15,6 +15,7 @@ from pathlib import Path
 
 from terok_shield import Shield, ShieldConfig
 from terok_shield.podman_info import HOOK_JSON_FILENAME, find_hooks_dirs
+from tests.testfs import HOOK_ERROR_LOG_FILENAME
 
 _DISPOSABLE_DIRS: list[tempfile.TemporaryDirectory] = []
 """Managed temp dirs for nft-only tests (cleaned up at process exit)."""
@@ -53,9 +54,13 @@ def _hook_error_log(extra_args: list[str]) -> str:
     for arg in extra_args:
         if key in arg:
             sd = arg.split(key, 1)[1]
-            log = Path(sd) / "hook-error.log"
+            log = Path(sd) / HOOK_ERROR_LOG_FILENAME
             if log.is_file():
-                return f"\n  [diag/hook-error.log] {log.read_text().strip()}"
+                try:
+                    content = log.read_text().strip()
+                except OSError as exc:
+                    return f"\n  [diag/hook-error.log] (read error: {exc})"
+                return f"\n  [diag/hook-error.log] {content}"
             return f"\n  [diag/hook-error.log] (not found: {log})"
     return ""
 

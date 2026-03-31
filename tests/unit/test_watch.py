@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Generator
 from pathlib import Path
 from unittest.mock import patch
 
@@ -28,10 +29,10 @@ _CONTAINER = "test-container"
 
 
 @pytest.fixture(autouse=False)
-def _restore_running() -> None:
+def _restore_running() -> Generator[None, None, None]:
     """Capture and restore ``terok_shield.watch._running`` around tests that mutate it."""
     original = _watch_mod._running
-    yield  # type: ignore[misc]
+    yield
     _watch_mod._running = original
 
 
@@ -147,8 +148,8 @@ class TestDnsLogWatcher:
         """A query for a non-allowed domain yields a blocked_query event."""
         log = state_dir / "dnsmasq.log"
         watcher = DnsLogWatcher(log, state_dir, _CONTAINER)
-        # Append a query line after watcher opened (seeks to end)
-        log.write_text(f"query[A] {BLOCKED_DOMAIN} from 127.0.0.1\n")
+        with log.open("a") as f:
+            f.write(f"query[A] {BLOCKED_DOMAIN} from 127.0.0.1\n")
         events = watcher.poll()
         watcher.close()
         assert len(events) == 1
@@ -159,7 +160,8 @@ class TestDnsLogWatcher:
         """A query for an allowed domain yields no event."""
         log = state_dir / "dnsmasq.log"
         watcher = DnsLogWatcher(log, state_dir, _CONTAINER)
-        log.write_text(f"query[A] {TEST_DOMAIN} from 127.0.0.1\n")
+        with log.open("a") as f:
+            f.write(f"query[A] {TEST_DOMAIN} from 127.0.0.1\n")
         events = watcher.poll()
         watcher.close()
         assert events == []
@@ -168,7 +170,8 @@ class TestDnsLogWatcher:
         """Subdomains of allowed domains are also allowed (nftset behavior)."""
         log = state_dir / "dnsmasq.log"
         watcher = DnsLogWatcher(log, state_dir, _CONTAINER)
-        log.write_text(f"query[A] api.{TEST_DOMAIN} from 127.0.0.1\n")
+        with log.open("a") as f:
+            f.write(f"query[A] api.{TEST_DOMAIN} from 127.0.0.1\n")
         events = watcher.poll()
         watcher.close()
         assert events == []
@@ -177,7 +180,8 @@ class TestDnsLogWatcher:
         """Subdomains of non-allowed domains are also blocked."""
         log = state_dir / "dnsmasq.log"
         watcher = DnsLogWatcher(log, state_dir, _CONTAINER)
-        log.write_text(f"query[A] {BLOCKED_SUBDOMAIN} from 127.0.0.1\n")
+        with log.open("a") as f:
+            f.write(f"query[A] {BLOCKED_SUBDOMAIN} from 127.0.0.1\n")
         events = watcher.poll()
         watcher.close()
         assert len(events) == 1
@@ -195,11 +199,12 @@ class TestDnsLogWatcher:
         """Multiple queries appended at once are all processed."""
         log = state_dir / "dnsmasq.log"
         watcher = DnsLogWatcher(log, state_dir, _CONTAINER)
-        log.write_text(
-            f"query[A] {BLOCKED_DOMAIN} from 127.0.0.1\n"
-            f"query[AAAA] {BLOCKED_DOMAIN} from 127.0.0.1\n"
-            f"query[A] {TEST_DOMAIN} from 127.0.0.1\n"
-        )
+        with log.open("a") as f:
+            f.write(
+                f"query[A] {BLOCKED_DOMAIN} from 127.0.0.1\n"
+                f"query[AAAA] {BLOCKED_DOMAIN} from 127.0.0.1\n"
+                f"query[A] {TEST_DOMAIN} from 127.0.0.1\n"
+            )
         events = watcher.poll()
         watcher.close()
         assert len(events) == 2
@@ -209,9 +214,10 @@ class TestDnsLogWatcher:
         """Reply and forwarded lines do not produce events."""
         log = state_dir / "dnsmasq.log"
         watcher = DnsLogWatcher(log, state_dir, _CONTAINER)
-        log.write_text(
-            f"reply {BLOCKED_DOMAIN} is 1.2.3.4\nforwarded {BLOCKED_DOMAIN} to 169.254.1.1\n"
-        )
+        with log.open("a") as f:
+            f.write(
+                f"reply {BLOCKED_DOMAIN} is 1.2.3.4\nforwarded {BLOCKED_DOMAIN} to 169.254.1.1\n"
+            )
         events = watcher.poll()
         watcher.close()
         assert events == []
@@ -268,16 +274,16 @@ class TestDomainRefresh:
         log = sd / "dnsmasq.log"
         log.write_text("")
 
-        # Monotonic clock: first call returns 0 (init), second returns beyond threshold
-        clock = iter([0.0, 0.0, _DOMAIN_REFRESH_INTERVAL + 1.0])
-        with patch("terok_shield.watch._monotonic", side_effect=lambda: next(clock)):
+        # Monotonic clock: returns 0 during init to set _last_refresh
+        with patch("terok_shield.watch._monotonic", return_value=0.0):
             watcher = DnsLogWatcher(log, sd, _CONTAINER)
 
         # Add BLOCKED_DOMAIN to allowed set *after* watcher was created
         (sd / "profile.domains").write_text(f"{TEST_DOMAIN}\n{BLOCKED_DOMAIN}\n")
 
-        # Write a query — before refresh, BLOCKED_DOMAIN would be blocked
-        log.write_text(f"query[A] {BLOCKED_DOMAIN} from 127.0.0.1\n")
+        # Append a query — before refresh, BLOCKED_DOMAIN would be blocked
+        with log.open("a") as f:
+            f.write(f"query[A] {BLOCKED_DOMAIN} from 127.0.0.1\n")
 
         # Force the clock past the refresh threshold
         with patch("terok_shield.watch._monotonic", return_value=_DOMAIN_REFRESH_INTERVAL + 1.0):

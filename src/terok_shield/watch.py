@@ -16,6 +16,7 @@ import re
 import select
 import signal
 import sys
+import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -70,10 +71,14 @@ class DnsLogWatcher:
         self._state_dir = state_dir
         self._container = container
         self._fh = open(log_path)  # noqa: SIM115 — needs fileno() for select
-        self._fh.seek(0, os.SEEK_END)
-        self._allowed_domains: set[str] = set()
-        self._last_refresh = 0.0
-        self._refresh_domains()
+        try:
+            self._fh.seek(0, os.SEEK_END)
+            self._allowed_domains: set[str] = set()
+            self._last_refresh = 0.0
+            self._refresh_domains()
+        except Exception:
+            self._fh.close()
+            raise
 
     def fileno(self) -> int:
         """Return the file descriptor for ``select.select()`` multiplexing."""
@@ -202,6 +207,4 @@ def run_watch(state_dir: Path, container: str) -> None:
 
 def _monotonic() -> float:
     """Return monotonic time (seconds).  Extracted for testability."""
-    import time
-
     return time.monotonic()
