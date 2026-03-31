@@ -226,8 +226,6 @@ class TestRunWatchValidation:
         sd.mkdir()
         (sd / "dns.tier").write_text(DnsTier.DIG.value)
         with pytest.raises(SystemExit, match="1"):
-            from terok_shield.watch import run_watch
-
             run_watch(sd, _CONTAINER)
 
     def test_rejects_getent_tier(self, tmp_path: Path) -> None:
@@ -236,8 +234,6 @@ class TestRunWatchValidation:
         sd.mkdir()
         (sd / "dns.tier").write_text(DnsTier.GETENT.value)
         with pytest.raises(SystemExit, match="1"):
-            from terok_shield.watch import run_watch
-
             run_watch(sd, _CONTAINER)
 
     def test_rejects_missing_tier(self, tmp_path: Path) -> None:
