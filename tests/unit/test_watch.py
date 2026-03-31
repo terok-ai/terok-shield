@@ -229,6 +229,22 @@ class TestDnsLogWatcher:
         assert isinstance(watcher.fileno(), int)
         watcher.close()
 
+    def test_init_closes_fh_on_refresh_failure(self, tmp_path: Path) -> None:
+        """File handle is closed if _refresh_domains() raises during __init__."""
+        sd = tmp_path / "state"
+        sd.mkdir()
+        log = sd / "dnsmasq.log"
+        log.write_text("")
+        # Make read_merged_domains raise by putting an unreadable file
+        domains = sd / "profile.domains"
+        domains.write_text(f"{TEST_DOMAIN}\n")
+        with patch("terok_shield.watch.dnsmasq.read_merged_domains", side_effect=OSError("boom")):
+            with pytest.raises(OSError, match="boom"):
+                DnsLogWatcher(log, sd, _CONTAINER)
+        # File handle should be closed — opening again must succeed (not leak fds)
+        with log.open() as f:
+            assert f.readable()
+
 
 # ── Tier validation ─────────────────────────────────────
 
