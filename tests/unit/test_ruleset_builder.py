@@ -58,7 +58,7 @@ class TestRulesetBuilderBuildHook:
         assert "policy drop" in rs
 
     def test_includes_deny_log(self) -> None:
-        """Hook ruleset includes deny log prefix."""
+        """Hook ruleset includes deny nflog prefix."""
         builder = RulesetBuilder()
         rs = builder.build_hook()
         assert "TEROK_SHIELD_DENIED" in rs
@@ -74,7 +74,7 @@ class TestRulesetBuilderBuildBypass:
         assert "policy accept" in rs
 
     def test_includes_bypass_log(self) -> None:
-        """Bypass ruleset includes bypass log prefix."""
+        """Bypass ruleset includes bypass nflog prefix."""
         builder = RulesetBuilder()
         rs = builder.build_bypass()
         assert BYPASS_LOG_PREFIX in rs
