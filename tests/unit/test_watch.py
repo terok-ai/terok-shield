@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
+import terok_shield.watch as _watch_mod
 from terok_shield.config import DnsTier
 from terok_shield.watch import (
     _DOMAIN_REFRESH_INTERVAL,
@@ -23,6 +24,14 @@ from terok_shield.watch import (
 from tests.testnet import BLOCKED_DOMAIN, BLOCKED_SUBDOMAIN, TEST_DOMAIN, TEST_DOMAIN2
 
 _CONTAINER = "test-container"
+
+
+@pytest.fixture(autouse=False)
+def _restore_running() -> None:
+    """Capture and restore ``terok_shield.watch._running`` around tests that mutate it."""
+    original = _watch_mod._running
+    yield  # type: ignore[misc]
+    _watch_mod._running = original
 
 
 # ── WatchEvent ──────────────────────────────────────────
@@ -281,21 +290,21 @@ class TestDomainRefresh:
 # ── Signal handler ──────────────────────────────────────
 
 
+@pytest.mark.usefixtures("_restore_running")
 class TestSignalHandler:
     """Test the SIGINT/SIGTERM handler."""
 
     def test_handle_signal_sets_running_false(self) -> None:
         """_handle_signal() clears the module-level _running flag."""
-        import terok_shield.watch as watch_mod
-
-        watch_mod._running = True
+        _watch_mod._running = True
         _handle_signal(2, None)
-        assert watch_mod._running is False
+        assert _watch_mod._running is False
 
 
 # ── run_watch happy path ────────────────────────────────
 
 
+@pytest.mark.usefixtures("_restore_running")
 class TestRunWatchHappyPath:
     """Test run_watch() select loop, event output, and log file creation."""
 
@@ -319,9 +328,7 @@ class TestRunWatchHappyPath:
         def _stop_after_one(*_args: object, **_kwargs: object) -> tuple[list, list, list]:
             nonlocal call_count
             call_count += 1
-            import terok_shield.watch as watch_mod
-
-            watch_mod._running = False
+            _watch_mod._running = False
             return ([], [], [])
 
         with patch("terok_shield.watch.select.select", side_effect=_stop_after_one):
@@ -347,9 +354,7 @@ class TestRunWatchHappyPath:
                     f.write(f"query[A] {BLOCKED_DOMAIN} from 127.0.0.1\n")
                 return ([True], [], [])
             # Stop on second iteration
-            import terok_shield.watch as watch_mod
-
-            watch_mod._running = False
+            _watch_mod._running = False
             return ([], [], [])
 
         with patch("terok_shield.watch.select.select", side_effect=_select_then_stop):
@@ -376,9 +381,7 @@ class TestRunWatchHappyPath:
                 with log.open("a") as f:
                     f.write(f"query[A] {TEST_DOMAIN} from 127.0.0.1\n")
                 return ([True], [], [])
-            import terok_shield.watch as watch_mod
-
-            watch_mod._running = False
+            _watch_mod._running = False
             return ([], [], [])
 
         with patch("terok_shield.watch.select.select", side_effect=_select_then_stop):
