@@ -20,7 +20,6 @@ from .nft_constants import (
     ALLOWED_LOG_PREFIX,
     BYPASS_LOG_PREFIX,
     DENIED_LOG_PREFIX,
-    NFLOG_GROUP,
     NFT_TABLE,
     PASTA_DNS,
     PASTA_HOST_LOOPBACK_MAP,
@@ -102,7 +101,7 @@ def _private_range_rules(prefix: str = PRIVATE_LOG_PREFIX) -> str:
     """
     return "\n".join(
         f"        {'ip' if _is_v4(net) else 'ip6'} daddr {net}"
-        f' nflog group {NFLOG_GROUP} prefix "{prefix}: " reject with icmpx admin-prohibited'
+        f' log prefix "{prefix}: " reject with icmpx admin-prohibited'
         for net in PRIVATE_RANGES
     )
 
@@ -114,7 +113,7 @@ def _audit_deny_rule() -> str:
     auto-selects ICMP (IPv4) or ICMPv6 (IPv6).
     """
     return (
-        f'        nflog group {NFLOG_GROUP} prefix "{DENIED_LOG_PREFIX}: " counter\n'
+        f'        log prefix "{DENIED_LOG_PREFIX}: " counter\n'
         "        reject with icmpx admin-prohibited"
     )
 
@@ -126,8 +125,8 @@ def _audit_allow_rules() -> str:
     ``ct state established,related accept`` is earlier in the chain.
     """
     return (
-        f'        ip daddr @allow_v4 nflog group {NFLOG_GROUP} prefix "{ALLOWED_LOG_PREFIX}: " counter accept\n'
-        f'        ip6 daddr @allow_v6 nflog group {NFLOG_GROUP} prefix "{ALLOWED_LOG_PREFIX}: " counter accept'
+        f'        ip daddr @allow_v4 log prefix "{ALLOWED_LOG_PREFIX}: " counter accept\n'
+        f'        ip6 daddr @allow_v6 log prefix "{ALLOWED_LOG_PREFIX}: " counter accept'
     )
 
 
@@ -363,9 +362,7 @@ def bypass_ruleset(
     set_v4 = _set_declaration("allow_v4", "ipv4_addr", set_timeout)
     set_v6 = _set_declaration("allow_v6", "ipv6_addr", set_timeout)
     private_block = "" if allow_all else f"\n{_private_range_rules()}"
-    bypass_log = (
-        f'        ct state new nflog group {NFLOG_GROUP} prefix "{BYPASS_LOG_PREFIX}: " counter'
-    )
+    bypass_log = f'        ct state new log prefix "{BYPASS_LOG_PREFIX}: " counter'
     return textwrap.dedent(f"""\
         table {NFT_TABLE} {{
             {set_v4}
@@ -496,7 +493,7 @@ def verify_ruleset(nft_output: str) -> list[str]:
     - Default policy is drop
     - Both output and input chains exist
     - Reject type is present
-    - Deny nflog prefix is present
+    - Deny log prefix is present
     - All private ranges are present (RFC 1918 + RFC 4193/4291)
     - Dual-stack allow sets are declared
     """
@@ -509,7 +506,7 @@ def verify_ruleset(nft_output: str) -> list[str]:
     if "admin-prohibited" not in nft_output:
         errors.append("reject type missing")
     if DENIED_LOG_PREFIX not in nft_output:
-        errors.append("deny nflog prefix missing")
+        errors.append("deny log prefix missing")
     if "allow_v4" not in nft_output:
         errors.append("allow_v4 set missing")
     if "allow_v6" not in nft_output:
@@ -524,7 +521,7 @@ def verify_bypass_ruleset(nft_output: str, *, allow_all: bool = False) -> list[s
     Verifies:
     - Output chain has policy accept
     - Input chain has policy drop
-    - Bypass nflog prefix is present
+    - Bypass log prefix is present
     - Dual-stack allow sets are declared
     - Private-range reject rules present (unless *allow_all*)
     """
@@ -537,7 +534,7 @@ def verify_bypass_ruleset(nft_output: str, *, allow_all: bool = False) -> list[s
         if f"chain {chain}" not in nft_output:
             errors.append(f"{chain} chain missing")
     if BYPASS_LOG_PREFIX not in nft_output:
-        errors.append("bypass nflog prefix missing")
+        errors.append("bypass log prefix missing")
     if "allow_v4" not in nft_output:
         errors.append("allow_v4 set missing")
     if "allow_v6" not in nft_output:
