@@ -18,6 +18,7 @@ from terok_shield.watch import (
     _QUERY_RE,
     DnsLogWatcher,
     WatchEvent,
+    _enable_query_logging,
     _handle_signal,
     run_watch,
 )
@@ -389,3 +390,60 @@ class TestRunWatchHappyPath:
             run_watch(dnsmasq_state, _CONTAINER)
 
         assert capsys.readouterr().out == ""
+
+
+# ── _enable_query_logging ───────────────────────────────
+
+
+class TestEnableQueryLogging:
+    """Test on-demand dnsmasq query logging activation."""
+
+    def test_noop_when_config_missing(self, tmp_path: Path) -> None:
+        """No-op when dnsmasq.conf does not exist (non-dnsmasq tier)."""
+        sd = tmp_path / "state"
+        sd.mkdir()
+        log = sd / "dnsmasq.log"
+        _enable_query_logging(sd, log)
+        assert not log.exists()
+
+    def test_noop_when_already_enabled(self, tmp_path: Path) -> None:
+        """No-op (besides touching log file) when log-queries is already in config."""
+        sd = tmp_path / "state"
+        sd.mkdir()
+        conf = sd / "dnsmasq.conf"
+        conf.write_text("log-queries\nlog-facility=/some/path\n")
+        log = sd / "dnsmasq.log"
+        _enable_query_logging(sd, log)
+        # Config unchanged, log file created
+        assert "log-facility=/some/path" in conf.read_text()
+        assert log.exists()
+
+    def test_appends_directives_and_sighups(self, tmp_path: Path) -> None:
+        """Appends log directives, creates log file, and SIGHUPs dnsmasq."""
+        sd = tmp_path / "state"
+        sd.mkdir()
+        conf = sd / "dnsmasq.conf"
+        conf.write_text("port=53\nbind-interfaces\n")
+        log = sd / "dnsmasq.log"
+        pid_file = sd / "dnsmasq.pid"
+        pid_file.write_text("99999\n")
+
+        with patch("terok_shield.watch.os.kill") as mock_kill:
+            _enable_query_logging(sd, log)
+
+        updated = conf.read_text()
+        assert "log-queries" in updated
+        assert f"log-facility={log}" in updated
+        assert log.exists()
+        mock_kill.assert_called_once_with(99999, _watch_mod.signal.SIGHUP)
+
+    def test_sighup_tolerates_dead_process(self, tmp_path: Path) -> None:
+        """SIGHUP is best-effort — no error if dnsmasq is already dead."""
+        sd = tmp_path / "state"
+        sd.mkdir()
+        (sd / "dnsmasq.conf").write_text("port=53\n")
+        (sd / "dnsmasq.pid").write_text("99999\n")
+
+        with patch("terok_shield.watch.os.kill", side_effect=ProcessLookupError):
+            _enable_query_logging(sd, sd / "dnsmasq.log")
+        # No exception raised
