@@ -141,30 +141,15 @@ def _handle_signal(_signum: int, _frame: object) -> None:
     _running = False
 
 
-def _enable_query_logging(state_dir: Path, log_path: Path) -> None:
-    """Enable dnsmasq query logging by rewriting the config and signalling reload.
+def _ensure_log_file(log_path: Path) -> None:
+    """Create the dnsmasq log file if it does not exist yet.
 
-    Appends ``log-queries`` + ``log-facility=<path>`` to the dnsmasq config
-    if not already present, creates the log file, and sends SIGHUP to make
-    dnsmasq re-read its config.  No-op if logging is already enabled.
+    ``pre_start()`` configures ``log-facility=<path>`` in the dnsmasq
+    config, but dnsmasq may not have written any queries yet when
+    ``shield watch`` starts.  Creating the file ensures the watcher
+    can open it immediately.
     """
-    conf_path = state.dnsmasq_conf_path(state_dir)
-    if not conf_path.is_file():
-        return
-    conf = conf_path.read_text()
-    if "log-queries" in conf:
-        log_path.touch(exist_ok=True)
-        return
-    conf += f"log-queries\nlog-facility={log_path}\n"
-    conf_path.write_text(conf)
     log_path.touch(exist_ok=True)
-    # SIGHUP dnsmasq so it picks up the new config
-    pid_path = state.dnsmasq_pid_path(state_dir)
-    if pid_path.is_file():
-        try:
-            os.kill(int(pid_path.read_text().strip()), signal.SIGHUP)
-        except (OSError, ValueError):
-            pass
 
 
 def run_watch(state_dir: Path, container: str) -> None:
@@ -198,7 +183,7 @@ def run_watch(state_dir: Path, container: str) -> None:
         raise SystemExit(1)
 
     log_path = state.dnsmasq_log_path(state_dir)
-    _enable_query_logging(state_dir, log_path)
+    _ensure_log_file(log_path)
 
     global _running  # noqa: PLW0603
     _running = True

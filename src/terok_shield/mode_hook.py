@@ -320,7 +320,12 @@ class HookMode:
         # the tier has changed on a reused state directory.
         if tier == DnsTier.DNSMASQ:
             domains = dnsmasq.read_merged_domains(sd)
-            conf = dnsmasq.generate_config(upstream_dns, domains, state.dnsmasq_pid_path(sd))
+            conf = dnsmasq.generate_config(
+                upstream_dns,
+                domains,
+                state.dnsmasq_pid_path(sd),
+                log_path=state.dnsmasq_log_path(sd),
+            )
             state.dnsmasq_conf_path(sd).write_text(conf)
             state.resolv_conf_path(sd).write_text("nameserver 127.0.0.1\noptions ndots:0\n")
         else:

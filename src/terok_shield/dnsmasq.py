@@ -274,7 +274,7 @@ def reload(state_dir: Path, upstream_dns: str, domains: list[str]) -> None:
         )
 
     # Regenerate config, then signal dnsmasq to re-read it.
-    # Preserve log-queries/log-facility if watch enabled them.
+    # Preserve log-queries/log-facility if pre_start enabled them.
     pid_path = state.dnsmasq_pid_path(state_dir)
     conf_path = state.dnsmasq_conf_path(state_dir)
     old_conf = conf_path.read_text() if conf_path.is_file() else ""
