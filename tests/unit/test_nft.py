@@ -14,6 +14,7 @@ from collections.abc import Callable
 import pytest
 
 from terok_shield.nft import (
+    _is_v4,
     _safe_timeout,
     add_elements,
     add_elements_dual,
@@ -117,6 +118,14 @@ def test_safe_ip_rejects_invalid_input(raw: str) -> None:
     """safe_ip() rejects hostnames, injections, and malformed addresses."""
     with pytest.raises(ValueError):
         safe_ip(raw)
+
+
+# ── _is_v4() -------------------------------------------------------------
+
+
+def test_is_v4_returns_false_for_garbage() -> None:
+    """_is_v4() returns False (not raises) for unparseable input."""
+    assert _is_v4("not-an-ip") is False
 
 
 # ── hook_ruleset() ----------------------------------------------------

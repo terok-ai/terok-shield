@@ -18,6 +18,7 @@ from terok_shield.registry import (
     _handle_preview,
     _handle_profiles,
     _handle_status,
+    _handle_watch,
 )
 
 
@@ -117,6 +118,13 @@ class TestHandlers:
         shield.state.return_value = ShieldState.UP
         _handle_status(shield, container="ctr")
         assert capsys.readouterr().out.strip() == "up"
+
+    def test_handle_watch_delegates_to_run_watch(self) -> None:
+        """_handle_watch calls run_watch with state_dir and container."""
+        shield = mock.MagicMock()
+        with mock.patch("terok_shield.watch.run_watch") as mock_run:
+            _handle_watch(shield, "ctr")
+        mock_run.assert_called_once_with(shield.config.state_dir, "ctr")
 
     def test_handle_preview_all_without_down_raises(self) -> None:
         """_handle_preview raises ValueError when allow_all without down."""

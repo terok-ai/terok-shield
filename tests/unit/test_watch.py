@@ -7,11 +7,19 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from terok_shield.config import DnsTier
-from terok_shield.watch import _QUERY_RE, DnsLogWatcher, WatchEvent
+from terok_shield.watch import (
+    _DOMAIN_REFRESH_INTERVAL,
+    _QUERY_RE,
+    DnsLogWatcher,
+    WatchEvent,
+    _handle_signal,
+    run_watch,
+)
 from tests.testnet import BLOCKED_DOMAIN, BLOCKED_SUBDOMAIN, TEST_DOMAIN, TEST_DOMAIN2
 
 _CONTAINER = "test-container"
@@ -237,6 +245,147 @@ class TestRunWatchValidation:
         sd = tmp_path / "state"
         sd.mkdir()
         with pytest.raises(SystemExit, match="1"):
-            from terok_shield.watch import run_watch
-
             run_watch(sd, _CONTAINER)
+
+
+# ── Domain refresh ──────────────────────────────────────
+
+
+class TestDomainRefresh:
+    """Test that DnsLogWatcher refreshes its domain set after the interval."""
+
+    def test_poll_refreshes_domains_after_interval(self, tmp_path: Path) -> None:
+        """poll() reloads the allowed domain set when the refresh interval elapses."""
+        sd = tmp_path / "state"
+        sd.mkdir()
+        (sd / "profile.domains").write_text(f"{TEST_DOMAIN}\n")
+        log = sd / "dnsmasq.log"
+        log.write_text("")
+
+        # Monotonic clock: first call returns 0 (init), second returns beyond threshold
+        clock = iter([0.0, 0.0, _DOMAIN_REFRESH_INTERVAL + 1.0])
+        with patch("terok_shield.watch._monotonic", side_effect=lambda: next(clock)):
+            watcher = DnsLogWatcher(log, sd, _CONTAINER)
+
+        # Add BLOCKED_DOMAIN to allowed set *after* watcher was created
+        (sd / "profile.domains").write_text(f"{TEST_DOMAIN}\n{BLOCKED_DOMAIN}\n")
+
+        # Write a query — before refresh, BLOCKED_DOMAIN would be blocked
+        log.write_text(f"query[A] {BLOCKED_DOMAIN} from 127.0.0.1\n")
+
+        # Force the clock past the refresh threshold
+        with patch("terok_shield.watch._monotonic", return_value=_DOMAIN_REFRESH_INTERVAL + 1.0):
+            events = watcher.poll()
+        watcher.close()
+
+        # After refresh, the domain is now allowed — no event
+        assert events == []
+
+
+# ── Signal handler ──────────────────────────────────────
+
+
+class TestSignalHandler:
+    """Test the SIGINT/SIGTERM handler."""
+
+    def test_handle_signal_sets_running_false(self) -> None:
+        """_handle_signal() clears the module-level _running flag."""
+        import terok_shield.watch as watch_mod
+
+        watch_mod._running = True
+        _handle_signal(2, None)
+        assert watch_mod._running is False
+
+
+# ── run_watch happy path ────────────────────────────────
+
+
+class TestRunWatchHappyPath:
+    """Test run_watch() select loop, event output, and log file creation."""
+
+    @pytest.fixture
+    def dnsmasq_state(self, tmp_path: Path) -> Path:
+        """State dir with dnsmasq tier and profile domains."""
+        sd = tmp_path / "state"
+        sd.mkdir()
+        (sd / "dns.tier").write_text(DnsTier.DNSMASQ.value)
+        (sd / "profile.domains").write_text(f"{TEST_DOMAIN}\n")
+        return sd
+
+    def test_creates_log_file_if_missing(self, dnsmasq_state: Path) -> None:
+        """run_watch() creates dnsmasq.log if it does not exist yet."""
+        log = dnsmasq_state / "dnsmasq.log"
+        assert not log.exists()
+
+        # Stop after one iteration
+        call_count = 0
+
+        def _stop_after_one(*_args: object, **_kwargs: object) -> tuple[list, list, list]:
+            nonlocal call_count
+            call_count += 1
+            import terok_shield.watch as watch_mod
+
+            watch_mod._running = False
+            return ([], [], [])
+
+        with patch("terok_shield.watch.select.select", side_effect=_stop_after_one):
+            run_watch(dnsmasq_state, _CONTAINER)
+
+        assert log.is_file()
+
+    def test_outputs_blocked_event_as_json(
+        self, dnsmasq_state: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """run_watch() prints a JSON line for each blocked query."""
+        log = dnsmasq_state / "dnsmasq.log"
+        log.write_text("")
+
+        iteration = 0
+
+        def _select_then_stop(*_args: object, **_kwargs: object) -> tuple[list, list, list]:
+            nonlocal iteration
+            iteration += 1
+            if iteration == 1:
+                # Simulate dnsmasq writing a query between select calls
+                with log.open("a") as f:
+                    f.write(f"query[A] {BLOCKED_DOMAIN} from 127.0.0.1\n")
+                return ([True], [], [])
+            # Stop on second iteration
+            import terok_shield.watch as watch_mod
+
+            watch_mod._running = False
+            return ([], [], [])
+
+        with patch("terok_shield.watch.select.select", side_effect=_select_then_stop):
+            run_watch(dnsmasq_state, _CONTAINER)
+
+        output = capsys.readouterr().out.strip()
+        parsed = json.loads(output)
+        assert parsed["domain"] == BLOCKED_DOMAIN
+        assert parsed["action"] == "blocked_query"
+
+    def test_allowed_domain_produces_no_output(
+        self, dnsmasq_state: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """run_watch() produces no output for queries to allowed domains."""
+        log = dnsmasq_state / "dnsmasq.log"
+        log.write_text("")
+
+        iteration = 0
+
+        def _select_then_stop(*_args: object, **_kwargs: object) -> tuple[list, list, list]:
+            nonlocal iteration
+            iteration += 1
+            if iteration == 1:
+                with log.open("a") as f:
+                    f.write(f"query[A] {TEST_DOMAIN} from 127.0.0.1\n")
+                return ([True], [], [])
+            import terok_shield.watch as watch_mod
+
+            watch_mod._running = False
+            return ([], [], [])
+
+        with patch("terok_shield.watch.select.select", side_effect=_select_then_stop):
+            run_watch(dnsmasq_state, _CONTAINER)
+
+        assert capsys.readouterr().out == ""
