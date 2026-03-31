@@ -435,7 +435,7 @@ def test_verify_ruleset_reports_errors_for_empty_input() -> None:
         pytest.param(_ALLOW_V4_SET, id="allow-v4-set"),
         pytest.param(_ALLOW_V6_SET, id="allow-v6-set"),
         pytest.param(BYPASS_LOG_PREFIX, id="bypass-log-prefix"),
-        pytest.param("ct state new nflog", id="logs-new-connections"),
+        pytest.param("ct state new log group", id="logs-new-connections"),
     ],
 )
 def test_bypass_ruleset_contains_required_fragments(fragment: str) -> None:
