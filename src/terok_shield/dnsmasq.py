@@ -158,8 +158,7 @@ def launch(
     # existence check is not fooled by a stale file from a reused state dir.
     _clear_pid_file(state_dir)
 
-    log_path = state.dnsmasq_log_path(state_dir)
-    config = generate_config(upstream_dns, domains, pid_path, log_path=log_path)
+    config = generate_config(upstream_dns, domains, pid_path)
     conf_path.write_text(config)
 
     # Launch dnsmasq inside the container's network namespace.
