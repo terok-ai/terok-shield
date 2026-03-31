@@ -23,6 +23,7 @@ Bundle layout::
     ├── deny.list                      # persistent deny overrides
     ├── dnsmasq.conf                   # generated dnsmasq configuration
     ├── dnsmasq.pid                    # dnsmasq PID (in container netns)
+    ├── dnsmasq.log                    # dnsmasq query log (for shield watch)
     ├── resolv.conf                    # bind-mounted over /etc/resolv.conf (dnsmasq tier)
     └── audit.jsonl                    # per-container audit log
 """
@@ -85,6 +86,11 @@ def dnsmasq_conf_path(state_dir: Path) -> Path:
 def dnsmasq_pid_path(state_dir: Path) -> Path:
     """Return the path to the dnsmasq PID file."""
     return state_dir / "dnsmasq.pid"
+
+
+def dnsmasq_log_path(state_dir: Path) -> Path:
+    """Return the path to the dnsmasq query log (tailed by ``shield watch``)."""
+    return state_dir / "dnsmasq.log"
 
 
 def ruleset_path(state_dir: Path) -> Path:

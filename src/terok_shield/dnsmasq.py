@@ -90,6 +90,8 @@ def generate_config(
     upstream_dns: str,
     domains: list[str],
     pid_path: Path,
+    *,
+    log_path: Path | None = None,
 ) -> str:
     """Generate a complete dnsmasq configuration.
 
@@ -97,6 +99,7 @@ def generate_config(
         upstream_dns: Upstream DNS forwarder (pasta or slirp4netns address).
         domains: Domain names for ``--nftset`` auto-population.
         pid_path: Path for the dnsmasq PID file.
+        log_path: If set, enable query logging to this file (for ``shield watch``).
 
     Raises:
         ValueError: If *upstream_dns* is not a valid IP address.
@@ -112,6 +115,8 @@ def generate_config(
         f"server={upstream_dns}",
         f"pid-file={pid_path}",
     ]
+    if log_path is not None:
+        lines += ["log-queries", f"log-facility={log_path}"]
     for domain in domains:
         try:
             lines.append(nftset_entry(domain))
@@ -153,7 +158,8 @@ def launch(
     # existence check is not fooled by a stale file from a reused state dir.
     _clear_pid_file(state_dir)
 
-    config = generate_config(upstream_dns, domains, pid_path)
+    log_path = state.dnsmasq_log_path(state_dir)
+    config = generate_config(upstream_dns, domains, pid_path, log_path=log_path)
     conf_path.write_text(config)
 
     # Launch dnsmasq inside the container's network namespace.
@@ -271,7 +277,8 @@ def reload(state_dir: Path, upstream_dns: str, domains: list[str]) -> None:
     # Regenerate config, then signal dnsmasq to re-read it
     pid_path = state.dnsmasq_pid_path(state_dir)
     conf_path = state.dnsmasq_conf_path(state_dir)
-    conf_path.write_text(generate_config(upstream_dns, domains, pid_path))
+    log_path = state.dnsmasq_log_path(state_dir)
+    conf_path.write_text(generate_config(upstream_dns, domains, pid_path, log_path=log_path))
     try:
         os.kill(pid_int, signal.SIGHUP)
     except ProcessLookupError as e:

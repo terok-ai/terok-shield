@@ -165,6 +165,13 @@ def _handle_check_environment(shield: Shield) -> None:
     _print_env_hint(result)
 
 
+def _handle_watch(shield: Shield, container: str) -> None:
+    """Stream blocked-access events as JSON lines."""
+    from .watch import run_watch
+
+    run_watch(shield.config.state_dir, container)
+
+
 def _handle_preview(shield: Shield, *, down: bool = False, allow_all: bool = False) -> None:
     """Show ruleset that would be applied."""
     if allow_all and not down:
@@ -254,6 +261,12 @@ COMMANDS: tuple[CommandDef, ...] = (
         name="rules",
         help="Show current nft rules for a container",
         handler=_handle_rules,
+        needs_container=True,
+    ),
+    CommandDef(
+        name="watch",
+        help="Stream blocked access events (requires dnsmasq tier)",
+        handler=_handle_watch,
         needs_container=True,
     ),
     # NOTE: CLI special-cases logs with --container optional for aggregated mode.

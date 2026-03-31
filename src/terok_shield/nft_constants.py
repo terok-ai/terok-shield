@@ -48,5 +48,13 @@ SLIRP4NETNS_DNS = "10.0.2.3"  # slirp4netns default DNS forwarder
 DNSMASQ_BIND = "127.0.0.1"  # dnsmasq listen address inside container
 NFT_SET_TIMEOUT_DNSMASQ = "30m"  # set element timeout when dnsmasq manages IPs
 
+# ── NFLOG ──────────────────────────────────────────────
+# nflog is a superset of log — it still writes to the kernel log AND makes
+# packets available via AF_NETLINK for userspace consumers (shield watch).
+NFLOG_GROUP = 100  # nflog group number for terok-shield rules
+
 # ── Log prefixes ───────────────────────────────────────
+DENIED_LOG_PREFIX = "TEROK_SHIELD_DENIED"
+PRIVATE_LOG_PREFIX = "TEROK_SHIELD_PRIVATE"
+ALLOWED_LOG_PREFIX = "TEROK_SHIELD_ALLOWED"
 BYPASS_LOG_PREFIX = "TEROK_SHIELD_BYPASS"

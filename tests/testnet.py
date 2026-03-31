@@ -22,6 +22,8 @@ CONTAINER_HOSTNAME = "host.containers.internal"
 TEST_DOMAIN = "github.com"
 TEST_DOMAIN2 = "example.org"  # Secondary test domain for multi-domain tests
 CUSTOM_DOMAIN = "custom.example.com"  # Fixture domain for user-override profile tests
+BLOCKED_DOMAIN = "evil.example.com"  # Domain NOT in any allowlist (for watch tests)
+BLOCKED_SUBDOMAIN = "api.evil.example.com"  # Subdomain of BLOCKED_DOMAIN
 
 # ── RFC 5737 TEST-NET addresses (non-routable, safe for unit tests) ──
 

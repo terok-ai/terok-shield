@@ -125,6 +125,25 @@ def test_generate_config_empty_domains(tmp_path: Path) -> None:
     assert f"server={PASTA_DNS}" in config
 
 
+def test_generate_config_with_log_path(tmp_path: Path) -> None:
+    """log_path enables query logging directives."""
+    pid_path = state.dnsmasq_pid_path(tmp_path)
+    log_path = state.dnsmasq_log_path(tmp_path)
+    config = generate_config(PASTA_DNS, [TEST_DOMAIN], pid_path, log_path=log_path)
+
+    assert "log-queries" in config
+    assert f"log-facility={log_path}" in config
+
+
+def test_generate_config_without_log_path(tmp_path: Path) -> None:
+    """Default (no log_path) omits query logging directives."""
+    pid_path = state.dnsmasq_pid_path(tmp_path)
+    config = generate_config(PASTA_DNS, [TEST_DOMAIN], pid_path)
+
+    assert "log-queries" not in config
+    assert "log-facility" not in config
+
+
 # ── launch ───────────────────────────────────────────────
 
 
