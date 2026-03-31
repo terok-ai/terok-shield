@@ -310,11 +310,12 @@ class TestRunWatchHappyPath:
 
     @pytest.fixture
     def dnsmasq_state(self, tmp_path: Path) -> Path:
-        """State dir with dnsmasq tier and profile domains."""
+        """State dir with dnsmasq tier, profile domains, and dnsmasq config."""
         sd = tmp_path / "state"
         sd.mkdir()
         (sd / "dns.tier").write_text(DnsTier.DNSMASQ.value)
         (sd / "profile.domains").write_text(f"{TEST_DOMAIN}\n")
+        (sd / "dnsmasq.conf").write_text("# stub config\n")
         return sd
 
     def test_creates_log_file_if_missing(self, dnsmasq_state: Path) -> None:

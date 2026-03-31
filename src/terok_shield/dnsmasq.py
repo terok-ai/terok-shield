@@ -273,10 +273,12 @@ def reload(state_dir: Path, upstream_dns: str, domains: list[str]) -> None:
             "Restart the container to recover."
         )
 
-    # Regenerate config, then signal dnsmasq to re-read it
+    # Regenerate config, then signal dnsmasq to re-read it.
+    # Preserve log-queries/log-facility if watch enabled them.
     pid_path = state.dnsmasq_pid_path(state_dir)
     conf_path = state.dnsmasq_conf_path(state_dir)
-    log_path = state.dnsmasq_log_path(state_dir)
+    old_conf = conf_path.read_text() if conf_path.is_file() else ""
+    log_path = state.dnsmasq_log_path(state_dir) if "log-queries" in old_conf else None
     conf_path.write_text(generate_config(upstream_dns, domains, pid_path, log_path=log_path))
     try:
         os.kill(pid_int, signal.SIGHUP)
