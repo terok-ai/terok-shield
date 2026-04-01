@@ -21,7 +21,7 @@ class TestPathResolution:
         monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
 
         root = _resolve_state_root()
-        assert root == tmp_path / "state" / "terok-shield"
+        assert root == tmp_path / "state" / "terok" / "shield"
 
     def test_config_root_with_xdg(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """XDG_CONFIG_HOME is respected."""
@@ -29,7 +29,7 @@ class TestPathResolution:
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
 
         root = _resolve_config_root()
-        assert root == tmp_path / "config" / "terok-shield"
+        assert root == tmp_path / "config" / "terok" / "shield"
 
     def test_explicit_overrides_xdg(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Explicit env var overrides XDG."""

@@ -26,7 +26,7 @@ def _resolve_state_root() -> Path:
         return Path(env)
     xdg = os.environ.get("XDG_STATE_HOME")
     base = Path(xdg) if xdg else Path.home() / ".local" / "state"
-    return base / "terok-shield"
+    return base / "terok" / "shield"
 
 
 def _resolve_config_root() -> Path:
@@ -36,7 +36,7 @@ def _resolve_config_root() -> Path:
         return Path(env)
     xdg = os.environ.get("XDG_CONFIG_HOME")
     base = Path(xdg) if xdg else Path.home() / ".config"
-    return base / "terok-shield"
+    return base / "terok" / "shield"
 
 
 def _parse_loopback_ports(raw: object) -> tuple[int, ...]:

@@ -755,7 +755,7 @@ def test_main_dispatch_errors_exit_1(
         ),
         pytest.param(
             {"XDG_STATE_HOME": str(FAKE_XDG_STATE_HOME)},
-            FAKE_XDG_STATE_HOME / "terok-shield",
+            FAKE_XDG_STATE_HOME / "terok" / "shield",
             id="xdg",
         ),
         pytest.param(
@@ -779,7 +779,7 @@ def test_resolve_state_root(
     )
     root = _resolve_state_root()
     if expected is None:
-        assert str(root).endswith("terok-shield")
+        assert str(root).endswith(str(Path("terok") / "shield"))
     else:
         assert root == expected
 
@@ -793,7 +793,7 @@ def test_resolve_state_root(
         ),
         pytest.param(
             {"XDG_CONFIG_HOME": str(FAKE_XDG_CONFIG_HOME)},
-            FAKE_XDG_CONFIG_HOME / "terok-shield",
+            FAKE_XDG_CONFIG_HOME / "terok" / "shield",
             id="xdg",
         ),
     ],
@@ -809,7 +809,7 @@ def test_resolve_config_root(
     )
     root = _resolve_config_root()
     if expected is None:
-        assert str(root).endswith("terok-shield")
+        assert str(root).endswith(str(Path("terok") / "shield"))
     else:
         assert root == expected
 
