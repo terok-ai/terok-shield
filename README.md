@@ -55,8 +55,8 @@ The default profile is `dev-standard`. To add a custom allowlist, create a
 `.txt` file with one domain or IP per line:
 
 ```bash
-mkdir -p ~/.config/terok-shield/profiles
-cat > ~/.config/terok-shield/profiles/my-project.txt << 'EOF'
+mkdir -p ~/.config/terok/shield/profiles
+cat > ~/.config/terok/shield/profiles/my-project.txt << 'EOF'
 api.example.com
 cdn.example.com
 203.0.113.10

@@ -4,8 +4,8 @@ terok-shield uses XDG-compliant directories and an optional YAML config file.
 
 ## Config file
 
-Optional. Located at `~/.config/terok-shield/config.yml`
-(or `$XDG_CONFIG_HOME/terok-shield/config.yml`).
+Optional. Located at `~/.config/terok/shield/config.yml`
+(or `$XDG_CONFIG_HOME/terok/shield/config.yml`).
 
 ```yaml
 mode: hook              # currently only "hook" is supported
@@ -39,13 +39,13 @@ topologies.
 
 ### State directory
 
-Default: `~/.local/state/terok-shield/`
+Default: `~/.local/state/terok/shield/`
 Override: `TEROK_SHIELD_STATE_DIR` or `--state-dir` flag
 
 Each container gets an isolated state bundle under `containers/`:
 
 ```text
-~/.local/state/terok-shield/
+~/.local/state/terok/shield/
 └── containers/
     └── my-container/
         ├── hooks/
@@ -89,7 +89,7 @@ Each container gets an isolated state bundle under `containers/`:
 
 ### Config directory
 
-Default: `~/.config/terok-shield/`
+Default: `~/.config/terok/shield/`
 Override: `TEROK_SHIELD_CONFIG_DIR`
 
 | Path | Contents |
