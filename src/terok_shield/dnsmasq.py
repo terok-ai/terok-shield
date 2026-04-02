@@ -124,7 +124,7 @@ def generate_config(
         try:
             lines.append(nftset_entry(domain))
         except ValueError:
-            logger.warning("generate_config: skipping invalid domain %r", domain)
+            logger.warning("generate_config: skipping invalid domain entry")
             continue
     return "\n".join(lines) + "\n"
 
@@ -370,9 +370,7 @@ def read_domains(domains_path: Path) -> list[str]:
         try:
             domains.append(_validate_domain(line))
         except ValueError:
-            logger.warning(
-                "read_domains: skipping invalid entry %r in %s", line.strip(), domains_path
-            )
+            logger.warning("read_domains: skipping invalid entry in %s", domains_path)
             continue
     return list(dict.fromkeys(domains))
 
