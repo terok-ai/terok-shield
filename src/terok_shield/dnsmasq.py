@@ -14,6 +14,7 @@ This module is the single owner of dnsmasq config format and CLI args.
 from __future__ import annotations
 
 import ipaddress
+import logging
 import os
 import re
 import signal
@@ -22,6 +23,8 @@ from pathlib import Path
 from . import state
 from .nft_constants import DNSMASQ_BIND, NFT_TABLE_NAME
 from .run import CommandRunner, ExecError
+
+logger = logging.getLogger(__name__)
 
 # ── Constants ────────────────────────────────────────────
 
@@ -121,7 +124,8 @@ def generate_config(
         try:
             lines.append(nftset_entry(domain))
         except ValueError:
-            continue  # skip invalid domains silently
+            logger.warning("generate_config: skipping invalid domain %r", domain)
+            continue
     return "\n".join(lines) + "\n"
 
 
@@ -366,6 +370,9 @@ def read_domains(domains_path: Path) -> list[str]:
         try:
             domains.append(_validate_domain(line))
         except ValueError:
+            logger.warning(
+                "read_domains: skipping invalid entry %r in %s", line.strip(), domains_path
+            )
             continue
     return list(dict.fromkeys(domains))
 
