@@ -523,7 +523,9 @@ class HookMode:
             )
         except ExecError as e:
             stderr = str(e).lower()
-            if "no such file" not in stderr and "element does not exist" not in stderr:
+            if not any(
+                pat in stderr for pat in ("no such file", "element does not exist", "not in set")
+            ):
                 logger.warning("nft delete element failed for %s: %s", ip, e)
 
         # Remove from live.allowed
