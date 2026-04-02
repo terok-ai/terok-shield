@@ -1,26 +1,47 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""Unit tests for the watch module (DNS log tailing and event stream)."""
+"""Unit tests for the watch module (DNS log, audit log, and NFLOG event streams)."""
 
 from __future__ import annotations
 
 import json
+import socket
+import struct
 from collections.abc import Generator
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 import terok_shield.watch as _watch_mod
 from terok_shield.config import DnsTier
+from terok_shield.nft_constants import (
+    ALLOWED_LOG_PREFIX,
+    BYPASS_LOG_PREFIX,
+    DENIED_LOG_PREFIX,
+    NFLOG_GROUP,
+    PRIVATE_LOG_PREFIX,
+)
 from terok_shield.watch import (
     _DOMAIN_REFRESH_INTERVAL,
+    _NFA_HDR,
+    _NFGEN_HDR,
+    _NFNL_SUBSYS_ULOG,
+    _NFULA_PAYLOAD,
+    _NFULA_PREFIX,
+    _NFULNL_MSG_PACKET,
+    _NLMSG_HDR,
     _QUERY_RE,
+    AuditLogWatcher,
     DnsLogWatcher,
+    NflogWatcher,
     WatchEvent,
+    _build_nflog_bind_msg,
     _ensure_log_file,
+    _extract_ip_dest,
     _handle_signal,
+    _parse_nflog_attrs,
     run_watch,
 )
 from tests.testnet import BLOCKED_DOMAIN, BLOCKED_SUBDOMAIN, TEST_DOMAIN, TEST_DOMAIN2
@@ -72,6 +93,52 @@ class TestWatchEvent:
         raw = event.to_json()
         assert ": " not in raw
         assert ", " not in raw
+
+    def test_to_json_omits_empty_optional_fields(self) -> None:
+        """Empty optional fields are omitted from JSON output."""
+        event = WatchEvent(
+            ts="2026-01-01T00:00:00+00:00",
+            source="audit",
+            action="allowed",
+            container=_CONTAINER,
+        )
+        parsed = json.loads(event.to_json())
+        assert "domain" not in parsed
+        assert "query_type" not in parsed
+        assert "port" not in parsed
+        assert "extra" not in parsed
+        assert parsed["source"] == "audit"
+        assert parsed["action"] == "allowed"
+
+    def test_to_json_includes_nonempty_optional_fields(self) -> None:
+        """Non-empty optional fields are included in JSON output."""
+        event = WatchEvent(
+            ts="2026-01-01T00:00:00+00:00",
+            source="nflog",
+            action="blocked_connection",
+            container=_CONTAINER,
+            dest="192.0.2.1",
+            port=443,
+            detail="TEROK_SHIELD_DENIED:",
+        )
+        parsed = json.loads(event.to_json())
+        assert parsed["dest"] == "192.0.2.1"
+        assert parsed["port"] == 443
+        assert parsed["detail"] == "TEROK_SHIELD_DENIED:"
+
+    def test_core_fields_always_present(self) -> None:
+        """Core fields are always present even when their values are empty-ish."""
+        event = WatchEvent(
+            ts="",
+            source="",
+            action="",
+            container="",
+        )
+        parsed = json.loads(event.to_json())
+        assert "ts" in parsed
+        assert "source" in parsed
+        assert "action" in parsed
+        assert "container" in parsed
 
 
 # ── Query regex ─────────────────────────────────────────
@@ -246,6 +313,407 @@ class TestDnsLogWatcher:
             assert f.readable()
 
 
+# ── AuditLogWatcher ────────────────────────────────────
+
+
+class TestAuditLogWatcher:
+    """Test AuditLogWatcher file tailing and event conversion."""
+
+    def test_new_audit_entry_produces_event(self, tmp_path: Path) -> None:
+        """A new JSON line in audit.jsonl yields a watch event."""
+        audit = tmp_path / "audit.jsonl"
+        audit.write_text("")
+        watcher = AuditLogWatcher(audit, _CONTAINER)
+        entry = {
+            "ts": "2026-04-01T12:00:00+00:00",
+            "container": _CONTAINER,
+            "action": "allowed",
+            "dest": "192.0.2.1",
+            "detail": "target=github.com",
+        }
+        with audit.open("a") as f:
+            f.write(json.dumps(entry, separators=(",", ":")) + "\n")
+        events = watcher.poll()
+        watcher.close()
+        assert len(events) == 1
+        assert events[0].source == "audit"
+        assert events[0].action == "allowed"
+        assert events[0].dest == "192.0.2.1"
+        assert events[0].detail == "target=github.com"
+        assert events[0].ts == "2026-04-01T12:00:00+00:00"
+
+    def test_empty_audit_log_produces_no_events(self, tmp_path: Path) -> None:
+        """poll() returns empty list when no new lines are available."""
+        audit = tmp_path / "audit.jsonl"
+        audit.write_text("")
+        watcher = AuditLogWatcher(audit, _CONTAINER)
+        events = watcher.poll()
+        watcher.close()
+        assert events == []
+
+    def test_malformed_json_is_skipped(self, tmp_path: Path) -> None:
+        """Malformed JSON lines are silently skipped."""
+        audit = tmp_path / "audit.jsonl"
+        audit.write_text("")
+        watcher = AuditLogWatcher(audit, _CONTAINER)
+        with audit.open("a") as f:
+            f.write("not valid json\n")
+            f.write('{"ts":"2026-04-01T00:00:00","action":"setup","container":"x"}\n')
+        events = watcher.poll()
+        watcher.close()
+        assert len(events) == 1
+        assert events[0].action == "setup"
+
+    def test_multiple_entries_in_batch(self, tmp_path: Path) -> None:
+        """Multiple audit lines appended at once are all processed."""
+        audit = tmp_path / "audit.jsonl"
+        audit.write_text("")
+        watcher = AuditLogWatcher(audit, _CONTAINER)
+        with audit.open("a") as f:
+            for action in ("setup", "allowed", "denied", "shield_down"):
+                entry = {"ts": "2026-04-01T00:00:00", "action": action, "container": _CONTAINER}
+                f.write(json.dumps(entry, separators=(",", ":")) + "\n")
+        events = watcher.poll()
+        watcher.close()
+        assert len(events) == 4
+        assert [e.action for e in events] == ["setup", "allowed", "denied", "shield_down"]
+
+    def test_fileno_returns_int(self, tmp_path: Path) -> None:
+        """fileno() returns a valid file descriptor for select()."""
+        audit = tmp_path / "audit.jsonl"
+        audit.write_text("")
+        watcher = AuditLogWatcher(audit, _CONTAINER)
+        assert isinstance(watcher.fileno(), int)
+        watcher.close()
+
+    def test_creates_missing_file(self, tmp_path: Path) -> None:
+        """AuditLogWatcher creates audit.jsonl if it does not exist."""
+        audit = tmp_path / "audit.jsonl"
+        assert not audit.exists()
+        watcher = AuditLogWatcher(audit, _CONTAINER)
+        assert audit.is_file()
+        watcher.close()
+
+    def test_preserves_existing_content(self, tmp_path: Path) -> None:
+        """AuditLogWatcher skips pre-existing lines (seeks to end on init)."""
+        audit = tmp_path / "audit.jsonl"
+        existing = {"ts": "2026-03-31T00:00:00", "action": "old", "container": _CONTAINER}
+        audit.write_text(json.dumps(existing, separators=(",", ":")) + "\n")
+        watcher = AuditLogWatcher(audit, _CONTAINER)
+        # No new content — should produce no events (old line was before seek)
+        events = watcher.poll()
+        watcher.close()
+        assert events == []
+
+    def test_blank_lines_are_skipped(self, tmp_path: Path) -> None:
+        """Blank lines in the audit log are silently skipped."""
+        audit = tmp_path / "audit.jsonl"
+        audit.write_text("")
+        watcher = AuditLogWatcher(audit, _CONTAINER)
+        with audit.open("a") as f:
+            f.write("\n\n")
+            f.write('{"ts":"2026-04-01T00:00:00","action":"shield_up","container":"x"}\n')
+            f.write("\n")
+        events = watcher.poll()
+        watcher.close()
+        assert len(events) == 1
+        assert events[0].action == "shield_up"
+
+    def test_missing_optional_fields_default_empty(self, tmp_path: Path) -> None:
+        """Audit entries with missing optional fields get empty-string defaults."""
+        audit = tmp_path / "audit.jsonl"
+        audit.write_text("")
+        watcher = AuditLogWatcher(audit, _CONTAINER)
+        entry = {"ts": "2026-04-01T00:00:00", "action": "setup", "container": _CONTAINER}
+        with audit.open("a") as f:
+            f.write(json.dumps(entry, separators=(",", ":")) + "\n")
+        events = watcher.poll()
+        watcher.close()
+        assert events[0].dest == ""
+        assert events[0].detail == ""
+
+
+# ── NflogWatcher ───────────────────────────────────────
+
+
+def _make_nflog_packet(
+    prefix: str,
+    dest_ip: str = "192.0.2.1",
+    proto: int = 6,
+    dest_port: int = 443,
+) -> bytes:
+    """Build a synthetic NFLOG netlink message for testing.
+
+    Constructs a minimal netlink + nfgenmsg + NFULA_PREFIX + NFULA_PAYLOAD
+    message that can be parsed by ``NflogWatcher._parse_messages``.
+    """
+    # Build the IP payload (minimal IPv4 header + TCP/UDP dest port)
+    ip_header = bytearray(20)
+    ip_header[0] = 0x45  # version=4, IHL=5
+    ip_header[9] = proto
+    ip_header[16:20] = socket.inet_aton(dest_ip)
+    # Transport header (4 bytes: src_port + dest_port)
+    transport = struct.pack("!HH", 12345, dest_port)
+    raw_ip = bytes(ip_header) + transport
+
+    # Build NFLOG attributes
+    attrs = b""
+
+    # NFULA_PREFIX attribute
+    prefix_bytes = prefix.encode("ascii") + b"\x00"
+    prefix_attr_len = _NFA_HDR.size + len(prefix_bytes)
+    attrs += _NFA_HDR.pack(prefix_attr_len, _NFULA_PREFIX)
+    attrs += prefix_bytes
+    # Pad to 4-byte alignment
+    pad = (4 - (prefix_attr_len % 4)) % 4
+    attrs += b"\x00" * pad
+
+    # NFULA_PAYLOAD attribute
+    payload_attr_len = _NFA_HDR.size + len(raw_ip)
+    attrs += _NFA_HDR.pack(payload_attr_len, _NFULA_PAYLOAD)
+    attrs += raw_ip
+    pad = (4 - (payload_attr_len % 4)) % 4
+    attrs += b"\x00" * pad
+
+    # nfgenmsg header
+    nfgen = _NFGEN_HDR.pack(2, 0, socket.htons(NFLOG_GROUP))  # AF_INET=2
+
+    # netlink message header
+    msg_type = (_NFNL_SUBSYS_ULOG << 8) | _NFULNL_MSG_PACKET
+    payload = nfgen + attrs
+    nlmsg = _NLMSG_HDR.pack(
+        _NLMSG_HDR.size + len(payload),
+        msg_type,
+        0,
+        0,
+        0,
+    )
+    return nlmsg + payload
+
+
+class TestExtractIpDest:
+    """Test raw IP packet destination extraction."""
+
+    def test_ipv4_tcp(self) -> None:
+        """Extracts destination IP and port from an IPv4/TCP packet."""
+        ip_header = bytearray(20)
+        ip_header[0] = 0x45  # version=4, IHL=5
+        ip_header[9] = 6  # TCP
+        ip_header[16:20] = socket.inet_aton("198.51.100.1")
+        transport = struct.pack("!HH", 54321, 8080)
+        dest, proto, port = _extract_ip_dest(bytes(ip_header) + transport)
+        assert dest == "198.51.100.1"
+        assert proto == 6
+        assert port == 8080
+
+    def test_ipv4_udp(self) -> None:
+        """Extracts destination IP and port from an IPv4/UDP packet."""
+        ip_header = bytearray(20)
+        ip_header[0] = 0x45
+        ip_header[9] = 17  # UDP
+        ip_header[16:20] = socket.inet_aton("203.0.113.1")
+        transport = struct.pack("!HH", 12345, 53)
+        dest, proto, port = _extract_ip_dest(bytes(ip_header) + transport)
+        assert dest == "203.0.113.1"
+        assert proto == 17
+        assert port == 53
+
+    def test_ipv6(self) -> None:
+        """Extracts destination IP and port from an IPv6/TCP packet."""
+        # Minimal IPv6 header: 40 bytes
+        ip6_header = bytearray(40)
+        ip6_header[0] = 0x60  # version=6
+        ip6_header[6] = 6  # Next Header = TCP
+        # Destination address at offset 24
+        ip6_header[24:40] = socket.inet_pton(socket.AF_INET6, "2001:db8::1")
+        transport = struct.pack("!HH", 54321, 443)
+        dest, proto, port = _extract_ip_dest(bytes(ip6_header) + transport)
+        assert dest == "2001:db8::1"
+        assert proto == 6
+        assert port == 443
+
+    def test_too_short_returns_empty(self) -> None:
+        """Packet shorter than minimum IP header returns empty tuple."""
+        assert _extract_ip_dest(b"\x45" * 10) == ("", 0, 0)
+
+    def test_unknown_version_returns_empty(self) -> None:
+        """Packet with unknown IP version returns empty tuple."""
+        pkt = bytearray(20)
+        pkt[0] = 0x35  # version=3 — invalid
+        assert _extract_ip_dest(bytes(pkt)) == ("", 0, 0)
+
+
+class TestParseNflogAttrs:
+    """Test NFLOG attribute TLV parsing."""
+
+    def test_parses_prefix_and_payload(self) -> None:
+        """Parses NFULA_PREFIX and NFULA_PAYLOAD attributes from raw data."""
+        prefix = b"TEROK_SHIELD_DENIED: \x00"
+        payload = b"\x45" + b"\x00" * 23  # minimal IP header
+
+        attrs_data = b""
+        # PREFIX attr
+        attr_len = _NFA_HDR.size + len(prefix)
+        attrs_data += _NFA_HDR.pack(attr_len, _NFULA_PREFIX) + prefix
+        pad = (4 - (attr_len % 4)) % 4
+        attrs_data += b"\x00" * pad
+        # PAYLOAD attr
+        attr_len = _NFA_HDR.size + len(payload)
+        attrs_data += _NFA_HDR.pack(attr_len, _NFULA_PAYLOAD) + payload
+        pad = (4 - (attr_len % 4)) % 4
+        attrs_data += b"\x00" * pad
+
+        parsed = _parse_nflog_attrs(attrs_data)
+        assert _NFULA_PREFIX in parsed
+        assert _NFULA_PAYLOAD in parsed
+        assert b"DENIED" in parsed[_NFULA_PREFIX]
+
+    def test_empty_data_returns_empty_dict(self) -> None:
+        """Empty data returns empty attribute dict."""
+        assert _parse_nflog_attrs(b"") == {}
+
+    def test_truncated_attr_stops_parsing(self) -> None:
+        """Attribute with length shorter than header stops parsing."""
+        # Attribute claiming 2-byte length (less than 4-byte header)
+        data = _NFA_HDR.pack(2, _NFULA_PREFIX)
+        assert _parse_nflog_attrs(data) == {}
+
+
+class TestBuildNflogBindMsg:
+    """Test NFLOG bind message construction."""
+
+    def test_produces_valid_netlink_message(self) -> None:
+        """Bind message has correct netlink header structure."""
+        msg = _build_nflog_bind_msg(NFLOG_GROUP)
+        # Must be at least nlmsg header size
+        assert len(msg) >= _NLMSG_HDR.size
+        nl_len, nl_type, _flags, _seq, _pid = _NLMSG_HDR.unpack_from(msg, 0)
+        assert nl_len == len(msg)
+        # Type should be ULOG subsystem + CONFIG msg
+        assert (nl_type >> 8) == _NFNL_SUBSYS_ULOG
+
+
+class TestNflogWatcherParsing:
+    """Test NflogWatcher message parsing (unit-level, no real netlink)."""
+
+    def _make_watcher(self) -> NflogWatcher:
+        """Create a NflogWatcher with a mock socket."""
+        mock_sock = MagicMock(spec=socket.socket)
+        mock_sock.fileno.return_value = 42
+        return NflogWatcher(mock_sock, _CONTAINER)
+
+    def test_denied_packet_produces_blocked_connection(self) -> None:
+        """NFLOG message with DENIED prefix yields blocked_connection event."""
+        watcher = self._make_watcher()
+        data = _make_nflog_packet(f"{DENIED_LOG_PREFIX}: ", "192.0.2.1", 6, 443)
+        events = watcher._parse_messages(data)
+        assert len(events) == 1
+        assert events[0].action == "blocked_connection"
+        assert events[0].dest == "192.0.2.1"
+        assert events[0].port == 443
+        assert events[0].source == "nflog"
+
+    def test_allowed_packet_produces_allowed_connection(self) -> None:
+        """NFLOG message with ALLOWED prefix yields allowed_connection event."""
+        watcher = self._make_watcher()
+        data = _make_nflog_packet(f"{ALLOWED_LOG_PREFIX}: ", "198.51.100.1", 6, 80)
+        events = watcher._parse_messages(data)
+        assert len(events) == 1
+        assert events[0].action == "allowed_connection"
+        assert events[0].dest == "198.51.100.1"
+
+    def test_private_range_packet(self) -> None:
+        """NFLOG message with PRIVATE prefix yields private_range event."""
+        watcher = self._make_watcher()
+        data = _make_nflog_packet(f"{PRIVATE_LOG_PREFIX}: ", "10.0.0.1", 6, 22)
+        events = watcher._parse_messages(data)
+        assert len(events) == 1
+        assert events[0].action == "private_range"
+
+    def test_bypass_packet(self) -> None:
+        """NFLOG message with BYPASS prefix yields bypass_connection event."""
+        watcher = self._make_watcher()
+        data = _make_nflog_packet(f"{BYPASS_LOG_PREFIX}: ", "203.0.113.1", 17, 53)
+        events = watcher._parse_messages(data)
+        assert len(events) == 1
+        assert events[0].action == "bypass_connection"
+        assert events[0].port == 53
+
+    def test_unknown_prefix_yields_nflog_action(self) -> None:
+        """NFLOG message with unrecognized prefix yields generic nflog action."""
+        watcher = self._make_watcher()
+        data = _make_nflog_packet("CUSTOM_PREFIX: ", "192.0.2.99", 6, 8080)
+        events = watcher._parse_messages(data)
+        assert len(events) == 1
+        assert events[0].action == "nflog"
+
+    def test_empty_payload_produces_no_event(self) -> None:
+        """NFLOG message without IP payload is skipped."""
+        watcher = self._make_watcher()
+        # Build a message with prefix but no payload attribute
+        prefix_bytes = b"TEROK_SHIELD_DENIED: \x00"
+        prefix_attr_len = _NFA_HDR.size + len(prefix_bytes)
+        attrs = _NFA_HDR.pack(prefix_attr_len, _NFULA_PREFIX) + prefix_bytes
+        pad = (4 - (prefix_attr_len % 4)) % 4
+        attrs += b"\x00" * pad
+
+        nfgen = _NFGEN_HDR.pack(2, 0, socket.htons(NFLOG_GROUP))
+        msg_type = (_NFNL_SUBSYS_ULOG << 8) | _NFULNL_MSG_PACKET
+        payload = nfgen + attrs
+        nlmsg = _NLMSG_HDR.pack(_NLMSG_HDR.size + len(payload), msg_type, 0, 0, 0) + payload
+        events = watcher._parse_messages(nlmsg)
+        assert events == []
+
+    def test_poll_reads_from_socket(self) -> None:
+        """poll() reads data from socket and parses into events."""
+        watcher = self._make_watcher()
+        data = _make_nflog_packet(f"{DENIED_LOG_PREFIX}: ", "192.0.2.1", 6, 443)
+        watcher._sock.recv.side_effect = [data, BlockingIOError]
+        events = watcher.poll()
+        assert len(events) == 1
+        assert events[0].action == "blocked_connection"
+
+    def test_poll_handles_blocking_io(self) -> None:
+        """poll() returns empty list when socket has no data."""
+        watcher = self._make_watcher()
+        watcher._sock.recv.side_effect = BlockingIOError
+        events = watcher.poll()
+        assert events == []
+
+    def test_fileno_delegates_to_socket(self) -> None:
+        """fileno() returns the socket's file descriptor."""
+        watcher = self._make_watcher()
+        assert watcher.fileno() == 42
+
+    def test_close_closes_socket(self) -> None:
+        """close() closes the underlying socket."""
+        watcher = self._make_watcher()
+        watcher.close()
+        watcher._sock.close.assert_called_once()
+
+
+class TestNflogWatcherCreate:
+    """Test NflogWatcher.create() factory method."""
+
+    def test_returns_none_on_oserror(self) -> None:
+        """create() returns None when AF_NETLINK socket fails."""
+        with patch("terok_shield.watch.socket.socket", side_effect=OSError("no netlink")):
+            result = NflogWatcher.create(_CONTAINER)
+        assert result is None
+
+    def test_returns_watcher_on_success(self) -> None:
+        """create() returns a NflogWatcher when socket succeeds."""
+        mock_sock = MagicMock(spec=socket.socket)
+        mock_sock.recv.side_effect = BlockingIOError  # ACK read
+        with patch("terok_shield.watch.socket.socket", return_value=mock_sock):
+            result = NflogWatcher.create(_CONTAINER)
+        assert result is not None
+        assert isinstance(result, NflogWatcher)
+        mock_sock.bind.assert_called_once_with((0, 0))
+        mock_sock.setblocking.assert_called_once_with(False)
+        result.close()
+
+
 # ── Tier validation ─────────────────────────────────────
 
 
@@ -355,7 +823,10 @@ class TestRunWatchHappyPath:
             _watch_mod._running = False
             return ([], [], [])
 
-        with patch("terok_shield.watch.select.select", side_effect=_stop_after_one):
+        with (
+            patch("terok_shield.watch.select.select", side_effect=_stop_after_one),
+            patch("terok_shield.watch.NflogWatcher.create", return_value=None),
+        ):
             run_watch(dnsmasq_state, _CONTAINER)
 
         assert log.is_file()
@@ -369,19 +840,22 @@ class TestRunWatchHappyPath:
 
         iteration = 0
 
-        def _select_then_stop(*_args: object, **_kwargs: object) -> tuple[list, list, list]:
+        def _select_then_stop(rlist: list, *_args: object, **_kwargs: object) -> tuple:
             nonlocal iteration
             iteration += 1
             if iteration == 1:
                 # Simulate dnsmasq writing a query between select calls
                 with log.open("a") as f:
                     f.write(f"query[A] {BLOCKED_DOMAIN} from 127.0.0.1\n")
-                return ([True], [], [])
+                return (rlist, [], [])
             # Stop on second iteration
             _watch_mod._running = False
             return ([], [], [])
 
-        with patch("terok_shield.watch.select.select", side_effect=_select_then_stop):
+        with (
+            patch("terok_shield.watch.select.select", side_effect=_select_then_stop),
+            patch("terok_shield.watch.NflogWatcher.create", return_value=None),
+        ):
             run_watch(dnsmasq_state, _CONTAINER)
 
         output = capsys.readouterr().out.strip()
@@ -398,20 +872,60 @@ class TestRunWatchHappyPath:
 
         iteration = 0
 
-        def _select_then_stop(*_args: object, **_kwargs: object) -> tuple[list, list, list]:
+        def _select_then_stop(rlist: list, *_args: object, **_kwargs: object) -> tuple:
             nonlocal iteration
             iteration += 1
             if iteration == 1:
                 with log.open("a") as f:
                     f.write(f"query[A] {TEST_DOMAIN} from 127.0.0.1\n")
-                return ([True], [], [])
+                return (rlist, [], [])
             _watch_mod._running = False
             return ([], [], [])
 
-        with patch("terok_shield.watch.select.select", side_effect=_select_then_stop):
+        with (
+            patch("terok_shield.watch.select.select", side_effect=_select_then_stop),
+            patch("terok_shield.watch.NflogWatcher.create", return_value=None),
+        ):
             run_watch(dnsmasq_state, _CONTAINER)
 
         assert capsys.readouterr().out == ""
+
+    def test_audit_events_appear_in_output(
+        self, dnsmasq_state: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """run_watch() outputs audit log events alongside DNS events."""
+        log = dnsmasq_state / "dnsmasq.log"
+        log.write_text("")
+        audit = dnsmasq_state / "audit.jsonl"
+        audit.write_text("")
+
+        iteration = 0
+
+        def _select_then_stop(rlist: list, *_args: object, **_kwargs: object) -> tuple:
+            nonlocal iteration
+            iteration += 1
+            if iteration == 1:
+                entry = {
+                    "ts": "2026-04-01T12:00:00",
+                    "action": "shield_up",
+                    "container": _CONTAINER,
+                }
+                with audit.open("a") as f:
+                    f.write(json.dumps(entry, separators=(",", ":")) + "\n")
+                return (rlist, [], [])
+            _watch_mod._running = False
+            return ([], [], [])
+
+        with (
+            patch("terok_shield.watch.select.select", side_effect=_select_then_stop),
+            patch("terok_shield.watch.NflogWatcher.create", return_value=None),
+        ):
+            run_watch(dnsmasq_state, _CONTAINER)
+
+        output = capsys.readouterr().out.strip()
+        parsed = json.loads(output)
+        assert parsed["source"] == "audit"
+        assert parsed["action"] == "shield_up"
 
 
 # ── _ensure_log_file ────────────────────────────────────

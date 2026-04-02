@@ -265,7 +265,7 @@ COMMANDS: tuple[CommandDef, ...] = (
     ),
     CommandDef(
         name="watch",
-        help="Stream blocked access events (requires dnsmasq tier)",
+        help="Stream shield events — DNS blocks, audit log, NFLOG packets (requires dnsmasq tier)",
         handler=_handle_watch,
         needs_container=True,
     ),
