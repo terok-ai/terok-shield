@@ -40,7 +40,7 @@ from pathlib import Path
 #   "dnsmasq.pid"    ↔  state.dnsmasq_pid_path()
 _ANN_STATE_DIR = "terok.shield.state_dir"
 _ANN_VERSION = "terok.shield.version"
-_BUNDLE_VERSION = 3
+_BUNDLE_VERSION = 4
 _TABLE = "inet terok_shield"
 
 

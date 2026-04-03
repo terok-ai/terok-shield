@@ -16,9 +16,11 @@ import pytest
 from terok_shield.nft import (
     _is_v4,
     _safe_timeout,
+    add_deny_elements_dual,
     add_elements,
     add_elements_dual,
     bypass_ruleset,
+    delete_deny_elements_dual,
     hook_ruleset,
     safe_ip,
     verify_bypass_ruleset,
@@ -50,8 +52,11 @@ from ..testnet import (
 
 _ALLOW_V4_SET = "set allow_v4 { type ipv4_addr; flags interval; }"
 _ALLOW_V6_SET = "set allow_v6 { type ipv6_addr; flags interval; }"
+_DENY_V4_SET = "set deny_v4 { type ipv4_addr; flags interval; }"
+_DENY_V6_SET = "set deny_v6 { type ipv6_addr; flags interval; }"
 _ALLOW_LOG_PREFIX = "TEROK_SHIELD_ALLOWED"
 _DENY_LOG_PREFIX = "TEROK_SHIELD_DENIED"
+_QUEUED_LOG_PREFIX = "TEROK_SHIELD_QUEUED"
 _ADMIN_PROHIBITED = "admin-prohibited"
 _INPUT_CHAIN = "chain input"
 _OUTPUT_CHAIN = "chain output"
@@ -139,6 +144,8 @@ def test_is_v4_returns_false_for_garbage() -> None:
         pytest.param(_INPUT_CHAIN, id="input-chain"),
         pytest.param(_ALLOW_V4_SET, id="allow-v4-set"),
         pytest.param(_ALLOW_V6_SET, id="allow-v6-set"),
+        pytest.param(_DENY_V4_SET, id="deny-v4-set"),
+        pytest.param(_DENY_V6_SET, id="deny-v6-set"),
         pytest.param(_LOOPBACK_ACCEPT, id="loopback-accept"),
         pytest.param(_ALLOW_LOG_PREFIX, id="allow-log-prefix"),
         pytest.param(_DENY_LOG_PREFIX, id="deny-log-prefix"),
@@ -207,6 +214,88 @@ def test_hook_ruleset_places_allow_sets_before_private_range_rejects() -> None:
     """Allow-set accepts must precede the private-range reject rules."""
     ruleset = hook_ruleset()
     assert ruleset.index("@allow_v4") < ruleset.index(RFC1918[0])
+
+
+def test_hook_ruleset_places_deny_sets_between_allow_and_private() -> None:
+    """Deny-set reject rules appear after allow-set accepts and before private-range rejects."""
+    ruleset = hook_ruleset()
+    allow_pos = ruleset.index("@allow_v4")
+    deny_pos = ruleset.index("@deny_v4")
+    private_pos = ruleset.index(RFC1918[0])
+    assert allow_pos < deny_pos < private_pos
+
+
+# ── Interactive mode ────────────────────────────────────
+
+
+def test_hook_ruleset_interactive_uses_queued_prefix() -> None:
+    """Interactive mode replaces the deny-all rule with a QUEUED prefix rule."""
+    ruleset = hook_ruleset(interactive=True)
+    assert _QUEUED_LOG_PREFIX in ruleset
+
+
+def test_hook_ruleset_interactive_does_not_have_deny_terminal_rule() -> None:
+    """Interactive mode must not include the terminal DENIED log line."""
+    ruleset = hook_ruleset(interactive=True)
+    # The deny sets still reference DENIED prefix -- but the terminal rule should use QUEUED.
+    # Split by lines: the terminal deny-all rule in non-interactive has a standalone
+    # DENIED line; interactive replaces it with QUEUED.
+    lines = ruleset.splitlines()
+    terminal_deny_lines = [
+        line.strip()
+        for line in lines
+        if line.strip().startswith("log group") and _DENY_LOG_PREFIX in line and "reject" in line
+    ]
+    assert terminal_deny_lines == [], "Terminal deny-all rule should not appear in interactive mode"
+
+
+def test_hook_ruleset_interactive_still_contains_deny_sets() -> None:
+    """Interactive mode still declares deny_v4 and deny_v6 sets."""
+    ruleset = hook_ruleset(interactive=True)
+    assert _DENY_V4_SET in ruleset
+    assert _DENY_V6_SET in ruleset
+
+
+def test_hook_ruleset_non_interactive_has_no_queued_prefix() -> None:
+    """Non-interactive (default) hook mode must not contain the QUEUED log prefix."""
+    ruleset = hook_ruleset(interactive=False)
+    assert _QUEUED_LOG_PREFIX not in ruleset
+
+
+def test_verify_ruleset_accepts_interactive_hook_ruleset() -> None:
+    """verify_ruleset() with interactive=True accepts the interactive hook ruleset."""
+    assert verify_ruleset(hook_ruleset(interactive=True), interactive=True) == []
+
+
+def test_verify_ruleset_interactive_rejects_non_interactive_ruleset() -> None:
+    """verify_ruleset() with interactive=True rejects a non-interactive ruleset."""
+    errors = verify_ruleset(hook_ruleset(interactive=False), interactive=True)
+    assert any("queued nflog prefix" in error for error in errors)
+
+
+def test_verify_ruleset_interactive_mode_cross_validates() -> None:
+    """Interactive ruleset passes interactive verify but not non-interactive, and vice versa."""
+    interactive_rs = hook_ruleset(interactive=True)
+    non_interactive_rs = hook_ruleset(interactive=False)
+    # Interactive ruleset passes interactive verify
+    assert verify_ruleset(interactive_rs, interactive=True) == []
+    # Non-interactive ruleset passes non-interactive verify
+    assert verify_ruleset(non_interactive_rs, interactive=False) == []
+    # Interactive verify rejects non-interactive (missing QUEUED prefix)
+    errors = verify_ruleset(non_interactive_rs, interactive=True)
+    assert any("queued nflog prefix" in e for e in errors)
+
+
+def test_verify_ruleset_checks_deny_sets() -> None:
+    """verify_ruleset() requires deny_v4 and deny_v6 sets in both modes."""
+    minimal = (
+        f"policy drop {_ADMIN_PROHIBITED} {_DENY_LOG_PREFIX} "
+        f"allow_v4 allow_v6 {_OUTPUT_CHAIN} {_INPUT_CHAIN}\n"
+        f"{_private_reject_rules()}"
+    )
+    errors = verify_ruleset(minimal)
+    assert "deny_v4 set missing" in errors
+    assert "deny_v6 set missing" in errors
 
 
 @pytest.mark.parametrize(
@@ -334,6 +423,95 @@ def test_add_elements_dual_classifies_by_address_family(ips: list[str], expected
 def test_add_elements_dual_returns_empty_when_no_valid_ips_remain(ips: list[str]) -> None:
     """add_elements_dual() returns an empty command batch when all inputs are invalid."""
     assert add_elements_dual(ips) == ""
+
+
+# ── add_deny_elements_dual() / delete_deny_elements_dual() -----------
+
+
+def _deny_add_element_command(set_name: str, *ips: str) -> str:
+    """Build the exact add-element command expected for deny sets."""
+    return f"add element {NFT_TABLE} {set_name} {{ {', '.join(ips)} }}\n"
+
+
+def _deny_delete_element_command(set_name: str, *ips: str) -> str:
+    """Build the exact delete-element command expected for deny sets."""
+    return f"delete element {NFT_TABLE} {set_name} {{ {', '.join(ips)} }}\n"
+
+
+@pytest.mark.parametrize(
+    ("ips", "expected"),
+    [
+        pytest.param(
+            [TEST_IP1, TEST_IP2],
+            _deny_add_element_command("deny_v4", TEST_IP1, TEST_IP2),
+            id="ipv4-only",
+        ),
+        pytest.param(
+            [IPV6_CLOUDFLARE],
+            _deny_add_element_command("deny_v6", IPV6_CLOUDFLARE),
+            id="ipv6-only",
+        ),
+        pytest.param(
+            [TEST_IP1, IPV6_CLOUDFLARE],
+            _deny_add_element_command("deny_v4", TEST_IP1)
+            + _deny_add_element_command("deny_v6", IPV6_CLOUDFLARE),
+            id="mixed-families",
+        ),
+        pytest.param(
+            [TEST_IP1, "invalid", IPV6_CLOUDFLARE],
+            _deny_add_element_command("deny_v4", TEST_IP1)
+            + _deny_add_element_command("deny_v6", IPV6_CLOUDFLARE),
+            id="skips-invalid",
+        ),
+    ],
+)
+def test_add_deny_elements_dual_classifies_by_family(ips: list[str], expected: str) -> None:
+    """add_deny_elements_dual() emits IPv4 deny commands before IPv6 deny commands."""
+    assert add_deny_elements_dual(ips) == expected
+
+
+@pytest.mark.parametrize(
+    "ips",
+    [pytest.param([], id="empty-list"), pytest.param(["bad", "worse"], id="all-invalid")],
+)
+def test_add_deny_elements_dual_returns_empty_when_no_valid_ips(ips: list[str]) -> None:
+    """add_deny_elements_dual() returns empty when all inputs are invalid."""
+    assert add_deny_elements_dual(ips) == ""
+
+
+@pytest.mark.parametrize(
+    ("ips", "expected"),
+    [
+        pytest.param(
+            [TEST_IP1, TEST_IP2],
+            _deny_delete_element_command("deny_v4", TEST_IP1, TEST_IP2),
+            id="ipv4-only",
+        ),
+        pytest.param(
+            [IPV6_CLOUDFLARE],
+            _deny_delete_element_command("deny_v6", IPV6_CLOUDFLARE),
+            id="ipv6-only",
+        ),
+        pytest.param(
+            [TEST_IP1, IPV6_CLOUDFLARE],
+            _deny_delete_element_command("deny_v4", TEST_IP1)
+            + _deny_delete_element_command("deny_v6", IPV6_CLOUDFLARE),
+            id="mixed-families",
+        ),
+    ],
+)
+def test_delete_deny_elements_dual_classifies_by_family(ips: list[str], expected: str) -> None:
+    """delete_deny_elements_dual() emits IPv4 delete commands before IPv6 ones."""
+    assert delete_deny_elements_dual(ips) == expected
+
+
+@pytest.mark.parametrize(
+    "ips",
+    [pytest.param([], id="empty-list"), pytest.param(["bad", "worse"], id="all-invalid")],
+)
+def test_delete_deny_elements_dual_returns_empty_when_no_valid_ips(ips: list[str]) -> None:
+    """delete_deny_elements_dual() returns empty when all inputs are invalid."""
+    assert delete_deny_elements_dual(ips) == ""
 
 
 # ── verify_ruleset() --------------------------------------------------

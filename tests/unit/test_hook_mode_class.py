@@ -246,9 +246,8 @@ def test_allow_and_deny_use_expected_nft_set(
 
     getattr(harness.mode, method)("test-ctr", ip)
 
-    nft_args = harness.runner.nft_via_nsenter.call_args.args
-    assert expected_action in nft_args
-    assert expected_set in nft_args
+    all_calls = harness.runner.nft_via_nsenter.call_args_list
+    assert any(expected_action in c.args and expected_set in c.args for c in all_calls)
 
 
 def test_allow_persists_and_deduplicates_live_allowed(

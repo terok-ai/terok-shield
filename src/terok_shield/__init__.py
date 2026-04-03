@@ -90,6 +90,28 @@ class EnvironmentCheck:
     setup_hint: str = ""
 
 
+def _read_installed_hook_version(hooks_dirs: list[Path]) -> int | None:
+    """Read ``_BUNDLE_VERSION`` from the installed hook entrypoint, or ``None``.
+
+    Scans each hooks directory for the entrypoint script and extracts the
+    version from the ``_BUNDLE_VERSION = N`` line.  Returns ``None`` if
+    not found or unparseable.
+    """
+    import re
+
+    pattern = re.compile(r"^_BUNDLE_VERSION\s*=\s*(\d+)", re.MULTILINE)
+    for d in hooks_dirs:
+        hook = d / "terok-shield-hook"
+        if hook.is_file():
+            try:
+                m = pattern.search(hook.read_text())
+                if m:
+                    return int(m.group(1))
+            except (OSError, ValueError):
+                pass
+    return None
+
+
 # ── Shield Facade ────────────────────────────────────────
 
 
@@ -188,6 +210,14 @@ class Shield:
                 sys_dir = system_hooks_dir()
                 hooks = "global-system" if has_global_hooks([sys_dir]) else "global-user"
                 health = "ok"
+                # Check hook version matches current package
+                hook_ver = _read_installed_hook_version(hooks_dirs)
+                if hook_ver is not None and hook_ver != state.BUNDLE_VERSION:
+                    health = "stale-hooks"
+                    issues.append(
+                        f"Installed hook version {hook_ver} != expected {state.BUNDLE_VERSION}. "
+                        "Run `terok-shield setup` to update."
+                    )
             else:
                 hooks = "not-installed"
                 health = "setup-needed"

@@ -113,10 +113,21 @@ depends_on = [
     "terok_shield.util",
 ]
 
-# Command registry — depends on watch for lazy-imported handler
+# Interactive verdict loop — NFLOG-based operator approval
+[[modules]]
+path = "terok_shield.interactive"
+depends_on = [
+    "terok_shield.nft",
+    "terok_shield.run",
+    "terok_shield.state",
+    "terok_shield.watch",
+]
+
+# Command registry — depends on watch + interactive for lazy-imported handlers
 [[modules]]
 path = "terok_shield.registry"
 depends_on = [
+    "terok_shield.interactive",
     "terok_shield.watch",
 ]
 

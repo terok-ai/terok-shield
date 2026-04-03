@@ -90,6 +90,7 @@ class TestAPISurface:
             "loopback_ports",
             "audit_enabled",
             "profiles_dir",
+            "interactive",
         ]
 
         cfg = make_config()
@@ -98,6 +99,7 @@ class TestAPISurface:
         assert cfg.loopback_ports == ()
         assert cfg.audit_enabled is True
         assert cfg.profiles_dir is None
+        assert cfg.interactive is False
 
     def test_shield_config_frozen(self, make_config):
         """ShieldConfig is frozen — assignment raises FrozenInstanceError."""

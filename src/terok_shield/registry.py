@@ -172,6 +172,13 @@ def _handle_watch(shield: Shield, container: str) -> None:
     run_watch(shield.config.state_dir, container)
 
 
+def _handle_interactive(shield: Shield, container: str) -> None:
+    """Start the interactive NFLOG verdict handler."""
+    from .interactive import run_interactive
+
+    run_interactive(shield.config.state_dir, container)
+
+
 def _handle_preview(shield: Shield, *, down: bool = False, allow_all: bool = False) -> None:
     """Show ruleset that would be applied."""
     if allow_all and not down:
@@ -206,6 +213,11 @@ COMMANDS: tuple[CommandDef, ...] = (
         standalone_only=True,
         args=(
             ArgDef(name="--profiles", nargs="+", help="Override default profiles"),
+            ArgDef(
+                name="--interactive",
+                action="store_true",
+                help="Enable NFLOG interactive verdict mode",
+            ),
             ArgDef(name="--json", action="store_true", dest="output_json", help="JSON output"),
         ),
     ),
@@ -214,7 +226,14 @@ COMMANDS: tuple[CommandDef, ...] = (
         help="Launch a shielded container via podman",
         needs_container=True,
         standalone_only=True,
-        args=(ArgDef(name="--profiles", nargs="+", help="Override default profiles"),),
+        args=(
+            ArgDef(name="--profiles", nargs="+", help="Override default profiles"),
+            ArgDef(
+                name="--interactive",
+                action="store_true",
+                help="Enable NFLOG interactive verdict mode",
+            ),
+        ),
     ),
     CommandDef(
         name="resolve",
@@ -267,6 +286,12 @@ COMMANDS: tuple[CommandDef, ...] = (
         name="watch",
         help="Stream shield events — DNS blocks, audit log, NFLOG packets (requires dnsmasq tier)",
         handler=_handle_watch,
+        needs_container=True,
+    ),
+    CommandDef(
+        name="interactive",
+        help="Start NFLOG verdict handler — rejected unknown packets presented for operator accept/deny",
+        handler=_handle_interactive,
         needs_container=True,
     ),
     # NOTE: CLI special-cases logs with --container optional for aggregated mode.

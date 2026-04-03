@@ -25,12 +25,13 @@ Bundle layout::
     ├── dnsmasq.pid                    # dnsmasq PID (in container netns)
     ├── dnsmasq.log                    # dnsmasq query log (for shield watch)
     ├── resolv.conf                    # bind-mounted over /etc/resolv.conf (dnsmasq tier)
+    ├── interactive                    # interactive tier marker (e.g. "nflog")
     └── audit.jsonl                    # per-container audit log
 """
 
 from pathlib import Path
 
-BUNDLE_VERSION = 3
+BUNDLE_VERSION = 4
 """Integer version of the state bundle layout.
 
 Bumped whenever the file layout changes in a backwards-incompatible way.
@@ -116,6 +117,24 @@ def upstream_dns_path(state_dir: Path) -> Path:
 def dns_tier_path(state_dir: Path) -> Path:
     """Return the path to the persisted DNS tier value."""
     return state_dir / "dns.tier"
+
+
+def interactive_path(state_dir: Path) -> Path:
+    """Return the path to the interactive tier marker file."""
+    return state_dir / "interactive"
+
+
+def read_interactive_tier(state_dir: Path) -> str | None:
+    """Read the interactive tier from the state bundle.
+
+    Returns ``"nflog"`` (or whatever tier string is stored) if the file
+    exists and contains a non-empty value, otherwise ``None``.
+    """
+    path = interactive_path(state_dir)
+    if not path.is_file():
+        return None
+    value = path.read_text().strip()
+    return value or None
 
 
 def live_domains_path(state_dir: Path) -> Path:

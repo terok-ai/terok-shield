@@ -26,6 +26,7 @@ from .nft_constants import (
     PASTA_HOST_LOOPBACK_MAP,
     PRIVATE_LOG_PREFIX,
     PRIVATE_RANGES,
+    QUEUED_LOG_PREFIX,
 )
 
 _SAFE_TIMEOUT_RE = re.compile(r"^\d+[smhd]$")
@@ -131,6 +132,30 @@ def _audit_allow_rules() -> str:
     )
 
 
+def _deny_set_rules() -> str:
+    """Generate deny-set match rules (IPv4 + IPv6).
+
+    Packets matching the deny sets are immediately rejected with an ICMP error.
+    Placed after allow-set rules, before private-range reject.
+    """
+    return (
+        f'        ip daddr @deny_v4 log group {NFLOG_GROUP} prefix "{DENIED_LOG_PREFIX}: " counter reject with icmpx admin-prohibited\n'
+        f'        ip6 daddr @deny_v6 log group {NFLOG_GROUP} prefix "{DENIED_LOG_PREFIX}: " counter reject with icmpx admin-prohibited'
+    )
+
+
+def _interactive_reject_rule() -> str:
+    """Generate the NFLOG+reject terminal rule for interactive mode.
+
+    Rejects unmatched packets immediately but logs them with the QUEUED prefix
+    so the interactive handler can detect them via NFLOG.
+    """
+    return (
+        f'        log group {NFLOG_GROUP} prefix "{QUEUED_LOG_PREFIX}: " '
+        f"counter reject with icmpx admin-prohibited"
+    )
+
+
 def _loopback_port_rules(ports: tuple[int, ...]) -> str:
     """Generate nft accept rules for host-loopback-proxy ports.
 
@@ -204,12 +229,13 @@ class RulesetBuilder:
         self._loopback_ports = loopback_ports
         self._set_timeout = set_timeout
 
-    def build_hook(self) -> str:
+    def build_hook(self, *, interactive: bool = False) -> str:
         """Generate the hook-mode (deny-all) nftables ruleset."""
         return hook_ruleset(
             dns=self._dns,
             loopback_ports=self._loopback_ports,
             set_timeout=self._set_timeout,
+            interactive=interactive,
         )
 
     def build_bypass(self, *, allow_all: bool = False) -> str:
@@ -221,9 +247,9 @@ class RulesetBuilder:
             set_timeout=self._set_timeout,
         )
 
-    def verify_hook(self, nft_output: str) -> list[str]:
+    def verify_hook(self, nft_output: str, *, interactive: bool = False) -> list[str]:
         """Check applied hook ruleset invariants.  Returns errors (empty = OK)."""
-        return verify_ruleset(nft_output)
+        return verify_ruleset(nft_output, interactive=interactive)
 
     def verify_bypass(self, nft_output: str, *, allow_all: bool = False) -> list[str]:
         """Check applied bypass ruleset invariants.  Returns errors (empty = OK)."""
@@ -260,6 +286,8 @@ def hook_ruleset(
     dns: str = PASTA_DNS,
     loopback_ports: tuple[int, ...] = (),
     set_timeout: str = "",
+    *,
+    interactive: bool = False,
 ) -> str:
     """Generate a per-container nftables ruleset for hook mode.
 
@@ -273,12 +301,14 @@ def hook_ruleset(
 
     Chain order (output):
         loopback -> established -> DNS -> gateway ports -> loopback ports
-        -> allow sets -> private-range reject -> deny
+        -> allow sets -> deny sets -> private-range reject -> deny/interactive-reject
 
     Args:
         dns: DNS server address (pasta default forwarder).
         loopback_ports: TCP ports to allow on the loopback interface.
         set_timeout: nft set element timeout (e.g. ``30m``).
+        interactive: When True, replaces the terminal deny-all rule with an
+            NFLOG+reject rule using the QUEUED prefix for interactive handling.
     """
     dns = safe_ip(dns)
     if set_timeout:
@@ -296,10 +326,15 @@ def hook_ruleset(
     dns_af = "ip" if _is_v4(dns) else "ip6"
     set_v4 = _set_declaration("allow_v4", "ipv4_addr", set_timeout)
     set_v6 = _set_declaration("allow_v6", "ipv6_addr", set_timeout)
+    set_deny_v4 = _set_declaration("deny_v4", "ipv4_addr")
+    set_deny_v6 = _set_declaration("deny_v6", "ipv6_addr")
+    terminal_rule = _interactive_reject_rule() if interactive else _audit_deny_rule()
     return textwrap.dedent(f"""\
         table {NFT_TABLE} {{
             {set_v4}
             {set_v6}
+            {set_deny_v4}
+            {set_deny_v6}
             set gateway_v4 {{ type ipv4_addr; }}
             set gateway_v6 {{ type ipv6_addr; }}
 
@@ -310,8 +345,9 @@ def hook_ruleset(
                 udp dport 53 {dns_af} daddr {dns} accept
                 tcp dport 53 {dns_af} daddr {dns} accept{infra_block}\
         {_audit_allow_rules()}
+        {_deny_set_rules()}
         {_private_range_rules()}
-        {_audit_deny_rule()}
+        {terminal_rule}
             }}
 
             chain input {{
@@ -470,6 +506,58 @@ def add_elements_dual(ips: list[str], *, permanent: bool = False) -> str:
     return "".join(parts)
 
 
+_DENY_V4 = "deny_v4"
+_DENY_V6 = "deny_v6"
+
+
+def add_deny_elements_dual(ips: list[str]) -> str:
+    """Classify IPs by family and generate add-element commands for deny sets.
+
+    IPv4 addresses go to ``deny_v4``, IPv6 to ``deny_v6``.
+    Returns empty string if no valid IPs.
+    """
+    v4: list[str] = []
+    v6: list[str] = []
+    for ip in ips:
+        try:
+            sanitized = safe_ip(ip)
+        except ValueError:
+            continue
+        (v4 if _is_v4(sanitized) else v6).append(sanitized)
+    parts: list[str] = []
+    cmd = add_elements(_DENY_V4, v4)
+    if cmd:
+        parts.append(cmd)
+    cmd = add_elements(_DENY_V6, v6)
+    if cmd:
+        parts.append(cmd)
+    return "".join(parts)
+
+
+def delete_deny_elements_dual(ips: list[str]) -> str:
+    """Classify IPs by family and generate delete-element commands for deny sets.
+
+    IPv4 addresses target ``deny_v4``, IPv6 target ``deny_v6``.
+    Returns empty string if no valid IPs.
+    """
+    v4: list[str] = []
+    v6: list[str] = []
+    for ip in ips:
+        try:
+            sanitized = safe_ip(ip)
+        except ValueError:
+            continue
+        (v4 if _is_v4(sanitized) else v6).append(sanitized)
+    parts: list[str] = []
+    if v4:
+        elements = ", ".join(v4)
+        parts.append(f"delete element {NFT_TABLE} {_DENY_V4} {{ {elements} }}\n")
+    if v6:
+        elements = ", ".join(v6)
+        parts.append(f"delete element {NFT_TABLE} {_DENY_V6} {{ {elements} }}\n")
+    return "".join(parts)
+
+
 # ── Verification ─────────────────────────────────────────
 
 
@@ -489,16 +577,18 @@ def _verify_private_blocks(nft_output: str) -> list[str]:
     return errors
 
 
-def verify_ruleset(nft_output: str) -> list[str]:
+def verify_ruleset(nft_output: str, *, interactive: bool = False) -> list[str]:
     """Check applied ruleset invariants.  Returns errors (empty = OK).
 
     Verifies:
     - Default policy is drop
     - Both output and input chains exist
     - Reject type is present
-    - Deny nflog prefix is present
-    - All private ranges are present (RFC 1918 + RFC 4193/4291)
     - Dual-stack allow sets are declared
+    - Dual-stack deny sets are declared
+    - All private ranges are present (RFC 1918 + RFC 4193/4291)
+    - Interactive mode: queued nflog prefix present
+    - Non-interactive mode: deny nflog prefix present
     """
     errors: list[str] = []
     if "policy drop" not in nft_output:
@@ -508,12 +598,20 @@ def verify_ruleset(nft_output: str) -> list[str]:
             errors.append(f"{chain} chain missing")
     if "admin-prohibited" not in nft_output:
         errors.append("reject type missing")
-    if DENIED_LOG_PREFIX not in nft_output:
-        errors.append("deny nflog prefix missing")
     if "allow_v4" not in nft_output:
         errors.append("allow_v4 set missing")
     if "allow_v6" not in nft_output:
         errors.append("allow_v6 set missing")
+    if "deny_v4" not in nft_output:
+        errors.append("deny_v4 set missing")
+    if "deny_v6" not in nft_output:
+        errors.append("deny_v6 set missing")
+    if interactive:
+        if QUEUED_LOG_PREFIX not in nft_output:
+            errors.append("queued nflog prefix missing")
+    else:
+        if DENIED_LOG_PREFIX not in nft_output:
+            errors.append("deny nflog prefix missing")
     errors.extend(_verify_private_blocks(nft_output))
     return errors
 

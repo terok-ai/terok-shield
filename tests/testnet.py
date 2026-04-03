@@ -91,6 +91,11 @@ CLOUDFLARE_DOMAIN = "one.one.one.one"  # Cloudflare DNS (always resolves)
 GOOGLE_DNS_DOMAIN = "dns.google"  # Google DNS (always resolves)
 NONEXISTENT_DOMAIN = "this-domain-does-not-exist.invalid"  # RFC 2606 reserved
 ALIAS_DOMAIN = "alias.example.com."  # CNAME-style answer for dig output filtering tests
+DNSMASQ_DOMAIN = "example.com"  # Generic domain for dnsmasq log parsing tests
+DNSMASQ_DOMAIN2 = "other.com"  # Secondary domain for dnsmasq cache tests
+STALE_DOMAIN = "old.com"  # Domain used to test cache rotation (replaced by new entries)
+FRESH_DOMAIN = "new.com"  # Domain used to test cache rotation (replaces stale entries)
+KEPT_DOMAIN = "kept.com"  # Domain that should survive OSError during cache refresh
 
 # ── IPv6 targets (used to verify IPv6 allowlisting and blocking) ──
 
