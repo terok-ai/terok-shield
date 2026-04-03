@@ -98,6 +98,26 @@ class TestLoadConfigFileWarnings:
         captured = capsys.readouterr()
         assert captured.err == ""
 
+    def test_unreadable_file_warns(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        config_root: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """An unreadable config file produces an OSError warning and returns {}."""
+        cfg = config_root / "config.yml"
+        cfg.write_text("mode: hook\n")
+        cfg.chmod(0o000)
+        monkeypatch.setenv("TEROK_SHIELD_CONFIG_DIR", str(config_root))
+
+        result = _load_config_file()
+
+        cfg.chmod(0o644)  # restore for cleanup
+        assert result == {}
+        captured = capsys.readouterr()
+        assert "Warning [shield]:" in captured.err
+        assert "failed to read" in captured.err
+
     def test_valid_config_no_warning(
         self,
         monkeypatch: pytest.MonkeyPatch,
