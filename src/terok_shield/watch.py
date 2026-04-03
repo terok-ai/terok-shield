@@ -204,6 +204,8 @@ class AuditLogWatcher:
                 entry = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if not isinstance(entry, dict):
+                continue
             events.append(
                 WatchEvent(
                     ts=entry.get("ts", datetime.now(UTC).isoformat()),
@@ -515,26 +517,33 @@ def run_watch(state_dir: Path, container: str) -> None:
     signal.signal(signal.SIGINT, _handle_signal)
     signal.signal(signal.SIGTERM, _handle_signal)
 
-    watchers: list[DnsLogWatcher | AuditLogWatcher | NflogWatcher] = []
     dns_watcher = DnsLogWatcher(log_path, state_dir, container)
-    watchers.append(dns_watcher)
-
     audit_watcher = AuditLogWatcher(state.audit_path(state_dir), container)
-    watchers.append(audit_watcher)
-
     nflog_watcher = NflogWatcher.create(container)
-    if nflog_watcher:
-        watchers.append(nflog_watcher)
 
     try:
         while _running:
-            readable, _, _ = select.select(watchers, [], [], 1.0)
-            for watcher in readable:
-                for event in watcher.poll():
-                    print(event.to_json(), flush=True)
+            # Only use select() for the netlink socket (real fd);
+            # regular files always appear readable in select() so we
+            # poll them unconditionally each iteration.
+            if nflog_watcher:
+                readable, _, _ = select.select([nflog_watcher], [], [], 1.0)
+                if readable:
+                    for event in nflog_watcher.poll():
+                        print(event.to_json(), flush=True)
+            else:
+                # No netlink socket — just sleep to avoid busy-looping
+                select.select([], [], [], 1.0)
+
+            for event in dns_watcher.poll():
+                print(event.to_json(), flush=True)
+            for event in audit_watcher.poll():
+                print(event.to_json(), flush=True)
     finally:
-        for w in watchers:
-            w.close()
+        dns_watcher.close()
+        audit_watcher.close()
+        if nflog_watcher:
+            nflog_watcher.close()
 
 
 def _monotonic() -> float:

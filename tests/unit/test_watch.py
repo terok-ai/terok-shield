@@ -419,6 +419,22 @@ class TestAuditLogWatcher:
         assert len(events) == 1
         assert events[0].action == "shield_up"
 
+    def test_non_dict_json_is_skipped(self, tmp_path: Path) -> None:
+        """JSON values that are not dicts (lists, strings, null) are silently skipped."""
+        audit = tmp_path / "audit.jsonl"
+        audit.write_text("")
+        watcher = AuditLogWatcher(audit, _CONTAINER)
+        with audit.open("a") as f:
+            f.write('"just a string"\n')
+            f.write("[1, 2, 3]\n")
+            f.write("null\n")
+            f.write("42\n")
+            f.write('{"ts":"2026-04-01T00:00:00","action":"setup","container":"x"}\n')
+        events = watcher.poll()
+        watcher.close()
+        assert len(events) == 1
+        assert events[0].action == "setup"
+
     def test_missing_optional_fields_default_empty(self, tmp_path: Path) -> None:
         """Audit entries with missing optional fields get empty-string defaults."""
         audit = tmp_path / "audit.jsonl"
@@ -814,17 +830,12 @@ class TestRunWatchHappyPath:
         log = dnsmasq_state / "dnsmasq.log"
         assert not log.exists()
 
-        # Stop after one iteration
-        call_count = 0
-
-        def _stop_after_one(*_args: object, **_kwargs: object) -> tuple[list, list, list]:
-            nonlocal call_count
-            call_count += 1
+        def _stop_immediately(*_args: object, **_kwargs: object) -> tuple[list, list, list]:
             _watch_mod._running = False
             return ([], [], [])
 
         with (
-            patch("terok_shield.watch.select.select", side_effect=_stop_after_one),
+            patch("terok_shield.watch.select.select", side_effect=_stop_immediately),
             patch("terok_shield.watch.NflogWatcher.create", return_value=None),
         ):
             run_watch(dnsmasq_state, _CONTAINER)
@@ -840,14 +851,14 @@ class TestRunWatchHappyPath:
 
         iteration = 0
 
-        def _select_then_stop(rlist: list, *_args: object, **_kwargs: object) -> tuple:
+        def _select_then_stop(*_args: object, **_kwargs: object) -> tuple:
             nonlocal iteration
             iteration += 1
             if iteration == 1:
                 # Simulate dnsmasq writing a query between select calls
                 with log.open("a") as f:
                     f.write(f"query[A] {BLOCKED_DOMAIN} from 127.0.0.1\n")
-                return (rlist, [], [])
+                return ([], [], [])
             # Stop on second iteration
             _watch_mod._running = False
             return ([], [], [])
@@ -872,13 +883,13 @@ class TestRunWatchHappyPath:
 
         iteration = 0
 
-        def _select_then_stop(rlist: list, *_args: object, **_kwargs: object) -> tuple:
+        def _select_then_stop(*_args: object, **_kwargs: object) -> tuple:
             nonlocal iteration
             iteration += 1
             if iteration == 1:
                 with log.open("a") as f:
                     f.write(f"query[A] {TEST_DOMAIN} from 127.0.0.1\n")
-                return (rlist, [], [])
+                return ([], [], [])
             _watch_mod._running = False
             return ([], [], [])
 
@@ -901,7 +912,7 @@ class TestRunWatchHappyPath:
 
         iteration = 0
 
-        def _select_then_stop(rlist: list, *_args: object, **_kwargs: object) -> tuple:
+        def _select_then_stop(*_args: object, **_kwargs: object) -> tuple:
             nonlocal iteration
             iteration += 1
             if iteration == 1:
@@ -912,7 +923,7 @@ class TestRunWatchHappyPath:
                 }
                 with audit.open("a") as f:
                     f.write(json.dumps(entry, separators=(",", ":")) + "\n")
-                return (rlist, [], [])
+                return ([], [], [])
             _watch_mod._running = False
             return ([], [], [])
 

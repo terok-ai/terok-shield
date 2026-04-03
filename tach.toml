@@ -95,6 +95,7 @@ path = "terok_shield.watch"
 depends_on = [
     "terok_shield.config",
     "terok_shield.dnsmasq",
+    "terok_shield.nft_constants",
     "terok_shield.state",
 ]
 
