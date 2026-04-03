@@ -56,7 +56,7 @@ class WatchEvent:
 
     Core fields (always present): ``ts``, ``source``, ``action``, ``container``.
     DNS-specific: ``domain``, ``query_type``.
-    Audit/NFLOG: ``dest``, ``detail``, ``port``.
+    Audit/NFLOG: ``dest``, ``detail``, ``port``, ``proto``.
     """
 
     ts: str
@@ -68,6 +68,7 @@ class WatchEvent:
     dest: str = ""
     detail: str = ""
     port: int = 0
+    proto: int = 0
     extra: dict[str, str] = field(default_factory=dict)
 
     def to_json(self) -> str:
@@ -323,6 +324,8 @@ def _extract_ip_dest(payload: bytes) -> tuple[str, int, int]:
             return (dest, proto, port)
         return ("", 0, 0)
     ihl = (payload[0] & 0xF) * 4
+    if ihl < 20:
+        return ("", 0, 0)
     proto = payload[9]
     dest = socket.inet_ntop(socket.AF_INET, payload[16:20])
     port = 0
@@ -363,19 +366,27 @@ class NflogWatcher:
             group: NFLOG group number to subscribe to.
         """
         try:
-            # NETLINK_NETFILTER = 12
+            # NETLINK_NETFILTER = 12; AF_NETLINK is Linux-only
             sock = socket.socket(socket.AF_NETLINK, socket.SOCK_RAW, 12)
             sock.bind((0, 0))
             sock.setblocking(False)
-            # Send the bind message
             sock.send(_build_nflog_bind_msg(group))
-            # Read the ACK (best-effort — non-blocking, may not arrive immediately)
+            # Parse the kernel's NLMSG_ERROR ACK to detect bind failures.
+            # NLMSG_ERROR layout: nlmsghdr (16 bytes) + error (int32).
             try:
-                sock.recv(4096)
+                ack = sock.recv(4096)
+                if len(ack) >= _NLMSG_HDR.size + 4:
+                    err = struct.unpack_from("=i", ack, _NLMSG_HDR.size)[0]
+                    if err < 0:
+                        sock.close()
+                        logger.debug("NFLOG bind rejected (errno %d) — skipping", -err)
+                        return None
             except BlockingIOError:
-                pass
+                pass  # ACK not yet available; proceed optimistically
             return cls(sock, container)
-        except OSError:
+        except (OSError, AttributeError):
+            # OSError: netlink unavailable; AttributeError: AF_NETLINK
+            # missing on non-Linux platforms.
             logger.debug("NFLOG socket unavailable — skipping packet events")
             return None
 
@@ -441,7 +452,7 @@ class NflogWatcher:
             action = "nflog"
 
         payload = attrs.get(_NFULA_PAYLOAD, b"")
-        dest, _proto, port = _extract_ip_dest(payload)
+        dest, proto, port = _extract_ip_dest(payload)
         if not dest:
             return None
 
@@ -452,6 +463,7 @@ class NflogWatcher:
             container=self._container,
             dest=dest,
             port=port,
+            proto=proto,
             detail=prefix,
         )
 

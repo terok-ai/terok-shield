@@ -558,6 +558,12 @@ class TestExtractIpDest:
         pkt[0] = 0x35  # version=3 — invalid
         assert _extract_ip_dest(bytes(pkt)) == ("", 0, 0)
 
+    def test_malformed_ihl_returns_empty(self) -> None:
+        """IPv4 packet with IHL < 5 (20 bytes) is rejected as malformed."""
+        pkt = bytearray(20)
+        pkt[0] = 0x43  # version=4, IHL=3 (12 bytes — below minimum)
+        assert _extract_ip_dest(bytes(pkt)) == ("", 0, 0)
+
 
 class TestParseNflogAttrs:
     """Test NFLOG attribute TLV parsing."""
@@ -627,6 +633,7 @@ class TestNflogWatcherParsing:
         assert events[0].action == "blocked_connection"
         assert events[0].dest == "192.0.2.1"
         assert events[0].port == 443
+        assert events[0].proto == 6
         assert events[0].source == "nflog"
 
     def test_allowed_packet_produces_allowed_connection(self) -> None:
@@ -654,6 +661,7 @@ class TestNflogWatcherParsing:
         assert len(events) == 1
         assert events[0].action == "bypass_connection"
         assert events[0].port == 53
+        assert events[0].proto == 17
 
     def test_unknown_prefix_yields_nflog_action(self) -> None:
         """NFLOG message with unrecognized prefix yields generic nflog action."""
@@ -742,6 +750,35 @@ class TestNflogWatcherCreate:
         assert isinstance(result, NflogWatcher)
         mock_sock.bind.assert_called_once_with((0, 0))
         mock_sock.setblocking.assert_called_once_with(False)
+        result.close()
+
+    def test_returns_none_on_attribute_error(self) -> None:
+        """create() returns None on non-Linux where AF_NETLINK is missing."""
+        with patch("terok_shield.watch.socket.socket", side_effect=AttributeError):
+            result = NflogWatcher.create(_CONTAINER)
+        assert result is None
+
+    def test_returns_none_on_bind_nack(self) -> None:
+        """create() returns None when the kernel ACK contains a negative error code."""
+        mock_sock = MagicMock(spec=socket.socket)
+        # Build an NLMSG_ERROR ACK with errno -1 (EPERM)
+        ack_payload = struct.pack("=i", -1)
+        ack = _NLMSG_HDR.pack(_NLMSG_HDR.size + len(ack_payload), 2, 0, 0, 0) + ack_payload
+        mock_sock.recv.return_value = ack
+        with patch("terok_shield.watch.socket.socket", return_value=mock_sock):
+            result = NflogWatcher.create(_CONTAINER)
+        assert result is None
+        mock_sock.close.assert_called_once()
+
+    def test_returns_watcher_on_success_ack(self) -> None:
+        """create() succeeds when the kernel ACK has error code 0."""
+        mock_sock = MagicMock(spec=socket.socket)
+        ack_payload = struct.pack("=i", 0)
+        ack = _NLMSG_HDR.pack(_NLMSG_HDR.size + len(ack_payload), 2, 0, 0, 0) + ack_payload
+        mock_sock.recv.return_value = ack
+        with patch("terok_shield.watch.socket.socket", return_value=mock_sock):
+            result = NflogWatcher.create(_CONTAINER)
+        assert result is not None
         result.close()
 
 
