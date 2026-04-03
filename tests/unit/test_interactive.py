@@ -23,7 +23,15 @@ from terok_shield.interactive import (
 )
 from terok_shield.nfqueue import QueuedPacket
 
-from ..testnet import TEST_IP1, TEST_IP2
+from ..testnet import (
+    DNSMASQ_DOMAIN,
+    DNSMASQ_DOMAIN2,
+    FRESH_DOMAIN,
+    KEPT_DOMAIN,
+    STALE_DOMAIN,
+    TEST_IP1,
+    TEST_IP2,
+)
 
 
 def _make_session(tmp_path: Path, **kwargs) -> InteractiveSession:
@@ -92,10 +100,10 @@ class TestPendingPacket:
     def test_fields(self) -> None:
         """Stores packet, queued_at, domain."""
         pkt = _make_pkt()
-        pp = _PendingPacket(packet=pkt, queued_at=1.0, domain="example.com")
+        pp = _PendingPacket(packet=pkt, queued_at=1.0, domain=DNSMASQ_DOMAIN)
         assert pp.packet is pkt
         assert pp.queued_at == 1.0
-        assert pp.domain == "example.com"
+        assert pp.domain == DNSMASQ_DOMAIN
 
     def test_default_domain(self) -> None:
         """Domain defaults to empty string."""
@@ -133,11 +141,11 @@ class TestHandleQueued:
     ) -> None:
         """Domain is included when IP is in the domain cache."""
         session = _make_session(tmp_path)
-        session._ip_to_domain[TEST_IP1] = "example.com"
+        session._ip_to_domain[TEST_IP1] = DNSMASQ_DOMAIN
         session._handle_queued(_make_pkt())
 
         event = json.loads(capsys.readouterr().out.strip())
-        assert event["domain"] == "example.com"
+        assert event["domain"] == DNSMASQ_DOMAIN
 
 
 # ── InteractiveSession._process_command ────────────────
@@ -305,29 +313,31 @@ class TestRefreshDomainCache:
         """Reply lines in dnsmasq log populate the IP→domain cache."""
         state.ensure_state_dirs(tmp_path)
         log = state.dnsmasq_log_path(tmp_path)
-        log.write_text(f"reply example.com is {TEST_IP1}\nreply other.com is {TEST_IP2}\n")
+        log.write_text(
+            f"reply {DNSMASQ_DOMAIN} is {TEST_IP1}\nreply {DNSMASQ_DOMAIN2} is {TEST_IP2}\n"
+        )
 
         session = _make_session(tmp_path)
         session._refresh_domain_cache()
 
-        assert session._ip_to_domain[TEST_IP1] == "example.com"
-        assert session._ip_to_domain[TEST_IP2] == "other.com"
+        assert session._ip_to_domain[TEST_IP1] == DNSMASQ_DOMAIN
+        assert session._ip_to_domain[TEST_IP2] == DNSMASQ_DOMAIN2
 
     def test_rebuilds_fresh_on_each_call(self, tmp_path: Path) -> None:
         """Cache is rebuilt from scratch, dropping stale entries after log rotation."""
         state.ensure_state_dirs(tmp_path)
         log = state.dnsmasq_log_path(tmp_path)
-        log.write_text(f"reply old.com is {TEST_IP1}\n")
+        log.write_text(f"reply {STALE_DOMAIN} is {TEST_IP1}\n")
 
         session = _make_session(tmp_path)
         session._refresh_domain_cache()
         assert TEST_IP1 in session._ip_to_domain
 
         # Simulate log rotation
-        log.write_text(f"reply new.com is {TEST_IP2}\n")
+        log.write_text(f"reply {FRESH_DOMAIN} is {TEST_IP2}\n")
         session._refresh_domain_cache()
         assert TEST_IP1 not in session._ip_to_domain
-        assert session._ip_to_domain[TEST_IP2] == "new.com"
+        assert session._ip_to_domain[TEST_IP2] == FRESH_DOMAIN
 
     def test_missing_log_no_error(self, tmp_path: Path) -> None:
         """Missing log file doesn't raise."""
@@ -339,16 +349,16 @@ class TestRefreshDomainCache:
         """OSError during read keeps the previous cache intact."""
         state.ensure_state_dirs(tmp_path)
         log = state.dnsmasq_log_path(tmp_path)
-        log.write_text(f"reply kept.com is {TEST_IP1}\n")
+        log.write_text(f"reply {KEPT_DOMAIN} is {TEST_IP1}\n")
 
         session = _make_session(tmp_path)
         session._refresh_domain_cache()
-        assert session._ip_to_domain[TEST_IP1] == "kept.com"
+        assert session._ip_to_domain[TEST_IP1] == KEPT_DOMAIN
 
         # Simulate OSError on next read (e.g. permission denied mid-rotation)
         with mock.patch.object(type(log), "read_text", side_effect=OSError("perm")):
             session._refresh_domain_cache()
-        assert session._ip_to_domain[TEST_IP1] == "kept.com"
+        assert session._ip_to_domain[TEST_IP1] == KEPT_DOMAIN
 
 
 # ── InteractiveSession._apply_verdict ──────────────────

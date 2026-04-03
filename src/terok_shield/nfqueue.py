@@ -134,6 +134,7 @@ class NfqueueHandler:
         Args:
             queue_num: NFQUEUE group number to bind to.
         """
+        sock: socket.socket | None = None
         try:
             sock = socket.socket(socket.AF_NETLINK, socket.SOCK_RAW, NETLINK_NETFILTER)
             sock.bind((0, 0))
@@ -154,6 +155,8 @@ class NfqueueHandler:
             return cls(sock, queue_num)
         except (OSError, AttributeError):
             logger.debug("NFQUEUE socket unavailable — interactive mode disabled")
+            if sock is not None:
+                sock.close()
             return None
 
     def fileno(self) -> int:

@@ -258,7 +258,7 @@ class InteractiveSession:
         if accept:
             from .nft import add_elements_dual
 
-            nft_cmd = add_elements_dual([ip])
+            nft_cmd = add_elements_dual([ip], permanent=True)
         else:
             from .nft import add_deny_elements_dual
 
@@ -365,6 +365,7 @@ def run_interactive(state_dir: Path, container: str, *, timeout: int = 5) -> Non
         SystemExit: If interactive mode is not enabled or NFQUEUE
             cannot be bound.
     """
+    state_dir = state_dir.resolve()
     if not interactive_path(state_dir).is_file():
         print("Error: interactive mode is not enabled for this container.", file=sys.stderr)
         raise SystemExit(1)
