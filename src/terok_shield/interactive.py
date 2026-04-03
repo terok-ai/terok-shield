@@ -118,10 +118,7 @@ class InteractiveSession:
             )
             raise SystemExit(1)
 
-        # Build initial domain cache from dnsmasq log
         self._refresh_domain_cache()
-
-        # Make stdin non-blocking for select()
         stdin_fd = sys.stdin.fileno()
         _set_nonblocking(stdin_fd)
 
@@ -133,31 +130,48 @@ class InteractiveSession:
         try:
             self._loop(handler, stdin_fd)
         finally:
+            self._drain_pending(handler)
             handler.close()
+
+    def _drain_pending(self, handler: NfqueueHandler) -> None:
+        """Reject all remaining pending packets on shutdown."""
+        for _pid, pending in self._pending.items():
+            handler.verdict(pending.packet.packet_id, accept=False)
+        self._pending.clear()
 
     def _loop(self, handler: NfqueueHandler, stdin_fd: int) -> None:
         """Core select() loop: NFQUEUE socket + stdin + timeout sweep."""
         stdin_buf = ""
         while _running:
-            readable, _, _ = select.select([handler, stdin_fd], [], [], 1.0)
-
-            # Read queued packets
-            if handler.fileno() in (r if isinstance(r, int) else r.fileno() for r in readable):
-                for pkt in handler.poll():
-                    self._handle_queued(pkt)
-
-            # Read stdin commands
-            if stdin_fd in (r if isinstance(r, int) else r.fileno() for r in readable):
-                stdin_buf = self._read_stdin(handler, stdin_buf)
-                if stdin_buf is None:
-                    break  # stdin closed
-
-            # Sweep timed-out packets
+            readable = self._select_readable(handler, stdin_fd)
+            self._poll_nfqueue(handler, readable)
+            stdin_buf = self._poll_stdin(handler, stdin_buf, readable)
+            if stdin_buf is None:
+                break
             self._sweep_timeouts(handler)
+            self._maybe_refresh_domains()
 
-            # Periodically refresh domain cache
-            if time.monotonic() - self._last_domain_refresh > _DOMAIN_REFRESH_INTERVAL:
-                self._refresh_domain_cache()
+    def _select_readable(self, handler: NfqueueHandler, stdin_fd: int) -> set[int]:
+        """Run select() and return a set of ready file descriptors."""
+        readable, _, _ = select.select([handler, stdin_fd], [], [], 1.0)
+        return {r if isinstance(r, int) else r.fileno() for r in readable}
+
+    def _poll_nfqueue(self, handler: NfqueueHandler, ready: set[int]) -> None:
+        """Read queued packets if the NFQUEUE socket is ready."""
+        if handler.fileno() in ready:
+            for pkt in handler.poll():
+                self._handle_queued(pkt)
+
+    def _poll_stdin(self, handler: NfqueueHandler, buf: str, ready: set[int]) -> str | None:
+        """Read and process stdin commands if stdin is ready."""
+        if sys.stdin.fileno() not in ready:
+            return buf
+        return self._read_stdin(handler, buf)
+
+    def _maybe_refresh_domains(self) -> None:
+        """Refresh domain cache if the refresh interval has elapsed."""
+        if time.monotonic() - self._last_domain_refresh > _DOMAIN_REFRESH_INTERVAL:
+            self._refresh_domain_cache()
 
     def _handle_queued(self, pkt: QueuedPacket) -> None:
         """Process a newly queued packet: enrich, emit, track."""
@@ -165,7 +179,7 @@ class InteractiveSession:
         pending = _PendingPacket(packet=pkt, queued_at=time.monotonic(), domain=domain)
         self._pending[pkt.packet_id] = pending
 
-        event = {
+        event: dict = {
             "type": "pending",
             "id": pkt.packet_id,
             "dest": pkt.dest,
@@ -223,10 +237,10 @@ class InteractiveSession:
 
         accept = action == "accept"
         handler.verdict(pending.packet.packet_id, accept=accept)
-        self._apply_verdict(pending, accept=accept)
+        ok = self._apply_verdict(pending, accept=accept)
 
-        result = {
-            "type": "verdict_applied",
+        result: dict = {
+            "type": "verdict_applied" if ok else "verdict_failed",
             "id": packet_id,
             "action": action,
             "dest": pending.packet.dest,
@@ -235,26 +249,32 @@ class InteractiveSession:
             result["domain"] = pending.domain
         print(json.dumps(result, separators=(",", ":")), flush=True)
 
-    def _apply_verdict(self, pending: _PendingPacket, *, accept: bool) -> None:
-        """Persist the verdict to nft sets and state files."""
+    def _apply_verdict(self, pending: _PendingPacket, *, accept: bool) -> bool:
+        """Persist the verdict to nft sets and state files.
+
+        Returns True on success, False if the nft update failed.
+        """
         ip = pending.packet.dest
         if accept:
             from .nft import add_elements_dual
 
             nft_cmd = add_elements_dual([ip])
-            if nft_cmd:
-                self._nft_apply(nft_cmd)
-            _append_unique(state.live_allowed_path(self._state_dir), ip)
         else:
             from .nft import add_deny_elements_dual
 
             nft_cmd = add_deny_elements_dual([ip])
-            if nft_cmd:
-                self._nft_apply(nft_cmd)
-            _append_unique(state.deny_path(self._state_dir), ip)
 
-    def _nft_apply(self, nft_cmd: str) -> None:
-        """Apply nft commands via nsenter into the container's netns."""
+        if nft_cmd and not self._nft_apply(nft_cmd):
+            return False
+
+        target = (
+            state.live_allowed_path(self._state_dir) if accept else state.deny_path(self._state_dir)
+        )
+        _append_unique(target, ip)
+        return True
+
+    def _nft_apply(self, nft_cmd: str) -> bool:
+        """Apply nft commands via nsenter.  Returns True on success."""
         for line in nft_cmd.strip().splitlines():
             parts = line.strip().split()
             if parts:
@@ -262,6 +282,8 @@ class InteractiveSession:
                     self._runner.nft_via_nsenter(self._container, *parts)
                 except Exception:
                     logger.warning("Failed to apply nft command: %s", line)
+                    return False
+        return True
 
     def _sweep_timeouts(self, handler: NfqueueHandler) -> None:
         """Drop packets that have exceeded the verdict timeout."""
@@ -270,7 +292,7 @@ class InteractiveSession:
         for pid in expired:
             pending = self._pending.pop(pid)
             handler.verdict(pending.packet.packet_id, accept=False)
-            event = {
+            event: dict = {
                 "type": "verdict_timeout",
                 "id": pid,
                 "dest": pending.packet.dest,
@@ -283,20 +305,23 @@ class InteractiveSession:
     def _refresh_domain_cache(self) -> None:
         """Refresh IP→domain cache from the dnsmasq query log.
 
-        Parses ``reply`` lines to map resolved IPs back to domain names.
-        Called periodically so long-running sessions learn new DNS replies.
+        Builds a fresh cache on each call so log rotation doesn't leave
+        stale entries.  Called periodically during the select loop.
         """
         log_path = state.dnsmasq_log_path(self._state_dir)
         if not log_path.is_file():
+            self._last_domain_refresh = time.monotonic()
             return
+        new_map: dict[str, str] = {}
         try:
             for line in log_path.read_text().splitlines():
                 m = _REPLY_RE.search(line)
                 if m:
                     domain, ip = m.group(1).lower().rstrip("."), m.group(2)
-                    self._ip_to_domain[ip] = domain
+                    new_map[ip] = domain
         except OSError:
             pass
+        self._ip_to_domain = new_map
         self._last_domain_refresh = time.monotonic()
 
 

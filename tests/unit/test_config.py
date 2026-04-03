@@ -224,3 +224,53 @@ class TestShieldFileConfigAuditValidation:
         """audit.enabled must be a boolean."""
         with pytest.raises(ValidationError):
             ShieldFileConfig(audit={"enabled": "yes-please"})  # type: ignore[arg-type]
+
+
+# ── Interactive / NFQUEUE config fields ────────────────
+
+
+class TestInteractiveConfig:
+    """Pydantic + dataclass validation for interactive mode fields."""
+
+    def test_file_config_defaults(self) -> None:
+        """ShieldFileConfig defaults: interactive=False, nfqueue_timeout=5."""
+        cfg = ShieldFileConfig()
+        assert cfg.interactive is False
+        assert cfg.nfqueue_timeout == 5
+
+    def test_file_config_accepts_valid(self) -> None:
+        """Valid interactive + nfqueue_timeout are accepted."""
+        cfg = ShieldFileConfig(interactive=True, nfqueue_timeout=30)
+        assert cfg.interactive is True
+        assert cfg.nfqueue_timeout == 30
+
+    def test_file_config_rejects_timeout_zero(self) -> None:
+        """nfqueue_timeout=0 is rejected by Pydantic (ge=1)."""
+        with pytest.raises(ValidationError):
+            ShieldFileConfig(nfqueue_timeout=0)
+
+    def test_file_config_rejects_timeout_too_large(self) -> None:
+        """nfqueue_timeout=61 is rejected by Pydantic (le=60)."""
+        with pytest.raises(ValidationError):
+            ShieldFileConfig(nfqueue_timeout=61)
+
+    def test_shield_config_rejects_timeout_zero(self, tmp_path: Path) -> None:
+        """ShieldConfig.__post_init__ rejects nfqueue_timeout=0."""
+        with pytest.raises(ValueError, match="nfqueue_timeout"):
+            ShieldConfig(state_dir=tmp_path, nfqueue_timeout=0)
+
+    def test_shield_config_rejects_timeout_negative(self, tmp_path: Path) -> None:
+        """ShieldConfig.__post_init__ rejects negative nfqueue_timeout."""
+        with pytest.raises(ValueError, match="nfqueue_timeout"):
+            ShieldConfig(state_dir=tmp_path, nfqueue_timeout=-1)
+
+    def test_shield_config_rejects_timeout_too_large(self, tmp_path: Path) -> None:
+        """ShieldConfig.__post_init__ rejects nfqueue_timeout > 60."""
+        with pytest.raises(ValueError, match="nfqueue_timeout"):
+            ShieldConfig(state_dir=tmp_path, nfqueue_timeout=100)
+
+    def test_shield_config_accepts_valid(self, tmp_path: Path) -> None:
+        """ShieldConfig accepts valid nfqueue_timeout."""
+        cfg = ShieldConfig(state_dir=tmp_path, interactive=True, nfqueue_timeout=10)
+        assert cfg.interactive is True
+        assert cfg.nfqueue_timeout == 10

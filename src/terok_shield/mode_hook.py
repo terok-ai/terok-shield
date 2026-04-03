@@ -579,7 +579,7 @@ class HookMode:
         # In interactive mode: always persist (operator rejects must stick).
         # In strict mode: only persist when the IP came from a profile
         # (non-profile IPs are already blocked by the default-deny rule).
-        should_persist = self._config.interactive
+        should_persist = state.interactive_path(sd).is_file()
         if not should_persist:
             profile_path = state.profile_allowed_path(sd)
             if profile_path.is_file():
