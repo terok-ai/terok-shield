@@ -105,7 +105,10 @@ class TestWatchEvent:
         parsed = json.loads(event.to_json())
         assert "domain" not in parsed
         assert "query_type" not in parsed
+        assert "dest" not in parsed
+        assert "detail" not in parsed
         assert "port" not in parsed
+        assert "proto" not in parsed
         assert "extra" not in parsed
         assert parsed["source"] == "audit"
         assert parsed["action"] == "allowed"
@@ -119,12 +122,16 @@ class TestWatchEvent:
             container=_CONTAINER,
             dest="192.0.2.1",
             port=443,
+            proto=6,
             detail="TEROK_SHIELD_DENIED:",
+            extra={"reason": "no-dns"},
         )
         parsed = json.loads(event.to_json())
         assert parsed["dest"] == "192.0.2.1"
         assert parsed["port"] == 443
+        assert parsed["proto"] == 6
         assert parsed["detail"] == "TEROK_SHIELD_DENIED:"
+        assert parsed["extra"] == {"reason": "no-dns"}
 
     def test_core_fields_always_present(self) -> None:
         """Core fields are always present even when their values are empty-ish."""
@@ -462,15 +469,26 @@ def _make_nflog_packet(
 
     Constructs a minimal netlink + nfgenmsg + NFULA_PREFIX + NFULA_PAYLOAD
     message that can be parsed by ``NflogWatcher._parse_messages``.
+    Detects IPv6 addresses automatically via ``:`` in *dest_ip*.
     """
-    # Build the IP payload (minimal IPv4 header + TCP/UDP dest port)
-    ip_header = bytearray(20)
-    ip_header[0] = 0x45  # version=4, IHL=5
-    ip_header[9] = proto
-    ip_header[16:20] = socket.inet_aton(dest_ip)
-    # Transport header (4 bytes: src_port + dest_port)
-    transport = struct.pack("!HH", 12345, dest_port)
-    raw_ip = bytes(ip_header) + transport
+    if ":" in dest_ip:
+        # IPv6: 40-byte header + transport
+        ip6_header = bytearray(40)
+        ip6_header[0] = 0x60  # version=6
+        ip6_header[6] = proto  # Next Header
+        ip6_header[24:40] = socket.inet_pton(socket.AF_INET6, dest_ip)
+        transport = struct.pack("!HH", 12345, dest_port)
+        raw_ip = bytes(ip6_header) + transport
+        af_family = socket.AF_INET6
+    else:
+        # IPv4: 20-byte header + transport
+        ip_header = bytearray(20)
+        ip_header[0] = 0x45  # version=4, IHL=5
+        ip_header[9] = proto
+        ip_header[16:20] = socket.inet_aton(dest_ip)
+        transport = struct.pack("!HH", 12345, dest_port)
+        raw_ip = bytes(ip_header) + transport
+        af_family = socket.AF_INET
 
     # Build NFLOG attributes
     attrs = b""
@@ -492,7 +510,7 @@ def _make_nflog_packet(
     attrs += b"\x00" * pad
 
     # nfgenmsg header
-    nfgen = _NFGEN_HDR.pack(2, 0, socket.htons(NFLOG_GROUP))  # AF_INET=2
+    nfgen = _NFGEN_HDR.pack(af_family, 0, socket.htons(NFLOG_GROUP))
 
     # netlink message header
     msg_type = (_NFNL_SUBSYS_ULOG << 8) | _NFULNL_MSG_PACKET
@@ -671,6 +689,17 @@ class TestNflogWatcherParsing:
         assert len(events) == 1
         assert events[0].action == "nflog"
 
+    def test_ipv6_packet_produces_event(self) -> None:
+        """NFLOG message with an IPv6 payload extracts dest and port correctly."""
+        watcher = self._make_watcher()
+        data = _make_nflog_packet(f"{DENIED_LOG_PREFIX}: ", "2001:db8::1", 6, 443)
+        events = watcher._parse_messages(data)
+        assert len(events) == 1
+        assert events[0].dest == "2001:db8::1"
+        assert events[0].port == 443
+        assert events[0].proto == 6
+        assert events[0].action == "blocked_connection"
+
     def test_empty_payload_produces_no_event(self) -> None:
         """NFLOG message without IP payload is skipped."""
         watcher = self._make_watcher()
@@ -750,6 +779,8 @@ class TestNflogWatcherCreate:
         assert isinstance(result, NflogWatcher)
         mock_sock.bind.assert_called_once_with((0, 0))
         mock_sock.setblocking.assert_called_once_with(False)
+        mock_sock.send.assert_called_once()
+        assert len(mock_sock.send.call_args[0][0]) >= _NLMSG_HDR.size
         result.close()
 
     def test_returns_none_on_attribute_error(self) -> None:
@@ -1032,6 +1063,56 @@ class TestRunWatchHappyPath:
         assert parsed["source"] == "nflog"
         assert parsed["action"] == "blocked_connection"
         assert parsed["dest"] == "192.0.2.1"
+
+    def test_mixed_sources_in_same_cycle(
+        self, dnsmasq_state: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """run_watch() emits events from all sources in a single loop iteration."""
+        log = dnsmasq_state / "dnsmasq.log"
+        log.write_text("")
+        audit = dnsmasq_state / "audit.jsonl"
+        audit.write_text("")
+
+        mock_nflog = MagicMock(spec=NflogWatcher)
+        mock_nflog.fileno.return_value = 99
+        nflog_event = WatchEvent(
+            ts="2026-04-01T12:00:00+00:00",
+            source="nflog",
+            action="blocked_connection",
+            container=_CONTAINER,
+            dest="192.0.2.1",
+            port=443,
+        )
+        mock_nflog.poll.side_effect = [[nflog_event], []]
+
+        iteration = 0
+
+        def _select_then_stop(rlist: list, *_args: object, **_kwargs: object) -> tuple:
+            nonlocal iteration
+            iteration += 1
+            if iteration == 1:
+                # Write audit + DNS events in the same cycle
+                entry = {"ts": "2026-04-01T12:00:00", "action": "allowed", "container": "x"}
+                with audit.open("a") as f:
+                    f.write(json.dumps(entry, separators=(",", ":")) + "\n")
+                with log.open("a") as f:
+                    f.write(f"query[A] {BLOCKED_DOMAIN} from 127.0.0.1\n")
+                return (rlist, [], [])  # nflog also readable
+            _watch_mod._running = False
+            return ([], [], [])
+
+        with (
+            patch("terok_shield.watch.select.select", side_effect=_select_then_stop),
+            patch("terok_shield.watch.NflogWatcher.create", return_value=mock_nflog),
+        ):
+            run_watch(dnsmasq_state, _CONTAINER)
+
+        lines = capsys.readouterr().out.strip().splitlines()
+        sources = {json.loads(line)["source"] for line in lines}
+        assert "nflog" in sources
+        assert "dns" in sources
+        assert "audit" in sources
+        mock_nflog.close.assert_called_once()
 
 
 # ── _ensure_log_file ────────────────────────────────────
