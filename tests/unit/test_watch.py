@@ -696,6 +696,21 @@ class TestNflogWatcherParsing:
         events = watcher.poll()
         assert events == []
 
+    def test_poll_stops_on_empty_recv(self) -> None:
+        """poll() stops reading when recv() returns empty bytes."""
+        watcher = self._make_watcher()
+        watcher._sock.recv.side_effect = [b""]
+        events = watcher.poll()
+        assert events == []
+
+    def test_parse_messages_stops_on_invalid_nllen(self) -> None:
+        """_parse_messages stops when nl_len is smaller than header size."""
+        watcher = self._make_watcher()
+        # Craft a message with nl_len = 4 (less than NLMSG_HDR.size=16)
+        bad_msg = _NLMSG_HDR.pack(4, 0, 0, 0, 0)
+        events = watcher._parse_messages(bad_msg)
+        assert events == []
+
     def test_fileno_delegates_to_socket(self) -> None:
         """fileno() returns the socket's file descriptor."""
         watcher = self._make_watcher()
@@ -937,6 +952,49 @@ class TestRunWatchHappyPath:
         parsed = json.loads(output)
         assert parsed["source"] == "audit"
         assert parsed["action"] == "shield_up"
+
+    def test_nflog_events_appear_in_output(
+        self, dnsmasq_state: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """run_watch() outputs NFLOG events when the netlink watcher is active."""
+        log = dnsmasq_state / "dnsmasq.log"
+        log.write_text("")
+
+        mock_nflog = MagicMock(spec=NflogWatcher)
+        mock_nflog.fileno.return_value = 99
+        nflog_event = WatchEvent(
+            ts="2026-04-01T12:00:00+00:00",
+            source="nflog",
+            action="blocked_connection",
+            container=_CONTAINER,
+            dest="192.0.2.1",
+            port=443,
+        )
+        # First poll returns an event, second poll returns nothing
+        mock_nflog.poll.side_effect = [[nflog_event], []]
+
+        iteration = 0
+
+        def _select_then_stop(rlist: list, *_args: object, **_kwargs: object) -> tuple:
+            nonlocal iteration
+            iteration += 1
+            if iteration == 1:
+                return (rlist, [], [])
+            _watch_mod._running = False
+            return ([], [], [])
+
+        with (
+            patch("terok_shield.watch.select.select", side_effect=_select_then_stop),
+            patch("terok_shield.watch.NflogWatcher.create", return_value=mock_nflog),
+        ):
+            run_watch(dnsmasq_state, _CONTAINER)
+
+        mock_nflog.close.assert_called_once()
+        output = capsys.readouterr().out.strip().splitlines()[0]
+        parsed = json.loads(output)
+        assert parsed["source"] == "nflog"
+        assert parsed["action"] == "blocked_connection"
+        assert parsed["dest"] == "192.0.2.1"
 
 
 # ── _ensure_log_file ────────────────────────────────────
