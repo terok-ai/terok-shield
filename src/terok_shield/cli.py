@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from . import ExecError, Shield, ShieldConfig, ShieldMode
+from .config import ShieldFileConfig
 from .registry import COMMANDS, ArgDef, CommandDef
 from .validation import validate_container_name
 
@@ -39,40 +40,6 @@ def _resolve_config_root() -> Path:
     return base / "terok" / "shield"
 
 
-def _parse_loopback_ports(raw: object) -> tuple[int, ...]:
-    """Parse and validate loopback_ports from config YAML.
-
-    Accepts a list of ints or a single int.  Invalid entries are dropped
-    with a warning.
-    """
-    if isinstance(raw, bool):
-        print("Warning [shield]: loopback_ports: expected list of ints, got bool", file=sys.stderr)
-        return ()
-    if isinstance(raw, int):
-        raw = [raw]
-    if not isinstance(raw, list):
-        print(
-            f"Warning [shield]: loopback_ports: expected list of ints, got {type(raw).__name__}",
-            file=sys.stderr,
-        )
-        return ()
-    ports: list[int] = []
-    for v in raw:
-        if isinstance(v, bool) or not isinstance(v, int):
-            print(
-                f"Warning [shield]: loopback_ports: dropping non-integer value {v!r}",
-                file=sys.stderr,
-            )
-            continue
-        if 1 <= v <= 65535:
-            ports.append(v)
-        else:
-            print(
-                f"Warning [shield]: loopback_ports: dropping out-of-range port {v}", file=sys.stderr
-            )
-    return tuple(ports)
-
-
 def _auto_detect_mode() -> ShieldMode:
     """Auto-detect the best available shield mode.
 
@@ -89,31 +56,40 @@ def _auto_detect_mode() -> ShieldMode:
     raise NftNotFoundError("No supported shield mode available. Install nft for hook mode.")
 
 
-def _load_config_file() -> dict:
-    """Load config.yml from the config root, returning a dict (or empty)."""
+def _load_config_file() -> ShieldFileConfig:
+    """Load and validate ``config.yml`` via :class:`ShieldFileConfig`.
+
+    Returns defaults when the file is missing or contains invalid YAML.
+    Validation errors (typos, wrong types) abort with a clear message.
+    """
     import yaml
+    from pydantic import ValidationError
 
     config_file = _resolve_config_root() / "config.yml"
     if not config_file.is_file():
-        return {}
+        return ShieldFileConfig()
 
     try:
-        section = yaml.safe_load(config_file.read_text()) or {}
+        raw = yaml.safe_load(config_file.read_text()) or {}
     except yaml.YAMLError as e:
         print(f"Warning [shield]: failed to parse {config_file}: {e}", file=sys.stderr)
-        return {}
+        return ShieldFileConfig()
     except OSError as e:
         print(f"Warning [shield]: failed to read {config_file}: {e}", file=sys.stderr)
-        return {}
+        return ShieldFileConfig()
 
-    if not isinstance(section, dict):
+    if not isinstance(raw, dict):
         print(
-            f"Warning [shield]: {config_file}: expected mapping, got {type(section).__name__}",
+            f"Warning [shield]: {config_file}: expected mapping, got {type(raw).__name__}",
             file=sys.stderr,
         )
-        return {}
+        return ShieldFileConfig()
 
-    return section
+    try:
+        return ShieldFileConfig(**raw)
+    except ValidationError as e:
+        print(f"Error [shield]: invalid {config_file}:\n{e}", file=sys.stderr)
+        sys.exit(1)
 
 
 def _build_config(
@@ -127,35 +103,10 @@ def _build_config(
         container: Container name (used for per-container state_dir).
         state_dir_override: Explicit state_dir from --state-dir flag.
     """
-    section = _load_config_file()
+    file_cfg = _load_config_file()
 
     # Resolve mode
-    mode_str = section.get("mode", "auto")
-    if mode_str == "auto":
-        mode = _auto_detect_mode()
-    elif mode_str == "hook":
-        mode = ShieldMode.HOOK
-    else:
-        raise ValueError(f"Unknown shield mode: {mode_str!r}")
-
-    # Profiles
-    raw_profiles = section.get("default_profiles", ["dev-standard"])
-    if not isinstance(raw_profiles, list) or not all(
-        isinstance(p, str) and p for p in raw_profiles
-    ):
-        raw_profiles = ["dev-standard"]
-    profiles = tuple(raw_profiles)
-
-    # Loopback ports
-    loopback_ports = _parse_loopback_ports(section.get("loopback_ports", []))
-
-    # Audit
-    audit_section = section.get("audit", {})
-    if not isinstance(audit_section, dict):
-        audit_section = {}
-    audit_enabled = audit_section.get("enabled", True)
-    if not isinstance(audit_enabled, bool):
-        audit_enabled = True
+    mode = _auto_detect_mode() if file_cfg.mode == "auto" else ShieldMode.HOOK
 
     # State dir
     if state_dir_override:
@@ -175,9 +126,9 @@ def _build_config(
     return ShieldConfig(
         state_dir=state_dir,
         mode=mode,
-        default_profiles=profiles,
-        loopback_ports=loopback_ports,
-        audit_enabled=audit_enabled,
+        default_profiles=tuple(file_cfg.default_profiles),
+        loopback_ports=tuple(file_cfg.loopback_ports),
+        audit_enabled=file_cfg.audit.enabled,
         profiles_dir=profiles_dir,
     )
 

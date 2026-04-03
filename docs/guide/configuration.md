@@ -7,23 +7,13 @@ terok-shield uses XDG-compliant directories and an optional YAML config file.
 Optional. Located at `~/.config/terok/shield/config.yml`
 (or `$XDG_CONFIG_HOME/terok/shield/config.yml`).
 
-```yaml
-mode: hook              # currently only "hook" is supported
-default_profiles:
-  - dev-standard
-loopback_ports: []      # TCP ports forwarded to host loopback (e.g. [8080, 9090])
-audit:
-  enabled: true
-```
+The file is validated with Pydantic (`extra="forbid"`).  Typos and wrong
+types produce a clear error at startup instead of being silently ignored.
+See [Config Reference](../config-reference.md) for the full field table
+and annotated YAML example.
 
-| Key | Default | Description |
-|-----|---------|-------------|
-| `mode` | `auto` | Firewall mode. `auto` selects the best available mode |
-| `default_profiles` | `["dev-standard"]` | Profiles used when resolving without explicit profile list |
-| `loopback_ports` | `[]` | TCP ports forwarded to host loopback (via pasta `-T`) |
-| `audit.enabled` | `true` | Enable JSON-lines audit logging |
-
-If the config file is missing or unparseable, defaults are used.
+If the config file is missing, defaults are used.  Unparseable YAML
+(syntax errors) falls back to defaults with a warning.
 
 !!! note "Library vs CLI"
     The config file is only read by the CLI. When using terok-shield as a

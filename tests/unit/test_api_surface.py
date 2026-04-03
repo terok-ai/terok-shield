@@ -24,6 +24,7 @@ from terok_shield import (
 
 EXPECTED_ALL = [
     "ArgDef",
+    "AuditFileConfig",
     "AuditLogger",
     "COMMANDS",
     "CommandDef",
@@ -38,6 +39,7 @@ EXPECTED_ALL = [
     "RulesetBuilder",
     "Shield",
     "ShieldConfig",
+    "ShieldFileConfig",
     "ShieldMode",
     "ShieldNeedsSetup",
     "ShieldState",

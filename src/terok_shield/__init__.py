@@ -20,7 +20,15 @@ from pathlib import Path
 
 from . import dnsmasq, state
 from .audit import AuditLogger
-from .config import DnsTier, ShieldConfig, ShieldMode, ShieldState, detect_dns_tier
+from .config import (
+    AuditFileConfig,
+    DnsTier,
+    ShieldConfig,
+    ShieldFileConfig,
+    ShieldMode,
+    ShieldState,
+    detect_dns_tier,
+)
 from .dns import DnsResolver
 from .mode_hook import setup_global_hooks
 from .nft import RulesetBuilder
@@ -317,6 +325,7 @@ from .registry import COMMANDS, ArgDef, CommandDef  # noqa: E402
 
 __all__ = [
     "ArgDef",
+    "AuditFileConfig",
     "AuditLogger",
     "COMMANDS",
     "CommandDef",
@@ -331,6 +340,7 @@ __all__ = [
     "RulesetBuilder",
     "Shield",
     "ShieldConfig",
+    "ShieldFileConfig",
     "ShieldMode",
     "ShieldNeedsSetup",
     "ShieldState",

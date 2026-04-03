@@ -23,12 +23,11 @@ from terok_shield.cli import (
     _build_parser,
     _find_podman,
     _load_config_file,
-    _parse_loopback_ports,
     _resolve_config_root,
     _resolve_state_root,
     main,
 )
-from terok_shield.config import ShieldMode
+from terok_shield.config import ShieldFileConfig, ShieldMode
 
 from ..testfs import (
     AUDIT_FILENAME,
@@ -814,24 +813,6 @@ def test_resolve_config_root(
         assert root == expected
 
 
-@pytest.mark.parametrize(
-    ("raw", "expected"),
-    [
-        pytest.param([8080, 9090], (8080, 9090), id="valid-list"),
-        pytest.param(1234, (1234,), id="single-int"),
-        pytest.param([], (), id="empty-list"),
-        pytest.param([True], (), id="bool-dropped"),
-        pytest.param([99999], (), id="out-of-range-dropped"),
-        pytest.param([8080, 0, True, 9090], (8080, 9090), id="mixed-valid-invalid"),
-        pytest.param(True, (), id="bare-bool"),
-        pytest.param("not-a-list", (), id="string-input"),
-    ],
-)
-def test_parse_loopback_ports(raw: object, expected: tuple[int, ...]) -> None:
-    """_parse_loopback_ports() accepts ints/lists and silently drops invalid values."""
-    assert _parse_loopback_ports(raw) == expected
-
-
 def test_auto_detect_mode_raises_without_nft(monkeypatch: pytest.MonkeyPatch) -> None:
     """_auto_detect_mode() fails when nft is unavailable."""
     monkeypatch.setattr("terok_shield.run.find_nft", lambda: "")
@@ -852,15 +833,15 @@ def test_auto_detect_mode_returns_hook(monkeypatch: pytest.MonkeyPatch) -> None:
         pytest.param("- just\n- a\n- list\n", id="non-dict-yaml"),
     ],
 )
-def test_load_config_file_returns_empty_for_invalid_inputs(
+def test_load_config_file_returns_defaults_for_invalid_inputs(
     monkeypatch: pytest.MonkeyPatch,
     config_root: Path,
     config_text: str,
 ) -> None:
-    """_load_config_file() returns an empty mapping for malformed or non-dict YAML."""
+    """_load_config_file() returns defaults for malformed or non-dict YAML."""
     (config_root / "config.yml").write_text(config_text)
     monkeypatch.setenv("TEROK_SHIELD_CONFIG_DIR", str(config_root))
-    assert _load_config_file() == {}
+    assert _load_config_file() == ShieldFileConfig()
 
 
 def test_build_config_uses_defaults_when_config_file_is_missing(
@@ -911,42 +892,41 @@ def test_build_config_rejects_unknown_mode(
     isolated_roots: tuple[Path, Path],
     write_config: Callable[[str], Path],
 ) -> None:
-    """_build_config() rejects unknown mode strings from config.yml."""
+    """_build_config() exits when config.yml contains an invalid mode."""
     state_root, _ = isolated_roots
     write_config("mode: bridge\n")
-    with pytest.raises(ValueError, match="Unknown shield mode"):
+    with pytest.raises(SystemExit, match="1"):
         _build_config("ctr", state_dir_override=state_root)
 
 
 @pytest.mark.parametrize(
-    ("config_text", "expected_profiles", "expected_audit_enabled"),
+    "config_text",
     [
-        pytest.param(
-            "default_profiles: not-a-list\n", ("dev-standard",), True, id="profiles-not-list"
-        ),
-        pytest.param(
-            "default_profiles: [1, null]\n", ("dev-standard",), True, id="profiles-not-strings"
-        ),
-        pytest.param("audit: not-a-dict\n", ("dev-standard",), True, id="audit-not-dict"),
-        pytest.param(
-            "audit:\n  enabled: yes-please\n", ("dev-standard",), True, id="audit-enabled-not-bool"
-        ),
+        pytest.param("default_profiles: not-a-list\n", id="profiles-not-list"),
+        pytest.param("default_profiles: [1, null]\n", id="profiles-not-strings"),
+        pytest.param("audit: not-a-dict\n", id="audit-not-dict"),
+        pytest.param("audit:\n  enabled: yes-please\n", id="audit-enabled-not-bool"),
     ],
 )
-def test_build_config_falls_back_for_invalid_sections(
-    force_hook_mode: None,
+def test_build_config_exits_for_invalid_sections(
     isolated_roots: tuple[Path, Path],
     write_config: Callable[[str], Path],
     config_text: str,
-    expected_profiles: tuple[str, ...],
-    expected_audit_enabled: bool,
 ) -> None:
-    """_build_config() falls back to safe defaults for invalid config sections."""
-    state_root, _ = isolated_roots
+    """_build_config() exits with error for invalid config values (strict Pydantic validation)."""
     write_config(config_text)
-    config = _build_config("ctr", state_dir_override=state_root)
-    assert config.default_profiles == expected_profiles
-    assert config.audit_enabled is expected_audit_enabled
+    with pytest.raises(SystemExit, match="1"):
+        _build_config("ctr", state_dir_override=isolated_roots[0])
+
+
+def test_build_config_exits_for_unknown_keys(
+    isolated_roots: tuple[Path, Path],
+    write_config: Callable[[str], Path],
+) -> None:
+    """_build_config() exits when config.yml contains unknown keys (typo detection)."""
+    write_config("mod: hook\n")  # typo: "mod" instead of "mode"
+    with pytest.raises(SystemExit, match="1"):
+        _build_config("ctr", state_dir_override=isolated_roots[0])
 
 
 def test_build_config_rejects_container_path_traversal(

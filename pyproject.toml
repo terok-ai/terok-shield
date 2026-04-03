@@ -25,6 +25,7 @@ packages = [
 [tool.poetry.dependencies]
 python = ">=3.12,<4.0"
 PyYAML = ">=6.0"
+pydantic = ">=2.0"
 
 [tool.poetry.group.dev.dependencies]
 ruff = ">=0.8"
@@ -45,6 +46,7 @@ mkdocs-material = ">=9.0"
 mkdocstrings = {extras = ["python"], version = ">=0.24"}
 mkdocs-literate-nav = ">=0.6"
 mkdocs-section-index = ">=0.3"
+mkdocs-gen-files = ">=0.5"
 mkdocs-terok = {url = "https://github.com/terok-ai/mkdocs-terok/releases/download/v0.3.0/mkdocs_terok-0.3.0-py3-none-any.whl"}
 
 [tool.poetry.scripts]

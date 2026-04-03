@@ -12,7 +12,9 @@ import enum
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 ANNOTATION_KEY = "terok.shield.profiles"
 ANNOTATION_NAME_KEY = "terok.shield.name"
@@ -109,6 +111,66 @@ class ShieldConfig:
     loopback_ports: tuple[int, ...] = ()
     audit_enabled: bool = True
     profiles_dir: Path | None = None
+
+
+# -- Config-file schema (Pydantic) ------------------------
+
+
+class AuditFileConfig(BaseModel):
+    """Audit section of ``config.yml``."""
+
+    enabled: bool = Field(default=True, description="Enable JSON-lines audit logging")
+    model_config = ConfigDict(extra="forbid")
+
+
+class ShieldFileConfig(BaseModel):
+    """Validated schema for ``config.yml``.
+
+    Loaded by the CLI at startup.  ``extra="forbid"`` rejects unknown
+    keys so typos (e.g. ``mod: hook``) produce a clear error instead
+    of being silently ignored.
+    """
+
+    mode: Literal["auto", "hook"] = Field(
+        default="auto", description="Firewall mode (``auto`` selects the best available)"
+    )
+    default_profiles: list[str] = Field(
+        default_factory=lambda: ["dev-standard"],
+        description="Profiles applied when no explicit list is given",
+    )
+    loopback_ports: list[int] = Field(
+        default_factory=list,
+        description="TCP ports forwarded to host loopback (via pasta ``-T``)",
+    )
+    audit: AuditFileConfig = Field(
+        default_factory=AuditFileConfig, description="Audit logging settings"
+    )
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("default_profiles")
+    @classmethod
+    def _profiles_non_empty(cls, v: list[str]) -> list[str]:
+        """Ensure every profile name is a non-empty string."""
+        if not v or not all(isinstance(p, str) and p for p in v):
+            raise ValueError("each profile must be a non-empty string")
+        return v
+
+    @field_validator("loopback_ports", mode="before")
+    @classmethod
+    def _ports_validated(cls, v: object) -> list[int]:
+        """Validate port entries: reject bools, enforce 1-65535 range."""
+        if isinstance(v, int) and not isinstance(v, bool):
+            v = [v]
+        if not isinstance(v, list):
+            raise ValueError(f"expected list of ints, got {type(v).__name__}")
+        ports: list[int] = []
+        for item in v:
+            if isinstance(item, bool) or not isinstance(item, int):
+                raise ValueError(f"expected integer port, got {type(item).__name__}: {item!r}")
+            if not (1 <= item <= 65535):
+                raise ValueError(f"port {item} out of range 1–65535")
+            ports.append(item)
+        return ports
 
 
 # -- ShieldModeBackend Protocol ---------------------------

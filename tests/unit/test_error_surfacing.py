@@ -16,7 +16,8 @@ from unittest import mock
 import pytest
 
 from terok_shield.audit import AuditLogger
-from terok_shield.cli import _load_config_file, _parse_loopback_ports
+from terok_shield.cli import _load_config_file
+from terok_shield.config import ShieldFileConfig
 from terok_shield.dnsmasq import generate_config, read_domains
 from terok_shield.nft_constants import PASTA_DNS
 from terok_shield.run import ExecError
@@ -41,7 +42,7 @@ class TestLoadConfigFileWarnings:
 
         result = _load_config_file()
 
-        assert result == {}
+        assert result == ShieldFileConfig()
         captured = capsys.readouterr()
         assert "Warning [shield]:" in captured.err
         assert "failed to parse" in captured.err
@@ -58,7 +59,7 @@ class TestLoadConfigFileWarnings:
 
         result = _load_config_file()
 
-        assert result == {}
+        assert result == ShieldFileConfig()
         captured = capsys.readouterr()
         assert "Warning [shield]:" in captured.err
         assert "expected mapping" in captured.err
@@ -76,7 +77,7 @@ class TestLoadConfigFileWarnings:
 
         result = _load_config_file()
 
-        assert result == {}
+        assert result == ShieldFileConfig()
         captured = capsys.readouterr()
         assert "Warning [shield]:" in captured.err
         assert "expected mapping" in captured.err
@@ -94,7 +95,7 @@ class TestLoadConfigFileWarnings:
 
         result = _load_config_file()
 
-        assert result == {}
+        assert result == ShieldFileConfig()
         captured = capsys.readouterr()
         assert captured.err == ""
 
@@ -113,7 +114,7 @@ class TestLoadConfigFileWarnings:
         result = _load_config_file()
 
         cfg.chmod(0o644)  # restore for cleanup
-        assert result == {}
+        assert result == ShieldFileConfig()
         captured = capsys.readouterr()
         assert "Warning [shield]:" in captured.err
         assert "failed to read" in captured.err
@@ -130,97 +131,9 @@ class TestLoadConfigFileWarnings:
 
         result = _load_config_file()
 
-        assert result == {"mode": "hook"}
+        assert result == ShieldFileConfig(mode="hook")
         captured = capsys.readouterr()
         assert captured.err == ""
-
-
-# ── cli._parse_loopback_ports warnings ──────────────────
-
-
-class TestParseLoopbackPortsWarnings:
-    """Verify _parse_loopback_ports() prints warnings to stderr on invalid entries."""
-
-    def test_bare_bool_warns(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """A bare bool input warns about the wrong type."""
-        result = _parse_loopback_ports(True)
-
-        assert result == ()
-        captured = capsys.readouterr()
-        assert "Warning [shield]:" in captured.err
-        assert "got bool" in captured.err
-
-    def test_string_input_warns(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """A string input warns about the wrong type."""
-        result = _parse_loopback_ports("not-a-list")
-
-        assert result == ()
-        captured = capsys.readouterr()
-        assert "Warning [shield]:" in captured.err
-        assert "got str" in captured.err
-
-    def test_bool_in_list_warns(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """A bool inside a list is dropped with a warning."""
-        result = _parse_loopback_ports([True])
-
-        assert result == ()
-        captured = capsys.readouterr()
-        assert "Warning [shield]:" in captured.err
-        assert "dropping non-integer" in captured.err
-
-    def test_out_of_range_warns(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """Out-of-range port numbers are dropped with a warning."""
-        result = _parse_loopback_ports([99999])
-
-        assert result == ()
-        captured = capsys.readouterr()
-        assert "Warning [shield]:" in captured.err
-        assert "out-of-range" in captured.err
-
-    def test_zero_port_warns(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """Port 0 is out-of-range and warns."""
-        result = _parse_loopback_ports([0])
-
-        assert result == ()
-        captured = capsys.readouterr()
-        assert "Warning [shield]:" in captured.err
-        assert "out-of-range" in captured.err
-
-    def test_mixed_valid_invalid_warns_for_invalid_only(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """Mixed list returns valid ports and warns about each invalid entry."""
-        result = _parse_loopback_ports([8080, 0, True, 9090])
-
-        assert result == (8080, 9090)
-        captured = capsys.readouterr()
-        # Two warnings: one for 0 (out-of-range), one for True (non-integer)
-        assert captured.err.count("Warning [shield]:") == 2
-
-    def test_valid_list_no_warning(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """A fully valid list produces no warnings."""
-        result = _parse_loopback_ports([8080, 443])
-
-        assert result == (8080, 443)
-        captured = capsys.readouterr()
-        assert captured.err == ""
-
-    def test_empty_list_no_warning(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """An empty list produces no warnings."""
-        result = _parse_loopback_ports([])
-
-        assert result == ()
-        captured = capsys.readouterr()
-        assert captured.err == ""
-
-    def test_non_int_string_in_list_warns(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """A string inside a port list is dropped with a warning."""
-        result = _parse_loopback_ports([8080, "http", 9090])
-
-        assert result == (8080, 9090)
-        captured = capsys.readouterr()
-        assert "Warning [shield]:" in captured.err
-        assert "dropping non-integer" in captured.err
 
 
 # ── dnsmasq.read_domains logging ────────────────────────
