@@ -8,9 +8,12 @@ flag, writes JSON-lines entries to a single per-container file.
 """
 
 import json
+import logging
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 class AuditLogger:
@@ -74,8 +77,8 @@ class AuditLogger:
             self._audit_path.parent.mkdir(parents=True, exist_ok=True)
             with self._audit_path.open("a") as f:
                 f.write(json.dumps(entry, separators=(",", ":")) + "\n")
-        except OSError:
-            pass  # audit logging is best-effort
+        except OSError as e:
+            logger.warning("Failed to write audit log to %s: %s", self._audit_path, e)
 
     def tail_log(self, n: int = 50) -> Iterator[dict]:
         """Yield the last *n* audit events.

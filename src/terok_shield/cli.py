@@ -42,21 +42,34 @@ def _resolve_config_root() -> Path:
 def _parse_loopback_ports(raw: object) -> tuple[int, ...]:
     """Parse and validate loopback_ports from config YAML.
 
-    Accepts a list of ints or a single int.  Invalid entries are silently
-    dropped.
+    Accepts a list of ints or a single int.  Invalid entries are dropped
+    with a warning.
     """
     if isinstance(raw, bool):
+        print("Warning [shield]: loopback_ports: expected list of ints, got bool", file=sys.stderr)
         return ()
     if isinstance(raw, int):
         raw = [raw]
     if not isinstance(raw, list):
+        print(
+            f"Warning [shield]: loopback_ports: expected list of ints, got {type(raw).__name__}",
+            file=sys.stderr,
+        )
         return ()
     ports: list[int] = []
     for v in raw:
         if isinstance(v, bool) or not isinstance(v, int):
+            print(
+                f"Warning [shield]: loopback_ports: dropping non-integer value {v!r}",
+                file=sys.stderr,
+            )
             continue
         if 1 <= v <= 65535:
             ports.append(v)
+        else:
+            print(
+                f"Warning [shield]: loopback_ports: dropping out-of-range port {v}", file=sys.stderr
+            )
     return tuple(ports)
 
 
@@ -86,10 +99,21 @@ def _load_config_file() -> dict:
 
     try:
         section = yaml.safe_load(config_file.read_text()) or {}
-    except (OSError, yaml.YAMLError):
+    except yaml.YAMLError as e:
+        print(f"Warning [shield]: failed to parse {config_file}: {e}", file=sys.stderr)
+        return {}
+    except OSError as e:
+        print(f"Warning [shield]: failed to read {config_file}: {e}", file=sys.stderr)
         return {}
 
-    return section if isinstance(section, dict) else {}
+    if not isinstance(section, dict):
+        print(
+            f"Warning [shield]: {config_file}: expected mapping, got {type(section).__name__}",
+            file=sys.stderr,
+        )
+        return {}
+
+    return section
 
 
 def _build_config(

@@ -16,6 +16,7 @@ and ``install_hooks()`` for OCI hook file installation.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import stat
 from pathlib import Path
@@ -52,6 +53,8 @@ from .podman_info import (
 )
 from .run import ExecError, ShieldNeedsSetup
 from .util import is_ip as _is_ip, is_ipv4
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from .audit import AuditLogger
@@ -518,8 +521,12 @@ class HookMode:
                 self._set_for_ip(ip),
                 f"{{ {ip} }}",
             )
-        except ExecError:
-            pass
+        except ExecError as e:
+            stderr = str(e).lower()
+            if not any(
+                pat in stderr for pat in ("no such file", "element does not exist", "not in set")
+            ):
+                logger.warning("nft delete element failed for %s: %s", ip, e)
 
         # Remove from live.allowed
         live_path = self._live_path()
