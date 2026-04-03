@@ -224,6 +224,7 @@ class AuditLogWatcher:
 
 # Linux netlink / nflog constants (from linux/netfilter/nfnetlink.h and
 # linux/netfilter/nfnetlink_log.h).
+_NETLINK_NETFILTER = 12
 _NFNL_SUBSYS_ULOG = 4
 _NFULNL_MSG_CONFIG = 1
 _NFULNL_MSG_PACKET = 0
@@ -366,8 +367,7 @@ class NflogWatcher:
             group: NFLOG group number to subscribe to.
         """
         try:
-            # NETLINK_NETFILTER = 12; AF_NETLINK is Linux-only
-            sock = socket.socket(socket.AF_NETLINK, socket.SOCK_RAW, 12)
+            sock = socket.socket(socket.AF_NETLINK, socket.SOCK_RAW, _NETLINK_NETFILTER)
             sock.bind((0, 0))
             sock.setblocking(False)
             sock.send(_build_nflog_bind_msg(group))
@@ -490,20 +490,11 @@ def _ensure_log_file(log_path: Path) -> None:
     log_path.touch(exist_ok=True)
 
 
-def run_watch(state_dir: Path, container: str) -> None:
-    """Stream blocked-access events as JSON lines to stdout.
-
-    Validates that the dnsmasq tier is active, then enters a
-    ``select.select()`` loop tailing the query log, audit log,
-    and (optionally) the NFLOG netlink socket.  Clean exit
-    on SIGINT or SIGTERM.
-
-    Args:
-        state_dir: Per-container state directory.
-        container: Container name (for event metadata).
+def _validate_dnsmasq_tier(state_dir: Path) -> None:
+    """Verify the dnsmasq DNS tier is active, or exit with an error.
 
     Raises:
-        SystemExit: If the DNS tier is not dnsmasq.
+        SystemExit: If the DNS tier file is missing or not dnsmasq.
     """
     tier_path = state.dns_tier_path(state_dir)
     if tier_path.is_file():
@@ -520,6 +511,24 @@ def run_watch(state_dir: Path, container: str) -> None:
             file=sys.stderr,
         )
         raise SystemExit(1)
+
+
+def run_watch(state_dir: Path, container: str) -> None:
+    """Stream blocked-access events as JSON lines to stdout.
+
+    Validates that the dnsmasq tier is active, then enters a
+    ``select.select()`` loop tailing the query log, audit log,
+    and (optionally) the NFLOG netlink socket.  Clean exit
+    on SIGINT or SIGTERM.
+
+    Args:
+        state_dir: Per-container state directory.
+        container: Container name (for event metadata).
+
+    Raises:
+        SystemExit: If the DNS tier is not dnsmasq.
+    """
+    _validate_dnsmasq_tier(state_dir)
 
     log_path = state.dnsmasq_log_path(state_dir)
     _ensure_log_file(log_path)
