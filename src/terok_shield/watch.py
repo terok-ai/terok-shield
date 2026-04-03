@@ -404,7 +404,7 @@ class NflogWatcher:
         while True:
             try:
                 data = self._sock.recv(65535)
-            except (BlockingIOError, OSError):
+            except OSError:
                 break
             if not data:
                 break
