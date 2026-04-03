@@ -46,7 +46,6 @@ EXPECTED_ALL = [
     "SubprocessRunner",
     "USER_HOOKS_DIR",
     "ensure_containers_conf_hooks_dir",
-    "run_interactive",
     "setup_global_hooks",
     "system_hooks_dir",
 ]

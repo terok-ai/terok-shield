@@ -321,7 +321,6 @@ class Shield:
         return self.profiles.compose_profiles(names)
 
 
-from .interactive import run_interactive  # noqa: E402
 from .registry import COMMANDS, ArgDef, CommandDef  # noqa: E402
 
 __all__ = [
@@ -348,7 +347,6 @@ __all__ = [
     "SubprocessRunner",
     "USER_HOOKS_DIR",
     "ensure_containers_conf_hooks_dir",
-    "run_interactive",
     "setup_global_hooks",
     "system_hooks_dir",
 ]
