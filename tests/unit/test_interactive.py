@@ -14,6 +14,7 @@ import pytest
 
 from terok_shield import state
 from terok_shield.interactive import (
+    _NSENTER_ENV,
     InteractiveSession,
     _append_unique,
     _handle_signal,
@@ -506,10 +507,18 @@ class TestRunInteractive:
             run_interactive(tmp_path, _CONTAINER)
         assert ctx.value.code == 1
 
-    def test_dispatches_to_session(self, tmp_path: Path) -> None:
-        """run_interactive creates a session and calls run() when tier is nflog."""
+    def test_nsenter_reexec_when_not_in_netns(self, tmp_path: Path) -> None:
+        """run_interactive calls nsenter reexec when not inside the container netns."""
+        state.interactive_path(tmp_path).write_text("nflog\n")
+        with mock.patch("terok_shield.interactive._nsenter_reexec") as mock_reexec:
+            run_interactive(tmp_path, _CONTAINER)
+        mock_reexec.assert_called_once_with(tmp_path, _CONTAINER)
+
+    def test_dispatches_to_session_inside_netns(self, tmp_path: Path) -> None:
+        """run_interactive creates a session when already inside the container netns."""
         state.interactive_path(tmp_path).write_text("nflog\n")
         with (
+            mock.patch.dict("os.environ", {_NSENTER_ENV: "1"}),
             mock.patch("terok_shield.interactive.SubprocessRunner") as mock_runner_cls,
             mock.patch("terok_shield.interactive.InteractiveSession") as mock_session_cls,
         ):
@@ -517,6 +526,51 @@ class TestRunInteractive:
         mock_runner_cls.assert_called_once()
         mock_session_cls.assert_called_once()
         mock_session_cls.return_value.run.assert_called_once()
+
+
+# ── _nsenter_reexec ──────────────────────────────────────
+
+
+class TestNsenterReexec:
+    """Tests for the _nsenter_reexec helper."""
+
+    def test_builds_nsenter_command(self, tmp_path: Path) -> None:
+        """_nsenter_reexec invokes podman unshare nsenter with correct args."""
+        from terok_shield.interactive import _nsenter_reexec
+
+        with (
+            mock.patch("terok_shield.interactive.SubprocessRunner") as mock_runner_cls,
+            mock.patch("subprocess.run") as mock_run,
+        ):
+            mock_runner_cls.return_value.podman_inspect.return_value = "12345"
+            _nsenter_reexec(tmp_path, _CONTAINER)
+
+        cmd = mock_run.call_args[0][0]
+        assert cmd[:3] == ["podman", "unshare", "nsenter"]
+        assert "-t" in cmd and "12345" in cmd
+        assert "-n" in cmd
+        assert str(tmp_path) in cmd
+        assert _CONTAINER in cmd
+        env = mock_run.call_args[1]["env"]
+        assert env[_NSENTER_ENV] == "1"
+
+    def test_subprocess_failure_raises_systemexit(self, tmp_path: Path) -> None:
+        """_nsenter_reexec raises SystemExit on subprocess failure."""
+        import subprocess
+
+        from terok_shield.interactive import _nsenter_reexec
+
+        with (
+            mock.patch("terok_shield.interactive.SubprocessRunner") as mock_runner_cls,
+            mock.patch(
+                "subprocess.run",
+                side_effect=subprocess.CalledProcessError(42, "nsenter"),
+            ),
+            pytest.raises(SystemExit) as ctx,
+        ):
+            mock_runner_cls.return_value.podman_inspect.return_value = "12345"
+            _nsenter_reexec(tmp_path, _CONTAINER)
+        assert ctx.value.code == 42
 
 
 # ── InteractiveSession.run / _loop coverage ──────────────

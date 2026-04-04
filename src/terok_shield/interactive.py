@@ -409,15 +409,59 @@ def _append_unique(path: Path, value: str) -> None:
         f.write(value + "\n")
 
 
+# ── nsenter re-exec ───────────────────────────────────
+
+_NSENTER_ENV = "_TEROK_SHIELD_NFLOG_NSENTER"
+
+
+def _nsenter_reexec(state_dir: Path, container: str) -> None:
+    """Re-exec the interactive handler inside the container's network namespace.
+
+    NFLOG messages are delivered per-netns — the watcher must be inside the
+    container's netns to receive packets logged by its nft rules.  Uses
+    ``podman unshare nsenter -t PID -n`` to enter the netns, then runs this
+    module as ``__main__``.
+
+    Args:
+        state_dir: Per-container state directory.
+        container: Container name.
+    """
+    import subprocess
+
+    runner = SubprocessRunner()
+    pid = runner.podman_inspect(container, "{{.State.Pid}}")
+
+    cmd = [
+        "podman",
+        "unshare",
+        "nsenter",
+        "-t",
+        pid,
+        "-n",
+        sys.executable,
+        "-m",
+        "terok_shield.interactive",
+        str(state_dir),
+        container,
+    ]
+    env = {**os.environ, _NSENTER_ENV: "1"}
+    try:
+        subprocess.run(cmd, env=env, check=True)  # noqa: S603
+    except subprocess.CalledProcessError as e:
+        raise SystemExit(e.returncode) from e
+
+
 # ── Entry point ────────────────────────────────────────
 
 
 def run_interactive(state_dir: Path, container: str) -> None:
     """Start the interactive NFLOG handler for a container.
 
-    Validates that the interactive tier is configured, then creates a
-    :class:`SubprocessRunner` and :class:`InteractiveSession` and enters
-    the event loop.
+    The NFLOG netlink socket must be inside the container's network
+    namespace to receive packets logged by nft rules.  On first
+    invocation, re-execs via ``podman unshare nsenter`` into the
+    container's netns.  The re-exec sets ``_TEROK_SHIELD_NFLOG_NSENTER``
+    so the second invocation runs the handler directly.
 
     Args:
         state_dir: Per-container state directory (may be relative).
@@ -436,6 +480,20 @@ def run_interactive(state_dir: Path, container: str) -> None:
         )
         raise SystemExit(1)
 
+    if os.environ.get(_NSENTER_ENV) != "1":
+        _nsenter_reexec(state_dir, container)
+        return
+
     runner = SubprocessRunner()
     session = InteractiveSession(runner=runner, state_dir=state_dir, container=container)
     session.run()
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        print(
+            f"Usage: {sys.executable} -m terok_shield.interactive <state_dir> <container>",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    run_interactive(Path(sys.argv[1]), sys.argv[2])
