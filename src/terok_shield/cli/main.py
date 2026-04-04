@@ -13,8 +13,8 @@ from pathlib import Path
 from typing import Any
 
 from .. import ExecError, Shield, ShieldConfig, ShieldMode
-from ..config import ShieldFileConfig
-from ..validation import validate_container_name
+from ..common.config import ShieldFileConfig
+from ..common.validation import validate_container_name
 from .registry import COMMANDS, ArgDef, CommandDef
 
 # ── Config construction (formerly in config.py) ──────────
@@ -418,7 +418,7 @@ def _cmd_resolve(shield: Shield, container: str, force: bool) -> None:
 
 def _collect_all_audit_entries(state_root: Path, n: int) -> list[dict]:
     """Collect audit entries from all containers, sorted by timestamp, trimmed to n."""
-    from ..audit import AuditLogger
+    from ..lib.audit import AuditLogger
 
     containers_dir = state_root / "containers"
     if not containers_dir.is_dir():
@@ -445,7 +445,7 @@ def _cmd_logs_cli(
     Otherwise, collects entries from all containers, sorts by timestamp,
     and prints the most recent ``n`` globally.
     """
-    from ..audit import AuditLogger
+    from ..lib.audit import AuditLogger
 
     state_root = (state_dir_override or _resolve_state_root()).resolve()
     if container:
@@ -464,13 +464,13 @@ def _cmd_logs_cli(
 
 def _cmd_setup(*, root: bool, user: bool) -> None:
     """Install global OCI hooks for podman < 5.6.0 restart persistence."""
-    from ..core.mode_hook import setup_global_hooks
-    from ..podman_info import (
+    from ..common.podman_info import (
         USER_HOOKS_DIR,
         _user_containers_conf,
         ensure_containers_conf_hooks_dir,
         system_hooks_dir,
     )
+    from ..core.mode_hook import setup_global_hooks
 
     sys_dir = system_hooks_dir()
     usr_dir = USER_HOOKS_DIR.expanduser()

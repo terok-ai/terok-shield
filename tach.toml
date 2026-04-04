@@ -18,38 +18,43 @@ ignore_type_checking_imports = true
 # never the reverse.  Same-layer imports require explicit depends_on.
 #
 #   cli         CLI entry points, interactive loops, watch runner
-#   support     Public facade, audit, profiles, watch library
+#   support     Public facade, audit, profiles, watchers
 #   core        Security-critical: nft, dns, dnsmasq, mode_hook, state, run
-#   foundation  Pure data / standalone helpers with zero internal deps
+#   common      Pure data / standalone helpers with zero internal deps
 
-layers = ["cli", "support", "core", "foundation"]
+layers = ["cli", "support", "core", "common"]
 
-# ── Foundation ─────────────────────────────────────────────
+# ── Common ─────────────────────────────────────────────────
 # Zero-dependency primitives.  No internal imports.
 
 [[modules]]
-path = "terok_shield.config"
-layer = "foundation"
+path = "terok_shield.common"
+layer = "common"
 depends_on = []
 
 [[modules]]
-path = "terok_shield.util"
-layer = "foundation"
+path = "terok_shield.common.config"
+layer = "common"
 depends_on = []
 
 [[modules]]
-path = "terok_shield.validation"
-layer = "foundation"
+path = "terok_shield.common.util"
+layer = "common"
 depends_on = []
 
 [[modules]]
-path = "terok_shield.podman_info"
-layer = "foundation"
+path = "terok_shield.common.validation"
+layer = "common"
+depends_on = []
+
+[[modules]]
+path = "terok_shield.common.podman_info"
+layer = "common"
 depends_on = []
 
 # ── Core ───────────────────────────────────────────────────
 # Security-critical modules — the auditable boundary.
-# May import from foundation freely; must declare same-layer deps.
+# May import from common freely; must declare same-layer deps.
 
 [[modules]]
 path = "terok_shield.core"
@@ -114,23 +119,28 @@ depends_on = [
 
 # ── Support ────────────────────────────────────────────────
 # Non-security-critical library modules.
-# May import from core and foundation freely; must declare same-layer deps.
+# May import from core and common freely; must declare same-layer deps.
+
+[[modules]]
+path = "terok_shield.lib"
+layer = "support"
+depends_on = []
 
 # Audit logging — no internal deps
 [[modules]]
-path = "terok_shield.audit"
+path = "terok_shield.lib.audit"
 layer = "support"
 depends_on = []
 
 # Profile loading
 [[modules]]
-path = "terok_shield.profiles"
+path = "terok_shield.lib.profiles"
 layer = "support"
 depends_on = []
 
-# Watch — library-level event-stream classes
+# Watchers — library-level event-stream classes
 [[modules]]
-path = "terok_shield.watch"
+path = "terok_shield.lib.watchers"
 layer = "support"
 depends_on = []
 
@@ -139,8 +149,8 @@ depends_on = []
 path = "terok_shield"
 layer = "support"
 depends_on = [
-    "terok_shield.audit",
-    "terok_shield.profiles",
+    "terok_shield.lib.audit",
+    "terok_shield.lib.profiles",
 ]
 
 # ── CLI ────────────────────────────────────────────────────

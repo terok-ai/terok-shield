@@ -18,8 +18,7 @@ from dataclasses import dataclass, field
 from importlib.metadata import PackageNotFoundError, version as _meta_version
 from pathlib import Path
 
-from .audit import AuditLogger
-from .config import (
+from .common.config import (
     AuditFileConfig,
     DnsTier,
     ShieldConfig,
@@ -28,6 +27,16 @@ from .config import (
     ShieldState,
     detect_dns_tier,
 )
+from .common.podman_info import (
+    USER_HOOKS_DIR,
+    ensure_containers_conf_hooks_dir,
+    find_hooks_dirs,
+    global_hooks_hint,
+    has_global_hooks,
+    parse_podman_info,
+    system_hooks_dir,
+)
+from .common.util import is_ip as _is_ip
 from .core import dnsmasq, state
 from .core.dns import DnsResolver
 from .core.mode_hook import setup_global_hooks
@@ -40,17 +49,8 @@ from .core.run import (
     ShieldNeedsSetup,
     SubprocessRunner,
 )
-from .podman_info import (
-    USER_HOOKS_DIR,
-    ensure_containers_conf_hooks_dir,
-    find_hooks_dirs,
-    global_hooks_hint,
-    has_global_hooks,
-    parse_podman_info,
-    system_hooks_dir,
-)
-from .profiles import ProfileLoader
-from .util import is_ip as _is_ip
+from .lib.audit import AuditLogger
+from .lib.profiles import ProfileLoader
 
 logger = logging.getLogger(__name__)
 

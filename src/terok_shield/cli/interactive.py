@@ -38,7 +38,7 @@ from ..core import state
 from ..core.nft import add_deny_elements_dual, add_elements_dual
 from ..core.run import CommandRunner, SubprocessRunner
 from ..core.state import read_interactive_tier
-from ..watch import NflogWatcher, WatchEvent
+from ..lib.watchers import NflogWatcher, WatchEvent
 
 logger = logging.getLogger(__name__)
 

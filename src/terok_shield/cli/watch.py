@@ -6,7 +6,7 @@
 This module contains the CLI/tool portion of the watch subsystem:
 signal handlers, tier validation, and the blocking ``run_watch()``
 event loop.  The library-level watcher classes live in
-:mod:`terok_shield.watch`.
+:mod:`terok_shield.lib.watchers`.
 """
 
 from __future__ import annotations
@@ -16,9 +16,9 @@ import signal
 import sys
 from pathlib import Path
 
-from ..config import DnsTier
+from ..common.config import DnsTier
 from ..core import state
-from ..watch import AuditLogWatcher, DnsLogWatcher, NflogWatcher
+from ..lib.watchers import AuditLogWatcher, DnsLogWatcher, NflogWatcher
 
 # ── Entry point ─────────────────────────────────────────
 

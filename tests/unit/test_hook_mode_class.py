@@ -11,7 +11,7 @@ from unittest import mock
 
 import pytest
 
-from terok_shield.config import (
+from terok_shield.common.config import (
     ANNOTATION_AUDIT_ENABLED_KEY,
     ANNOTATION_STATE_DIR_KEY,
     ShieldConfig,

@@ -17,12 +17,12 @@ from unittest import mock
 import pytest
 
 from terok_shield import Shield, ShieldConfig
-from terok_shield.audit import AuditLogger
 from terok_shield.core import state
 from terok_shield.core.dns import DnsResolver
 from terok_shield.core.mode_hook import HookMode
 from terok_shield.core.nft import RulesetBuilder
-from terok_shield.profiles import ProfileLoader
+from terok_shield.lib.audit import AuditLogger
+from terok_shield.lib.profiles import ProfileLoader
 
 from ..testfs import FAKE_RESOLVED_DIR, NFT_BINARY
 from ..testnet import TEST_DOMAIN, TEST_IP1, TEST_IP2

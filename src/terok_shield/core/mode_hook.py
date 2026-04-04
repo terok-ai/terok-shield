@@ -22,7 +22,7 @@ import stat
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..config import (
+from ..common.config import (
     ANNOTATION_AUDIT_ENABLED_KEY,
     ANNOTATION_DNS_TIER_KEY,
     ANNOTATION_INTERACTIVE_KEY,
@@ -37,14 +37,14 @@ from ..config import (
     ShieldState,
     detect_dns_tier,
 )
-from ..podman_info import (
+from ..common.podman_info import (
     PodmanInfo,
     global_hooks_hint,
     has_global_hooks,
     parse_podman_info,
     parse_resolv_conf,
 )
-from ..util import is_ip as _is_ip, is_ipv4
+from ..common.util import is_ip as _is_ip, is_ipv4
 from . import dnsmasq, state
 from .nft import (
     NFT_TABLE,
@@ -64,8 +64,8 @@ from .run import ExecError, ShieldNeedsSetup
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from ..audit import AuditLogger
-    from ..profiles import ProfileLoader
+    from ..lib.audit import AuditLogger
+    from ..lib.profiles import ProfileLoader
     from .dns import DnsResolver
     from .run import CommandRunner
 

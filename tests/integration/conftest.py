@@ -28,8 +28,8 @@ from pathlib import Path
 
 import pytest
 
+from terok_shield.common.podman_info import has_global_hooks, parse_podman_info
 from terok_shield.core.run import find_nft
-from terok_shield.podman_info import has_global_hooks, parse_podman_info
 from tests.testnet import ALLOWED_TARGET_IPS
 
 from .helpers import start_shielded_container

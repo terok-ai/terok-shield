@@ -27,7 +27,7 @@ from terok_shield.cli.main import (
     _resolve_state_root,
     main,
 )
-from terok_shield.config import ShieldFileConfig, ShieldMode
+from terok_shield.common.config import ShieldFileConfig, ShieldMode
 
 from ..testfs import (
     AUDIT_FILENAME,
@@ -973,7 +973,7 @@ class TestSetupCommand:
     """Tests for the setup CLI command."""
 
     @mock.patch("terok_shield.core.mode_hook.setup_global_hooks")
-    @mock.patch("terok_shield.podman_info.ensure_containers_conf_hooks_dir")
+    @mock.patch("terok_shield.common.podman_info.ensure_containers_conf_hooks_dir")
     def test_setup_user(
         self,
         mock_ensure: mock.Mock,
@@ -1081,7 +1081,7 @@ class TestSetupInteractive:
     ) -> None:
         """Interactive setup with 'u' choice installs user hooks."""
         monkeypatch.setattr(
-            "terok_shield.podman_info.ensure_containers_conf_hooks_dir", lambda _d: None
+            "terok_shield.common.podman_info.ensure_containers_conf_hooks_dir", lambda _d: None
         )
         main(["setup"])
         mock_setup.assert_called_once()

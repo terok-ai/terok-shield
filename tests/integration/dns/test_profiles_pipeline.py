@@ -11,7 +11,7 @@ import pytest
 from terok_shield.core import state
 from terok_shield.core.dns import DnsResolver
 from terok_shield.core.run import SubprocessRunner
-from terok_shield.profiles import ProfileLoader
+from terok_shield.lib.profiles import ProfileLoader
 from tests.testnet import CLOUDFLARE_DOMAIN, TEST_IP99
 
 from ..conftest import dig_missing

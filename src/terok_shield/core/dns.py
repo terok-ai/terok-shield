@@ -11,7 +11,7 @@ import logging
 import time
 from pathlib import Path
 
-from ..util import is_ip as _is_ip
+from ..common.util import is_ip as _is_ip
 from .run import CommandRunner, DigNotFoundError
 
 logger = logging.getLogger(__name__)

@@ -27,8 +27,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .core import dnsmasq
-from .core.nft_constants import NFLOG_GROUP
+from ..core import dnsmasq
+from ..core.nft_constants import NFLOG_GROUP
 
 logger = logging.getLogger(__name__)
 

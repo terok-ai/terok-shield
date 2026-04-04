@@ -21,7 +21,7 @@ from terok_shield.cli.interactive import (
     run_interactive,
 )
 from terok_shield.core import state
-from terok_shield.watch import WatchEvent
+from terok_shield.lib.watchers import WatchEvent
 
 from ..testnet import (
     DNSMASQ_DOMAIN,
@@ -369,7 +369,7 @@ class TestDrainWatcherAndReadableFds:
 
     def test_drain_watcher_ignores_non_queued(self, tmp_path: Path) -> None:
         """_drain_watcher ignores events that are not queued_connection."""
-        from terok_shield.watch import WatchEvent
+        from terok_shield.lib.watchers import WatchEvent
 
         session = _make_session(tmp_path)
         mock_watcher = mock.MagicMock()
