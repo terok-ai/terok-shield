@@ -779,14 +779,18 @@ class TestNflogWatcherCreate:
         assert result is None
 
     def test_returns_watcher_on_success(self) -> None:
-        """create() returns a NflogWatcher when socket succeeds."""
+        """create() returns a NflogWatcher when bind ACK succeeds."""
         mock_sock = MagicMock(spec=socket.socket)
-        mock_sock.recv.side_effect = BlockingIOError  # ACK read
+        # Build a success ACK (error code 0)
+        ack_payload = struct.pack("=i", 0)
+        ack = _NLMSG_HDR.pack(_NLMSG_HDR.size + len(ack_payload), 2, 0, 0, 0) + ack_payload
+        mock_sock.recv.return_value = ack
         with patch("terok_shield.watch.socket.socket", return_value=mock_sock):
             result = NflogWatcher.create(_CONTAINER)
         assert result is not None
         assert isinstance(result, NflogWatcher)
         mock_sock.bind.assert_called_once_with((0, 0))
+        mock_sock.settimeout.assert_called_once_with(2.0)
         mock_sock.setblocking.assert_called_once_with(False)
         mock_sock.send.assert_called_once()
         assert len(mock_sock.send.call_args[0][0]) >= _NLMSG_HDR.size
