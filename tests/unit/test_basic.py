@@ -25,7 +25,7 @@ def test_version_string() -> None:
 
 def test_cli_help(capsys: pytest.CaptureFixture[str]) -> None:
     """CLI prints help without error."""
-    from terok_shield.cli import main
+    from terok_shield.cli.main import main
 
     with pytest.raises(SystemExit) as exc_info:
         main(["--help"])
@@ -35,7 +35,7 @@ def test_cli_help(capsys: pytest.CaptureFixture[str]) -> None:
 
 def test_cli_no_command(capsys: pytest.CaptureFixture[str]) -> None:
     """CLI with no subcommand prints help and exits 0."""
-    from terok_shield.cli import main
+    from terok_shield.cli.main import main
 
     with pytest.raises(SystemExit) as exc_info:
         main([])
@@ -48,11 +48,11 @@ def test_cli_status(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """CLI status subcommand prints mode info."""
-    from terok_shield.cli import main
+    from terok_shield.cli.main import main
 
     mock_cls = mock.MagicMock()
-    monkeypatch.setattr("terok_shield.cli._build_config", mock.Mock())
-    monkeypatch.setattr("terok_shield.cli.Shield", mock_cls)
+    monkeypatch.setattr("terok_shield.cli.main._build_config", mock.Mock())
+    monkeypatch.setattr("terok_shield.cli.main.Shield", mock_cls)
     mock_cls.return_value.status.return_value = {
         "mode": "standard",
         "audit_enabled": True,

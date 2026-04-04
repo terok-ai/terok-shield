@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from terok_shield.cli import main
+from terok_shield.cli.main import main
 from tests.testnet import TEST_IP1
 
 from ..conftest import podman_missing

@@ -5,8 +5,8 @@
 
 import pytest
 
-from terok_shield.cli import main
-from terok_shield.nft_constants import BYPASS_LOG_PREFIX
+from terok_shield.cli.main import main
+from terok_shield.core.nft_constants import BYPASS_LOG_PREFIX
 
 from ..conftest import nft_missing, podman_missing
 from ..helpers import disposable_shield as _shield

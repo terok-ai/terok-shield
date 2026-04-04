@@ -17,7 +17,7 @@ from unittest import mock
 import pytest
 
 from terok_shield import ExecError, NftNotFoundError, ShieldState
-from terok_shield.cli import (
+from terok_shield.cli.main import (
     _auto_detect_mode,
     _build_config,
     _build_parser,
@@ -27,7 +27,7 @@ from terok_shield.cli import (
     _resolve_state_root,
     main,
 )
-from terok_shield.config import ShieldFileConfig, ShieldMode
+from terok_shield.common.config import ShieldFileConfig, ShieldMode
 
 from ..testfs import (
     AUDIT_FILENAME,
@@ -83,8 +83,8 @@ def parser() -> argparse.ArgumentParser:
 def cli_dispatch() -> Iterator[CliDispatchHarness]:
     """Patch CLI config construction and Shield wiring."""
     with (
-        mock.patch("terok_shield.cli._build_config") as build_config,
-        mock.patch("terok_shield.cli.Shield") as shield_cls,
+        mock.patch("terok_shield.cli.main._build_config") as build_config,
+        mock.patch("terok_shield.cli.main.Shield") as shield_cls,
     ):
         yield CliDispatchHarness(build_config=build_config, shield_cls=shield_cls)
 
@@ -93,9 +93,9 @@ def cli_dispatch() -> Iterator[CliDispatchHarness]:
 def cli_run() -> Iterator[CliRunHarness]:
     """Patch CLI collaborators plus ``os.execv`` for ``run`` tests."""
     with (
-        mock.patch("terok_shield.cli._build_config") as build_config,
-        mock.patch("terok_shield.cli.Shield") as shield_cls,
-        mock.patch("terok_shield.cli._find_podman", return_value=PODMAN_BINARY),
+        mock.patch("terok_shield.cli.main._build_config") as build_config,
+        mock.patch("terok_shield.cli.main.Shield") as shield_cls,
+        mock.patch("terok_shield.cli.main._find_podman", return_value=PODMAN_BINARY),
         mock.patch("os.execv") as execv,
     ):
         yield CliRunHarness(build_config=build_config, shield_cls=shield_cls, execv=execv)
@@ -122,7 +122,7 @@ def _set_env(
 @pytest.fixture
 def force_hook_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     """Force CLI config building to use hook mode without autodetection."""
-    monkeypatch.setattr("terok_shield.cli._auto_detect_mode", lambda: ShieldMode.HOOK)
+    monkeypatch.setattr("terok_shield.cli.main._auto_detect_mode", lambda: ShieldMode.HOOK)
 
 
 @pytest.mark.parametrize(
@@ -382,7 +382,7 @@ def test_find_podman_resolves_relative_path(
     podman_path.chmod(0o755)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
-        "terok_shield.cli.shutil.which", lambda _name: str(Path(BIN_DIR_NAME) / "podman")
+        "terok_shield.cli.main.shutil.which", lambda _name: str(Path(BIN_DIR_NAME) / "podman")
     )
     assert _find_podman() == str(podman_path.resolve())
 
@@ -397,7 +397,7 @@ def test_find_podman_rejects_non_executable_path(
     podman_path.chmod(0o644)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
-        "terok_shield.cli.shutil.which", lambda _name: str(Path(BIN_DIR_NAME) / "podman")
+        "terok_shield.cli.main.shutil.which", lambda _name: str(Path(BIN_DIR_NAME) / "podman")
     )
     with pytest.raises(OSError, match="podman binary not found"):
         _find_podman()
@@ -406,7 +406,7 @@ def test_find_podman_rejects_non_executable_path(
 def test_run_reports_missing_podman(cli_dispatch: CliDispatchHarness) -> None:
     """run() exits with a clear error when podman cannot be found."""
     cli_dispatch.shield.pre_start.return_value = ["--annotation", "a=b"]
-    with mock.patch("terok_shield.cli.shutil.which", return_value=None):
+    with mock.patch("terok_shield.cli.main.shutil.which", return_value=None):
         with pytest.raises(SystemExit) as ctx:
             main(["run", _CONTAINER, "--", _IMAGE])
     assert ctx.value.code == 1
@@ -832,14 +832,14 @@ def test_resolve_config_root(
 
 def test_auto_detect_mode_raises_without_nft(monkeypatch: pytest.MonkeyPatch) -> None:
     """_auto_detect_mode() fails when nft is unavailable."""
-    monkeypatch.setattr("terok_shield.run.find_nft", lambda: "")
+    monkeypatch.setattr("terok_shield.core.run.find_nft", lambda: "")
     with pytest.raises(NftNotFoundError):
         _auto_detect_mode()
 
 
 def test_auto_detect_mode_returns_hook(monkeypatch: pytest.MonkeyPatch) -> None:
     """_auto_detect_mode() selects hook mode when nft is installed."""
-    monkeypatch.setattr("terok_shield.run.find_nft", lambda: NFT_BINARY)
+    monkeypatch.setattr("terok_shield.core.run.find_nft", lambda: NFT_BINARY)
     assert _auto_detect_mode() == ShieldMode.HOOK
 
 
@@ -972,8 +972,8 @@ def test_build_config_uses_resolved_state_root_when_not_overridden(
 class TestSetupCommand:
     """Tests for the setup CLI command."""
 
-    @mock.patch("terok_shield.mode_hook.setup_global_hooks")
-    @mock.patch("terok_shield.podman_info.ensure_containers_conf_hooks_dir")
+    @mock.patch("terok_shield.core.mode_hook.setup_global_hooks")
+    @mock.patch("terok_shield.common.podman_info.ensure_containers_conf_hooks_dir")
     def test_setup_user(
         self,
         mock_ensure: mock.Mock,
@@ -986,7 +986,7 @@ class TestSetupCommand:
         mock_ensure.assert_called_once()
         assert "Done" in capsys.readouterr().out
 
-    @mock.patch("terok_shield.mode_hook.setup_global_hooks")
+    @mock.patch("terok_shield.core.mode_hook.setup_global_hooks")
     def test_setup_root(
         self,
         mock_setup: mock.Mock,
@@ -1008,7 +1008,7 @@ class TestSetupCommand:
 # ── check-environment command test ───────────────────────
 
 
-@mock.patch("terok_shield.run.find_nft", return_value=NFT_BINARY)
+@mock.patch("terok_shield.core.run.find_nft", return_value=NFT_BINARY)
 def test_check_environment_command(
     _find: mock.Mock,
     tmp_path: Path,
@@ -1034,7 +1034,7 @@ def test_check_environment_command(
 # ── version command test ─────────────────────────────────
 
 
-@mock.patch("terok_shield.run.find_nft", return_value=NFT_BINARY)
+@mock.patch("terok_shield.core.run.find_nft", return_value=NFT_BINARY)
 def test_version_flag_prints_versions(
     _find: mock.Mock,
     capsys: pytest.CaptureFixture[str],
@@ -1050,7 +1050,7 @@ def test_version_flag_prints_versions(
     assert "nft found" in out
 
 
-@mock.patch("terok_shield.run.find_nft", return_value="")
+@mock.patch("terok_shield.core.run.find_nft", return_value="")
 def test_version_flag_podman_missing(
     _find: mock.Mock,
     capsys: pytest.CaptureFixture[str],
@@ -1070,7 +1070,7 @@ def test_version_flag_podman_missing(
 class TestSetupInteractive:
     """Tests for interactive setup mode."""
 
-    @mock.patch("terok_shield.mode_hook.setup_global_hooks")
+    @mock.patch("terok_shield.core.mode_hook.setup_global_hooks")
     @mock.patch("builtins.input", return_value="u")
     def test_interactive_user_choice(
         self,
@@ -1081,7 +1081,7 @@ class TestSetupInteractive:
     ) -> None:
         """Interactive setup with 'u' choice installs user hooks."""
         monkeypatch.setattr(
-            "terok_shield.podman_info.ensure_containers_conf_hooks_dir", lambda _d: None
+            "terok_shield.common.podman_info.ensure_containers_conf_hooks_dir", lambda _d: None
         )
         main(["setup"])
         mock_setup.assert_called_once()
@@ -1097,7 +1097,7 @@ class TestSetupInteractive:
         main(["setup"])
         assert "Cancelled" in capsys.readouterr().out
 
-    @mock.patch("terok_shield.mode_hook.setup_global_hooks")
+    @mock.patch("terok_shield.core.mode_hook.setup_global_hooks")
     @mock.patch("builtins.input", return_value="r")
     def test_interactive_root_choice(
         self,
@@ -1133,6 +1133,6 @@ def test_prepare_with_interactive_passes_true(cli_dispatch: CliDispatchHarness) 
 
 def test_interactive_command_routes_to_handler(cli_dispatch: CliDispatchHarness) -> None:
     """interactive subcommand dispatches to _handle_interactive via the registry."""
-    with mock.patch("terok_shield.interactive.run_interactive") as mock_run:
+    with mock.patch("terok_shield.cli.interactive.run_interactive") as mock_run:
         main(["interactive", _CONTAINER])
     mock_run.assert_called_once()

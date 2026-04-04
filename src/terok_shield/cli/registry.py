@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from . import EnvironmentCheck, Shield
+    from .. import EnvironmentCheck, Shield
 
 
 @dataclass(frozen=True)

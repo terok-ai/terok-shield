@@ -12,8 +12,7 @@ from unittest import mock
 
 import pytest
 
-from terok_shield import state
-from terok_shield.interactive import (
+from terok_shield.cli.interactive import (
     _NSENTER_ENV,
     InteractiveSession,
     _append_unique,
@@ -21,7 +20,8 @@ from terok_shield.interactive import (
     _PendingPacket,
     run_interactive,
 )
-from terok_shield.watch import WatchEvent
+from terok_shield.core import state
+from terok_shield.lib.watchers import WatchEvent
 
 from ..testnet import (
     DNSMASQ_DOMAIN,
@@ -68,7 +68,7 @@ class TestHandleSignal:
 
     def test_sets_running_false(self) -> None:
         """_handle_signal sets the module-level _running flag to False."""
-        import terok_shield.interactive as mod
+        import terok_shield.cli.interactive as mod
 
         mod._running = True
         _handle_signal(2, None)
@@ -284,7 +284,7 @@ class TestApplyVerdict:
         """Accept verdict persists IP to live.allowed."""
         session = _make_session(tmp_path)
         pkt = _PendingPacket(dest=TEST_IP1, port=443, proto=6, queued_at=1.0, packet_id=1)
-        with mock.patch("terok_shield.interactive.add_elements_dual", return_value="nft add"):
+        with mock.patch("terok_shield.cli.interactive.add_elements_dual", return_value="nft add"):
             result = session._apply_verdict(pkt, accept=True)
         assert result is True
         assert TEST_IP1 in state.live_allowed_path(tmp_path).read_text()
@@ -293,7 +293,9 @@ class TestApplyVerdict:
         """Deny verdict persists IP to deny.list."""
         session = _make_session(tmp_path)
         pkt = _PendingPacket(dest=TEST_IP1, port=443, proto=6, queued_at=1.0, packet_id=1)
-        with mock.patch("terok_shield.interactive.add_deny_elements_dual", return_value="nft add"):
+        with mock.patch(
+            "terok_shield.cli.interactive.add_deny_elements_dual", return_value="nft add"
+        ):
             result = session._apply_verdict(pkt, accept=False)
         assert result is True
         assert TEST_IP1 in state.deny_path(tmp_path).read_text()
@@ -303,7 +305,9 @@ class TestApplyVerdict:
         session = _make_session(tmp_path)
         session._runner.nft_via_nsenter.side_effect = RuntimeError("nft failed")
         pkt = _PendingPacket(dest=TEST_IP1, port=443, proto=6, queued_at=1.0, packet_id=1)
-        with mock.patch("terok_shield.interactive.add_elements_dual", return_value="nft add x\n"):
+        with mock.patch(
+            "terok_shield.cli.interactive.add_elements_dual", return_value="nft add x\n"
+        ):
             result = session._apply_verdict(pkt, accept=True)
         assert result is False
 
@@ -312,7 +316,7 @@ class TestApplyVerdict:
         session = _make_session(tmp_path)
         state.dns_tier_path(tmp_path).write_text("dnsmasq\n")
         pkt = _PendingPacket(dest=TEST_IP1, port=443, proto=6, queued_at=1.0, packet_id=1)
-        with mock.patch("terok_shield.interactive.add_elements_dual", return_value="") as m:
+        with mock.patch("terok_shield.cli.interactive.add_elements_dual", return_value="") as m:
             session._apply_verdict(pkt, accept=True)
         m.assert_called_once_with([TEST_IP1], permanent=True)
 
@@ -321,7 +325,7 @@ class TestApplyVerdict:
         session = _make_session(tmp_path)
         state.dns_tier_path(tmp_path).write_text("dig\n")
         pkt = _PendingPacket(dest=TEST_IP1, port=443, proto=6, queued_at=1.0, packet_id=1)
-        with mock.patch("terok_shield.interactive.add_elements_dual", return_value="") as m:
+        with mock.patch("terok_shield.cli.interactive.add_elements_dual", return_value="") as m:
             session._apply_verdict(pkt, accept=True)
         m.assert_called_once_with([TEST_IP1], permanent=False)
 
@@ -365,7 +369,7 @@ class TestDrainWatcherAndReadableFds:
 
     def test_drain_watcher_ignores_non_queued(self, tmp_path: Path) -> None:
         """_drain_watcher ignores events that are not queued_connection."""
-        from terok_shield.watch import WatchEvent
+        from terok_shield.lib.watchers import WatchEvent
 
         session = _make_session(tmp_path)
         mock_watcher = mock.MagicMock()
@@ -385,7 +389,7 @@ class TestDrainWatcherAndReadableFds:
 
     def test_readable_fds_with_int_and_object(self) -> None:
         """_readable_fds handles both raw ints and objects with fileno()."""
-        from terok_shield.interactive import _readable_fds
+        from terok_shield.cli.interactive import _readable_fds
 
         obj = mock.MagicMock()
         obj.fileno.return_value = 42
@@ -457,8 +461,8 @@ class TestReadStdin:
         """Empty read (EOF) returns None."""
         session = _make_session(tmp_path)
         with (
-            mock.patch("terok_shield.interactive.sys.stdin", self._mock_stdin()),
-            mock.patch("terok_shield.interactive.os.read", return_value=b""),
+            mock.patch("terok_shield.cli.interactive.sys.stdin", self._mock_stdin()),
+            mock.patch("terok_shield.cli.interactive.os.read", return_value=b""),
         ):
             result = session._read_stdin("")
         assert result is None
@@ -467,8 +471,8 @@ class TestReadStdin:
         """OSError from os.read returns the current buffer unchanged."""
         session = _make_session(tmp_path)
         with (
-            mock.patch("terok_shield.interactive.sys.stdin", self._mock_stdin()),
-            mock.patch("terok_shield.interactive.os.read", side_effect=OSError("broken pipe")),
+            mock.patch("terok_shield.cli.interactive.sys.stdin", self._mock_stdin()),
+            mock.patch("terok_shield.cli.interactive.os.read", side_effect=OSError("broken pipe")),
         ):
             result = session._read_stdin("partial")
         assert result == "partial"
@@ -479,8 +483,8 @@ class TestReadStdin:
         line = json.dumps({"type": "verdict", "id": 1, "action": "accept"})
         data = (line + "\npartial").encode()
         with (
-            mock.patch("terok_shield.interactive.sys.stdin", self._mock_stdin()),
-            mock.patch("terok_shield.interactive.os.read", return_value=data),
+            mock.patch("terok_shield.cli.interactive.sys.stdin", self._mock_stdin()),
+            mock.patch("terok_shield.cli.interactive.os.read", return_value=data),
         ):
             with mock.patch.object(session, "_process_command") as mock_cmd:
                 result = session._read_stdin("")
@@ -510,7 +514,7 @@ class TestRunInteractive:
     def test_nsenter_reexec_when_not_in_netns(self, tmp_path: Path) -> None:
         """run_interactive calls nsenter reexec when not inside the container netns."""
         state.interactive_path(tmp_path).write_text("nflog\n")
-        with mock.patch("terok_shield.interactive._nsenter_reexec") as mock_reexec:
+        with mock.patch("terok_shield.cli.interactive._nsenter_reexec") as mock_reexec:
             run_interactive(tmp_path, _CONTAINER)
         mock_reexec.assert_called_once_with(tmp_path, _CONTAINER)
 
@@ -519,8 +523,8 @@ class TestRunInteractive:
         state.interactive_path(tmp_path).write_text("nflog\n")
         with (
             mock.patch.dict("os.environ", {_NSENTER_ENV: "1"}),
-            mock.patch("terok_shield.interactive.SubprocessRunner") as mock_runner_cls,
-            mock.patch("terok_shield.interactive.InteractiveSession") as mock_session_cls,
+            mock.patch("terok_shield.cli.interactive.SubprocessRunner") as mock_runner_cls,
+            mock.patch("terok_shield.cli.interactive.InteractiveSession") as mock_session_cls,
         ):
             run_interactive(tmp_path, _CONTAINER)
         mock_runner_cls.assert_called_once()
@@ -540,7 +544,7 @@ class TestMainBlock:
         import sys
 
         result = subprocess.run(
-            [sys.executable, "-m", "terok_shield.interactive"],  # noqa: S603
+            [sys.executable, "-m", "terok_shield.cli.interactive"],  # noqa: S603
             capture_output=True,
             text=True,
         )
@@ -556,7 +560,7 @@ class TestMainBlock:
             [  # noqa: S603
                 sys.executable,
                 "-m",
-                "terok_shield.interactive",
+                "terok_shield.cli.interactive",
                 str(tmp_path),
                 "test-ctr",
             ],
@@ -577,10 +581,10 @@ class TestNsenterReexec:
 
     def test_builds_nsenter_command(self, tmp_path: Path) -> None:
         """_nsenter_reexec invokes podman unshare nsenter with correct args."""
-        from terok_shield.interactive import _nsenter_reexec
+        from terok_shield.cli.interactive import _nsenter_reexec
 
         with (
-            mock.patch("terok_shield.interactive.SubprocessRunner") as mock_runner_cls,
+            mock.patch("terok_shield.cli.interactive.SubprocessRunner") as mock_runner_cls,
             mock.patch("subprocess.run") as mock_run,
         ):
             mock_runner_cls.return_value.podman_inspect.return_value = "12345"
@@ -599,10 +603,10 @@ class TestNsenterReexec:
         """_nsenter_reexec raises SystemExit on subprocess failure."""
         import subprocess
 
-        from terok_shield.interactive import _nsenter_reexec
+        from terok_shield.cli.interactive import _nsenter_reexec
 
         with (
-            mock.patch("terok_shield.interactive.SubprocessRunner") as mock_runner_cls,
+            mock.patch("terok_shield.cli.interactive.SubprocessRunner") as mock_runner_cls,
             mock.patch(
                 "subprocess.run",
                 side_effect=subprocess.CalledProcessError(42, "nsenter"),
@@ -624,7 +628,7 @@ class TestInteractiveSessionRun:
         """run() exits with code 1 if NflogWatcher.create returns None."""
         session = _make_session(tmp_path)
         with (
-            mock.patch("terok_shield.interactive.NflogWatcher.create", return_value=None),
+            mock.patch("terok_shield.cli.interactive.NflogWatcher.create", return_value=None),
             pytest.raises(SystemExit) as ctx,
         ):
             session.run()
@@ -632,7 +636,7 @@ class TestInteractiveSessionRun:
 
     def test_run_creates_watcher_and_loops(self, tmp_path: Path) -> None:
         """run() creates a watcher, enters the loop, and closes on signal."""
-        import terok_shield.interactive as mod
+        import terok_shield.cli.interactive as mod
 
         session = _make_session(tmp_path)
         mock_watcher = mock.MagicMock()
@@ -648,10 +652,12 @@ class TestInteractiveSessionRun:
         mock_stdin = mock.MagicMock()
         mock_stdin.fileno.return_value = 0
         with (
-            mock.patch("terok_shield.interactive.NflogWatcher.create", return_value=mock_watcher),
-            mock.patch("terok_shield.interactive._set_nonblocking"),
-            mock.patch("terok_shield.interactive.select.select", side_effect=stop_after_one),
-            mock.patch("terok_shield.interactive.sys.stdin", mock_stdin),
+            mock.patch(
+                "terok_shield.cli.interactive.NflogWatcher.create", return_value=mock_watcher
+            ),
+            mock.patch("terok_shield.cli.interactive._set_nonblocking"),
+            mock.patch("terok_shield.cli.interactive.select.select", side_effect=stop_after_one),
+            mock.patch("terok_shield.cli.interactive.sys.stdin", mock_stdin),
         ):
             session.run()
         mock_watcher.close.assert_called_once()
@@ -659,14 +665,16 @@ class TestInteractiveSessionRun:
 
     def test_loop_breaks_on_select_error(self, tmp_path: Path) -> None:
         """_loop() exits cleanly when select raises OSError."""
-        import terok_shield.interactive as mod
+        import terok_shield.cli.interactive as mod
 
         session = _make_session(tmp_path)
         mock_watcher = mock.MagicMock()
         mock_watcher.fileno.return_value = 99
         original = mod._running
         mod._running = True
-        with mock.patch("terok_shield.interactive.select.select", side_effect=OSError("broken")):
+        with mock.patch(
+            "terok_shield.cli.interactive.select.select", side_effect=OSError("broken")
+        ):
             session._loop(mock_watcher, 0)
         mod._running = original
 
@@ -674,7 +682,7 @@ class TestInteractiveSessionRun:
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """_loop() processes queued_connection events from the watcher."""
-        import terok_shield.interactive as mod
+        import terok_shield.cli.interactive as mod
 
         session = _make_session(tmp_path)
         mock_watcher = mock.MagicMock()
@@ -694,7 +702,7 @@ class TestInteractiveSessionRun:
 
         original = mod._running
         mod._running = True
-        with mock.patch("terok_shield.interactive.select.select", side_effect=select_twice):
+        with mock.patch("terok_shield.cli.interactive.select.select", side_effect=select_twice):
             session._loop(mock_watcher, 99)
         mod._running = original
         out = capsys.readouterr().out.strip()
@@ -702,7 +710,7 @@ class TestInteractiveSessionRun:
 
     def test_loop_reads_stdin_eof(self, tmp_path: Path) -> None:
         """_loop() exits when stdin returns EOF."""
-        import terok_shield.interactive as mod
+        import terok_shield.cli.interactive as mod
 
         session = _make_session(tmp_path)
         mock_watcher = mock.MagicMock()
@@ -714,9 +722,9 @@ class TestInteractiveSessionRun:
         original = mod._running
         mod._running = True
         with (
-            mock.patch("terok_shield.interactive.select.select", side_effect=select_stdin),
-            mock.patch("terok_shield.interactive.os.read", return_value=b""),
-            mock.patch("terok_shield.interactive.sys.stdin") as mock_stdin,
+            mock.patch("terok_shield.cli.interactive.select.select", side_effect=select_stdin),
+            mock.patch("terok_shield.cli.interactive.os.read", return_value=b""),
+            mock.patch("terok_shield.cli.interactive.sys.stdin") as mock_stdin,
         ):
             mock_stdin.fileno.return_value = 42
             session._loop(mock_watcher, 42)
@@ -733,7 +741,7 @@ class TestSetNonblocking:
         """_set_nonblocking calls fcntl to set O_NONBLOCK."""
         import fcntl as real_fcntl
 
-        from terok_shield.interactive import _set_nonblocking
+        from terok_shield.cli.interactive import _set_nonblocking
 
         mock_fcntl = mock.MagicMock()
         mock_fcntl.F_GETFL = real_fcntl.F_GETFL

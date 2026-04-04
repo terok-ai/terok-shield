@@ -22,8 +22,7 @@ import stat
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import dnsmasq, state
-from .config import (
+from ..common.config import (
     ANNOTATION_AUDIT_ENABLED_KEY,
     ANNOTATION_DNS_TIER_KEY,
     ANNOTATION_INTERACTIVE_KEY,
@@ -38,6 +37,15 @@ from .config import (
     ShieldState,
     detect_dns_tier,
 )
+from ..common.podman_info import (
+    PodmanInfo,
+    global_hooks_hint,
+    has_global_hooks,
+    parse_podman_info,
+    parse_resolv_conf,
+)
+from ..common.util import is_ip as _is_ip, is_ipv4
+from . import dnsmasq, state
 from .nft import (
     NFT_TABLE,
     RulesetBuilder,
@@ -51,22 +59,14 @@ from .nft_constants import (
     PASTA_HOST_LOOPBACK_MAP,
     SLIRP4NETNS_DNS,
 )
-from .podman_info import (
-    PodmanInfo,
-    global_hooks_hint,
-    has_global_hooks,
-    parse_podman_info,
-    parse_resolv_conf,
-)
 from .run import ExecError, ShieldNeedsSetup
-from .util import is_ip as _is_ip, is_ipv4
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from .audit import AuditLogger
+    from ..lib.audit import AuditLogger
+    from ..lib.profiles import ProfileLoader
     from .dns import DnsResolver
-    from .profiles import ProfileLoader
     from .run import CommandRunner
 
 
@@ -129,7 +129,7 @@ def _generate_entrypoint() -> str:
     execution time — no virtualenv path is baked in at setup time.
     Works for all install methods: pip, pipx, Poetry, system package.
     """
-    return (Path(__file__).parent / "resources" / "hook_entrypoint.py").read_text()
+    return (Path(__file__).parent.parent / "resources" / "hook_entrypoint.py").read_text()
 
 
 def _generate_hook_json(entrypoint: str, stage: str) -> str:
@@ -272,33 +272,8 @@ class HookMode:
         self._ruleset = ruleset
         self._podman_info: PodmanInfo | None = None
 
-    def pre_start(self, container: str, profiles: list[str]) -> list[str]:
-        """Prepare for container start in hook mode.
-
-        Installs hooks (idempotent), composes profiles, resolves DNS
-        domains, writes allowlist, detects DNS tier, sets annotations,
-        and returns the podman CLI arguments needed for shield protection.
-
-        Raises:
-            ShieldNeedsSetup: On podman < 5.6.0 without global hooks.
-        """
-        sd = self._config.state_dir.resolve()
-        info = self._get_podman_info()
-
-        # Ensure state dirs and install hooks (idempotent)
-        state.ensure_state_dirs(sd)
-        install_hooks(
-            hook_entrypoint=state.hook_entrypoint(sd),
-            hooks_dir=state.hooks_dir(sd),
-        )
-
-        # Detect DNS tier and upstream DNS
-        tier = self._detect_dns_tier()
-        mode = info.network_mode or "pasta"
-        upstream_dns = _upstream_dns_for_mode(mode)
-
-        # Resolve DNS and write profile allowlist
-        entries = self._profiles.compose_profiles(profiles)
+    def _resolve_and_write_allowlists(self, sd: Path, tier: DnsTier, entries: list[str]) -> None:
+        """Resolve profile entries and write allowlist files for the detected tier."""
         if tier == DnsTier.DNSMASQ:
             # dnsmasq handles domain→IP resolution at runtime via --nftset.
             # Split entries: write domains for dnsmasq config, resolve only raw IPs.
@@ -309,11 +284,8 @@ class HookMode:
             # dig/getent tier: resolve everything to IPs at pre-start time.
             self._dns.resolve_and_cache(entries, state.profile_allowed_path(sd))
 
-        # Persist runtime params before container starts (hook reads from state dir)
-        state.upstream_dns_path(sd).write_text(f"{upstream_dns}\n")
-        state.dns_tier_path(sd).write_text(f"{tier.value}\n")
-
-        # Pre-generate complete nft ruleset (gateway sets start empty; hook populates them)
+    def _write_ruleset(self, sd: Path, tier: DnsTier, upstream_dns: str) -> None:
+        """Pre-generate the complete nft ruleset into the state bundle."""
         set_timeout = NFT_SET_TIMEOUT_DNSMASQ if tier == DnsTier.DNSMASQ else ""
         interactive = self._config.interactive
         ruleset_builder = RulesetBuilder(
@@ -335,9 +307,8 @@ class HookMode:
         else:
             state.interactive_path(sd).unlink(missing_ok=True)
 
-        # Pre-generate dnsmasq config if using dnsmasq tier; otherwise scrub
-        # stale artifacts so hook_entrypoint.py does not launch dnsmasq when
-        # the tier has changed on a reused state directory.
+    def _write_dnsmasq_config_or_scrub(self, sd: Path, tier: DnsTier, upstream_dns: str) -> None:
+        """Pre-generate dnsmasq config for dnsmasq tier, or scrub stale artifacts."""
         if tier == DnsTier.DNSMASQ:
             domains = dnsmasq.read_merged_domains(sd)
             conf = dnsmasq.generate_config(
@@ -356,55 +327,66 @@ class HookMode:
             ):
                 stale.unlink(missing_ok=True)
 
+    def _build_network_args(self, mode: str) -> list[str]:
+        """Build rootless network arguments (pasta or slirp4netns)."""
+        if os.geteuid() == 0:
+            return []
+        if mode == "slirp4netns":
+            return [
+                "--network",
+                "slirp4netns:allow_host_loopback=true",
+                "--add-host",
+                "host.containers.internal:10.0.2.2",
+            ]
+        # Use pasta --map-host-loopback unconditionally so that
+        # host.containers.internal always resolves to an address
+        # pasta actually forwards to the host's 127.0.0.1.
+        return [
+            "--network",
+            f"pasta:--map-host-loopback,{PASTA_HOST_LOOPBACK_MAP}",
+            "--add-host",
+            f"host.containers.internal:{PASTA_HOST_LOOPBACK_MAP}",
+        ]
+
+    def pre_start(self, container: str, profiles: list[str]) -> list[str]:
+        """Prepare for container start in hook mode.
+
+        Installs hooks (idempotent), composes profiles, resolves DNS
+        domains, writes allowlist, detects DNS tier, sets annotations,
+        and returns the podman CLI arguments needed for shield protection.
+
+        Raises:
+            ShieldNeedsSetup: On podman < 5.6.0 without global hooks.
+        """
+        sd = self._config.state_dir.resolve()
+        info = self._get_podman_info()
+        interactive = self._config.interactive
+
+        # Ensure state dirs and install hooks (idempotent)
+        state.ensure_state_dirs(sd)
+        install_hooks(
+            hook_entrypoint=state.hook_entrypoint(sd),
+            hooks_dir=state.hooks_dir(sd),
+        )
+
+        # Detect DNS tier and upstream DNS
+        tier = self._detect_dns_tier()
+        mode = info.network_mode or "pasta"
+        upstream_dns = _upstream_dns_for_mode(mode)
+
+        # Resolve DNS, write allowlists, generate ruleset + dnsmasq config
+        entries = self._profiles.compose_profiles(profiles)
+        self._resolve_and_write_allowlists(sd, tier, entries)
+        state.upstream_dns_path(sd).write_text(f"{upstream_dns}\n")
+        state.dns_tier_path(sd).write_text(f"{tier.value}\n")
+        self._write_ruleset(sd, tier, upstream_dns)
+        self._write_dnsmasq_config_or_scrub(sd, tier, upstream_dns)
+
         # Build podman args
-        args: list[str] = []
+        args = self._build_network_args(mode)
 
-        if os.geteuid() != 0:
-            if mode == "slirp4netns":
-                args += [
-                    "--network",
-                    "slirp4netns:allow_host_loopback=true",
-                    "--add-host",
-                    "host.containers.internal:10.0.2.2",
-                ]
-            else:
-                # Use pasta --map-host-loopback unconditionally so that
-                # host.containers.internal always resolves to an address
-                # pasta actually forwards to the host's 127.0.0.1.
-                # Without --map-host-loopback, traffic to 169.254.1.2
-                # is not translated and the gate server is unreachable.
-                # This also avoids the pasta 2.x "two loopbacks" splice
-                # bug that broke the old -T,{port} approach.
-                args += [
-                    "--network",
-                    f"pasta:--map-host-loopback,{PASTA_HOST_LOOPBACK_MAP}",
-                    "--add-host",
-                    f"host.containers.internal:{PASTA_HOST_LOOPBACK_MAP}",
-                ]
-
-        # Redirect container DNS through the per-container dnsmasq instance.
-        #
-        # With pasta networking, podman normally generates /etc/resolv.conf pointing
-        # to pasta's DNS proxy (169.254.1.1) and bind-mounts it read-only.  We need
-        # the container to use 127.0.0.1 (dnsmasq) instead so that every DNS
-        # resolution populates the nft allow sets via --nftset — enabling dynamic
-        # domain-based egress control.
-        #
-        # --dns 127.0.0.1 cannot be used: podman passes it to pasta as a DNS-splice
-        # target, causing pasta to bind HOST UDP/TCP port 53.  Port 53 is privileged
-        # (< 1024) and rootless pasta lacks CAP_NET_BIND_SERVICE, so the container
-        # fails to start.
-        #
-        # Instead, pre_start writes resolv.conf to the state directory and passes
-        # it as an explicit volume mount.  Podman detects the user-supplied mount
-        # and skips its own resolv.conf generation entirely — pasta's DNS proxy
-        # never appears in the container's resolver list.  The :ro flag prevents
-        # the container payload from redirecting DNS away from dnsmasq, which would
-        # silently break dynamic domain allowlisting.  The :Z flag relabels the
-        # file with this container's private MCS label so that container_t can read
-        # it even when the state directory is labeled data_home_t.  :Z (private)
-        # is correct here because each container has its own state directory and
-        # its own resolv.conf — there is no cross-container sharing.
+        # Redirect container DNS through per-container dnsmasq via volume mount.
+        # See commit history for detailed rationale on why --dns cannot be used.
         if tier == DnsTier.DNSMASQ:
             args += ["--volume", f"{state.resolv_conf_path(sd)}:/etc/resolv.conf:ro,Z"]
 
