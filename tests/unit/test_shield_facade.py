@@ -544,11 +544,8 @@ class TestReadInstalledHookVersion:
         hooks_dir.mkdir()
         hook = hooks_dir / "terok-shield-hook"
         hook.write_text("_BUNDLE_VERSION = 5\n")
-        hook.chmod(0o000)
-        try:
+        with mock.patch.object(Path, "read_text", side_effect=OSError("boom")):
             assert _read_installed_hook_version([hooks_dir]) is None
-        finally:
-            hook.chmod(0o644)
 
     def test_returns_none_on_no_match(self, tmp_path: Path) -> None:
         """Returns None when the hook file has no _BUNDLE_VERSION line."""

@@ -146,6 +146,12 @@ class InteractiveSession:
         """
         buf = ""
         while _running:
+            # Refresh the reverse-DNS cache before processing events so that
+            # pending events see up-to-date IP→domain mappings.
+            now = time.monotonic()
+            if now - self._last_domain_refresh > _DOMAIN_REFRESH_INTERVAL:
+                self._refresh_domain_cache()
+
             try:
                 readable, _, _ = select.select([watcher, stdin_fd], [], [], 1.0)
             except (OSError, ValueError):
@@ -161,11 +167,6 @@ class InteractiveSession:
                 if result is None:
                     break
                 buf = result
-
-            # Periodically refresh the domain cache.
-            now = time.monotonic()
-            if now - self._last_domain_refresh > _DOMAIN_REFRESH_INTERVAL:
-                self._refresh_domain_cache()
 
     def _handle_nflog_event(self, event: WatchEvent) -> None:
         """Process a queued-connection NFLOG event.
@@ -299,7 +300,11 @@ class InteractiveSession:
         """
         ip = pending.dest
         if accept:
-            nft_cmd = add_elements_dual([ip], permanent=True)
+            # Only use timeout 0s (permanent) when allow sets have timeout flags
+            # (dnsmasq tier).  In dig/getent tier the sets lack timeout support
+            # and 'timeout 0s' would be rejected by nft.
+            permanent = self._is_dnsmasq_tier()
+            nft_cmd = add_elements_dual([ip], permanent=permanent)
         else:
             nft_cmd = add_deny_elements_dual([ip])
 
@@ -333,6 +338,14 @@ class InteractiveSession:
                 logger.exception("nft command failed: %s", line)
                 return False
         return True
+
+    def _is_dnsmasq_tier(self) -> bool:
+        """Return True when the container uses the dnsmasq DNS tier."""
+        tier_path = state.dns_tier_path(self._state_dir)
+        try:
+            return tier_path.is_file() and tier_path.read_text().strip() == "dnsmasq"
+        except OSError:
+            return False
 
     def _refresh_domain_cache(self) -> None:
         """Reload the IP-to-domain mapping from the dnsmasq query log.

@@ -306,6 +306,24 @@ class TestApplyVerdict:
             result = session._apply_verdict(pkt, accept=True)
         assert result is False
 
+    def test_accept_uses_permanent_for_dnsmasq_tier(self, tmp_path: Path) -> None:
+        """Accept verdict uses permanent=True when dnsmasq tier is active."""
+        session = _make_session(tmp_path)
+        state.dns_tier_path(tmp_path).write_text("dnsmasq\n")
+        pkt = _PendingPacket(dest=TEST_IP1, port=443, proto=6, queued_at=1.0, packet_id=1)
+        with mock.patch("terok_shield.interactive.add_elements_dual", return_value="") as m:
+            session._apply_verdict(pkt, accept=True)
+        m.assert_called_once_with([TEST_IP1], permanent=True)
+
+    def test_accept_uses_non_permanent_for_dig_tier(self, tmp_path: Path) -> None:
+        """Accept verdict uses permanent=False when dig tier is active."""
+        session = _make_session(tmp_path)
+        state.dns_tier_path(tmp_path).write_text("dig\n")
+        pkt = _PendingPacket(dest=TEST_IP1, port=443, proto=6, queued_at=1.0, packet_id=1)
+        with mock.patch("terok_shield.interactive.add_elements_dual", return_value="") as m:
+            session._apply_verdict(pkt, accept=True)
+        m.assert_called_once_with([TEST_IP1], permanent=False)
+
 
 # ── InteractiveSession._refresh_domain_cache ──────────────
 
