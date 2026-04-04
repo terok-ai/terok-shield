@@ -9,7 +9,7 @@ from unittest import mock
 
 import pytest
 
-from terok_shield.registry import (
+from terok_shield.cli.registry import (
     COMMANDS,
     ArgDef,
     _handle_allow,
@@ -122,7 +122,7 @@ class TestHandlers:
     def test_handle_watch_delegates_to_run_watch(self) -> None:
         """_handle_watch calls run_watch with state_dir and container."""
         shield = mock.MagicMock()
-        with mock.patch("terok_shield.watch.run_watch") as mock_run:
+        with mock.patch("terok_shield.cli.watch.run_watch") as mock_run:
             _handle_watch(shield, "ctr")
         mock_run.assert_called_once_with(shield.config.state_dir, "ctr")
 

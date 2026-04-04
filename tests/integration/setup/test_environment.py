@@ -12,14 +12,14 @@ from pathlib import Path
 import pytest
 
 from terok_shield import EnvironmentCheck, Shield, ShieldConfig
-from terok_shield.mode_hook import setup_global_hooks
+from terok_shield.core.mode_hook import setup_global_hooks
+from terok_shield.core.run import ShieldNeedsSetup
 from terok_shield.podman_info import (
     ensure_containers_conf_hooks_dir,
     find_hooks_dirs,
     has_global_hooks,
     parse_podman_info,
 )
-from terok_shield.run import ShieldNeedsSetup
 
 from ..conftest import hooks_present, nft_missing, podman_missing
 

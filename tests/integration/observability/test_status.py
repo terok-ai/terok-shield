@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from terok_shield import Shield, ShieldConfig
-from terok_shield.cli import main
+from terok_shield.cli.main import main
 
 # -- Public API status ----------------------------------------
 

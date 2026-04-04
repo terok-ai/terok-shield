@@ -13,7 +13,7 @@ from collections.abc import Callable
 
 import pytest
 
-from terok_shield.nft import (
+from terok_shield.core.nft import (
     _is_v4,
     _safe_timeout,
     add_deny_elements_dual,
@@ -26,7 +26,7 @@ from terok_shield.nft import (
     verify_bypass_ruleset,
     verify_ruleset,
 )
-from terok_shield.nft_constants import (
+from terok_shield.core.nft_constants import (
     BYPASS_LOG_PREFIX,
     IPV6_PRIVATE,
     NFT_TABLE,

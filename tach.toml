@@ -12,153 +12,141 @@ exact = true
 forbid_circular_dependencies = true
 ignore_type_checking_imports = true
 
-# ── Module Boundaries ───────────────────────────────────────────────
+# ── Layers ─────────────────────────────────────────────────
 #
-# Key constraint: nft.py is the auditable security boundary.
-# It may only import from nft_constants (literals-only, no logic).
-# All other modules may import freely within the package.
+# Strict ordering: higher layers may import from lower layers,
+# never the reverse.  Same-layer imports require explicit depends_on.
+#
+#   cli         CLI entry points, interactive loops, watch runner
+#   support     Public facade, audit, profiles, watch library
+#   core        Security-critical: nft, dns, dnsmasq, mode_hook, state, run
+#   foundation  Pure data / standalone helpers with zero internal deps
+
+layers = ["cli", "support", "core", "foundation"]
+
+# ── Foundation ─────────────────────────────────────────────
+# Zero-dependency primitives.  No internal imports.
+
+[[modules]]
+path = "terok_shield.config"
+layer = "foundation"
+depends_on = []
+
+[[modules]]
+path = "terok_shield.util"
+layer = "foundation"
+depends_on = []
+
+[[modules]]
+path = "terok_shield.validation"
+layer = "foundation"
+depends_on = []
+
+[[modules]]
+path = "terok_shield.podman_info"
+layer = "foundation"
+depends_on = []
+
+# ── Core ───────────────────────────────────────────────────
+# Security-critical modules — the auditable boundary.
+# May import from foundation freely; must declare same-layer deps.
+
+[[modules]]
+path = "terok_shield.core"
+layer = "core"
+depends_on = []
 
 # Security boundary — literals only, no dependencies
 [[modules]]
-path = "terok_shield.nft_constants"
+path = "terok_shield.core.nft_constants"
+layer = "core"
 depends_on = []
 
 # Security boundary — only stdlib + nft_constants
 [[modules]]
-path = "terok_shield.nft"
+path = "terok_shield.core.nft"
+layer = "core"
 depends_on = [
-    "terok_shield.nft_constants",
+    "terok_shield.core.nft_constants",
 ]
 
-# Per-container state bundle layout — zero dependencies
+# Per-container state bundle layout — zero internal deps
 [[modules]]
-path = "terok_shield.state"
+path = "terok_shield.core.state"
+layer = "core"
 depends_on = []
 
-# Podman environment detection — standalone, no internal deps
+# Subprocess helpers — zero internal deps
 [[modules]]
-path = "terok_shield.podman_info"
+path = "terok_shield.core.run"
+layer = "core"
 depends_on = []
 
-# Shared utilities — standalone, no internal deps
+# DNS resolution and caching
 [[modules]]
-path = "terok_shield.util"
-depends_on = []
-
-# Shared validators — standalone, no internal deps
-[[modules]]
-path = "terok_shield.validation"
-depends_on = []
-
-# Subprocess helpers — standalone, no internal deps
-[[modules]]
-path = "terok_shield.run"
-depends_on = []
-
-# Configuration — pure data definitions, no dependencies
-[[modules]]
-path = "terok_shield.config"
-depends_on = []
-
-# Audit logging — no internal deps (takes explicit path)
-[[modules]]
-path = "terok_shield.audit"
-depends_on = []
-
-# DNS resolution and caching — depends on run + util
-[[modules]]
-path = "terok_shield.dns"
+path = "terok_shield.core.dns"
+layer = "core"
 depends_on = [
-    "terok_shield.run",
-    "terok_shield.util",
-]
-
-# Profile loading — depends on validation
-[[modules]]
-path = "terok_shield.profiles"
-depends_on = [
-    "terok_shield.validation",
+    "terok_shield.core.run",
 ]
 
 # dnsmasq lifecycle — config generation, launch, cleanup
 [[modules]]
-path = "terok_shield.dnsmasq"
+path = "terok_shield.core.dnsmasq"
+layer = "core"
 depends_on = [
-    "terok_shield.nft_constants",
-    "terok_shield.run",
-    "terok_shield.state",
-]
-
-# Watch — live blocked-access event stream
-[[modules]]
-path = "terok_shield.watch"
-depends_on = [
-    "terok_shield.config",
-    "terok_shield.dnsmasq",
-    "terok_shield.nft_constants",
-    "terok_shield.state",
+    "terok_shield.core.nft_constants",
+    "terok_shield.core.run",
+    "terok_shield.core.state",
 ]
 
 # Hook mode — OCI hooks, per-container netns
 [[modules]]
-path = "terok_shield.mode_hook"
+path = "terok_shield.core.mode_hook"
+layer = "core"
 depends_on = [
-    "terok_shield.config",
-    "terok_shield.dnsmasq",
-    "terok_shield.nft",
-    "terok_shield.nft_constants",
-    "terok_shield.podman_info",
-    "terok_shield.run",
-    "terok_shield.state",
-    "terok_shield.util",
+    "terok_shield.core.dnsmasq",
+    "terok_shield.core.nft",
+    "terok_shield.core.nft_constants",
+    "terok_shield.core.run",
+    "terok_shield.core.state",
 ]
 
-# Interactive verdict loop — NFLOG-based operator approval
+# ── Support ────────────────────────────────────────────────
+# Non-security-critical library modules.
+# May import from core and foundation freely; must declare same-layer deps.
+
+# Audit logging — no internal deps
 [[modules]]
-path = "terok_shield.interactive"
-depends_on = [
-    "terok_shield.nft",
-    "terok_shield.run",
-    "terok_shield.state",
-    "terok_shield.watch",
-]
+path = "terok_shield.audit"
+layer = "support"
+depends_on = []
 
-# Command registry — depends on watch + interactive for lazy-imported handlers
+# Profile loading
 [[modules]]
-path = "terok_shield.registry"
-depends_on = [
-    "terok_shield.interactive",
-    "terok_shield.watch",
-]
+path = "terok_shield.profiles"
+layer = "support"
+depends_on = []
 
-# CLI — depends on package root (public API) + config for file schema + audit + validation + registry + run
+# Watch — library-level event-stream classes
 [[modules]]
-path = "terok_shield.cli"
-depends_on = [
-    "terok_shield",
-    "terok_shield.audit",
-    "terok_shield.config",
-    "terok_shield.mode_hook",
-    "terok_shield.podman_info",
-    "terok_shield.registry",
-    "terok_shield.run",
-    "terok_shield.validation",
-]
+path = "terok_shield.watch"
+layer = "support"
+depends_on = []
 
-# Package root — public API, dispatches to mode modules
+# Package root — public API facade
 [[modules]]
 path = "terok_shield"
+layer = "support"
 depends_on = [
     "terok_shield.audit",
-    "terok_shield.config",
-    "terok_shield.dns",
-    "terok_shield.dnsmasq",
-    "terok_shield.mode_hook",
-    "terok_shield.nft",
-    "terok_shield.podman_info",
     "terok_shield.profiles",
-    "terok_shield.registry",
-    "terok_shield.run",
-    "terok_shield.state",
-    "terok_shield.util",
 ]
+
+# ── CLI ────────────────────────────────────────────────────
+# Presentation layer: argument parsing, command dispatch, tools.
+
+[[modules]]
+path = "terok_shield.cli"
+layer = "cli"
+depends_on = []

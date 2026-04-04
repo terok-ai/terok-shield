@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from terok_shield import Shield, ShieldConfig
-from terok_shield.cli import main
+from terok_shield.cli.main import main
 from tests.testnet import ALLOWED_TARGET_HTTP, ALLOWED_TARGET_IPS
 
 from ..conftest import nft_missing, podman_missing

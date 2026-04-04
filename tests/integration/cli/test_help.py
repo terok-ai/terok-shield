@@ -5,7 +5,7 @@
 
 import pytest
 
-from terok_shield.cli import main
+from terok_shield.cli.main import main
 
 
 @pytest.mark.needs_host_features

@@ -34,11 +34,11 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import state
-from .nft import add_deny_elements_dual, add_elements_dual
-from .run import CommandRunner, SubprocessRunner
-from .state import read_interactive_tier
-from .watch import NflogWatcher, WatchEvent
+from ..core import state
+from ..core.nft import add_deny_elements_dual, add_elements_dual
+from ..core.run import CommandRunner, SubprocessRunner
+from ..core.state import read_interactive_tier
+from ..watch import NflogWatcher, WatchEvent
 
 logger = logging.getLogger(__name__)
 
@@ -440,7 +440,7 @@ def _nsenter_reexec(state_dir: Path, container: str) -> None:
         "-n",
         sys.executable,
         "-m",
-        "terok_shield.interactive",
+        "terok_shield.cli.interactive",
         str(state_dir),
         container,
     ]
@@ -492,7 +492,7 @@ def run_interactive(state_dir: Path, container: str) -> None:
 if __name__ == "__main__":
     if len(sys.argv) != 3:
         print(
-            f"Usage: {sys.executable} -m terok_shield.interactive <state_dir> <container>",
+            f"Usage: {sys.executable} -m terok_shield.cli.interactive <state_dir> <container>",
             file=sys.stderr,
         )
         raise SystemExit(2)

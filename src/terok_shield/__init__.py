@@ -18,7 +18,6 @@ from dataclasses import dataclass, field
 from importlib.metadata import PackageNotFoundError, version as _meta_version
 from pathlib import Path
 
-from . import dnsmasq, state
 from .audit import AuditLogger
 from .config import (
     AuditFileConfig,
@@ -29,9 +28,18 @@ from .config import (
     ShieldState,
     detect_dns_tier,
 )
-from .dns import DnsResolver
-from .mode_hook import setup_global_hooks
-from .nft import RulesetBuilder
+from .core import dnsmasq, state
+from .core.dns import DnsResolver
+from .core.mode_hook import setup_global_hooks
+from .core.nft import RulesetBuilder
+from .core.run import (
+    CommandRunner,
+    DigNotFoundError,
+    ExecError,
+    NftNotFoundError,
+    ShieldNeedsSetup,
+    SubprocessRunner,
+)
 from .podman_info import (
     USER_HOOKS_DIR,
     ensure_containers_conf_hooks_dir,
@@ -42,14 +50,6 @@ from .podman_info import (
     system_hooks_dir,
 )
 from .profiles import ProfileLoader
-from .run import (
-    CommandRunner,
-    DigNotFoundError,
-    ExecError,
-    NftNotFoundError,
-    ShieldNeedsSetup,
-    SubprocessRunner,
-)
 from .util import is_ip as _is_ip
 
 logger = logging.getLogger(__name__)
@@ -161,7 +161,7 @@ class Shield:
     def _create_mode(self, mode: ShieldMode):  # noqa: ANN202
         """Create the mode backend for the given mode."""
         if mode == ShieldMode.HOOK:
-            from .mode_hook import HookMode
+            from .core.mode_hook import HookMode
 
             return HookMode(
                 config=self.config,
@@ -351,14 +351,9 @@ class Shield:
         return self.profiles.compose_profiles(names)
 
 
-from .registry import COMMANDS, ArgDef, CommandDef  # noqa: E402
-
 __all__ = [
-    "ArgDef",
     "AuditFileConfig",
     "AuditLogger",
-    "COMMANDS",
-    "CommandDef",
     "CommandRunner",
     "DigNotFoundError",
     "DnsResolver",
