@@ -235,7 +235,7 @@ _NFULNL_CFG_CMD_UNBIND = 0
 
 # nflog attribute types (TLV in the packet payload)
 _NFULA_PACKET_HDR = 1
-_NFULA_PREFIX = 3
+_NFULA_PREFIX = 10  # NFULA_PREFIX (nfnetlink_log.h)
 _NFULA_PAYLOAD = 9
 
 # IP protocol numbers
