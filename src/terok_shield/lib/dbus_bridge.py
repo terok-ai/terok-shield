@@ -194,8 +194,8 @@ class ShieldBridge:
             self._read_task.cancel()
             try:
                 await self._read_task
-            except asyncio.CancelledError:
-                pass  # expected: we just cancelled it
+            except asyncio.CancelledError:  # NOSONAR(S5754) child task we just cancelled
+                pass
         if self._process and self._process.returncode is None:
             try:
                 self._process.terminate()
@@ -204,7 +204,7 @@ class ShieldBridge:
             else:
                 try:
                     await asyncio.wait_for(self._process.wait(), timeout=5.0)
-                except asyncio.CancelledError:
+                except asyncio.CancelledError:  # NOSONAR(S5754) re-raised after cleanup via flag
                     cancelled = True
                 except TimeoutError:
                     try:
