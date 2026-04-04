@@ -68,6 +68,10 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "ShieldNeedsSetup": ("terok_shield.core.run", "ShieldNeedsSetup"),
     "SubprocessRunner": ("terok_shield.core.run", "SubprocessRunner"),
     "setup_global_hooks": ("terok_shield.core.hook_install", "setup_global_hooks"),
+    # CLI registry — re-exported for terok integration layer
+    "ArgDef": ("terok_shield.cli.registry", "ArgDef"),
+    "COMMANDS": ("terok_shield.cli.registry", "COMMANDS"),
+    "CommandDef": ("terok_shield.cli.registry", "CommandDef"),
 }
 
 
@@ -397,8 +401,11 @@ class Shield:
 
 
 __all__ = [
+    "ArgDef",
     "AuditFileConfig",
     "AuditLogger",
+    "COMMANDS",
+    "CommandDef",
     "CommandRunner",
     "DigNotFoundError",
     "DnsResolver",

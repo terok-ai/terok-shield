@@ -23,8 +23,11 @@ from terok_shield import (
 )
 
 EXPECTED_ALL = [
+    "ArgDef",
     "AuditFileConfig",
     "AuditLogger",
+    "COMMANDS",
+    "CommandDef",
     "CommandRunner",
     "DigNotFoundError",
     "DnsResolver",
