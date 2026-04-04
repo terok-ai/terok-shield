@@ -18,7 +18,7 @@ from pathlib import Path
 
 from ..common.config import DnsTier
 from ..core import state
-from ..lib.watchers import AuditLogWatcher, DnsLogWatcher, NflogWatcher
+from ..lib.watchers import AuditLogWatcher, DnsLogWatcher, NflogWatcher, WatchEvent
 
 # ── Entry point ─────────────────────────────────────────
 
@@ -65,6 +65,22 @@ def _validate_dnsmasq_tier(state_dir: Path) -> None:
         raise SystemExit(1)
 
 
+def _emit_events(events: list[WatchEvent]) -> None:
+    """Print each event as a JSON line to stdout."""
+    for event in events:
+        print(event.to_json(), flush=True)
+
+
+def _poll_nflog_or_sleep(nflog_watcher: NflogWatcher | None) -> None:
+    """Wait on the NFLOG socket (or sleep) and emit any packets."""
+    if nflog_watcher:
+        readable, _, _ = select.select([nflog_watcher], [], [], 1.0)
+        if readable:
+            _emit_events(nflog_watcher.poll())
+    else:
+        select.select([], [], [], 1.0)
+
+
 def run_watch(state_dir: Path, container: str) -> None:
     """Stream blocked-access events as JSON lines to stdout.
 
@@ -96,22 +112,9 @@ def run_watch(state_dir: Path, container: str) -> None:
 
     try:
         while _running:
-            # Only use select() for the netlink socket (real fd);
-            # regular files always appear readable in select() so we
-            # poll them unconditionally each iteration.
-            if nflog_watcher:
-                readable, _, _ = select.select([nflog_watcher], [], [], 1.0)
-                if readable:
-                    for event in nflog_watcher.poll():
-                        print(event.to_json(), flush=True)
-            else:
-                # No netlink socket — just sleep to avoid busy-looping
-                select.select([], [], [], 1.0)
-
-            for event in dns_watcher.poll():
-                print(event.to_json(), flush=True)
-            for event in audit_watcher.poll():
-                print(event.to_json(), flush=True)
+            _poll_nflog_or_sleep(nflog_watcher)
+            _emit_events(dns_watcher.poll())
+            _emit_events(audit_watcher.poll())
     finally:
         dns_watcher.close()
         audit_watcher.close()
