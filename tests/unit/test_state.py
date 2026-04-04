@@ -11,6 +11,7 @@ import pytest
 from terok_shield.core.state import (
     BUNDLE_VERSION,
     audit_path,
+    container_id_path,
     denied_domains_path,
     deny_path,
     dns_tier_path,
@@ -57,6 +58,7 @@ def test_bundle_version_is_positive_int() -> None:
         pytest.param(dns_tier_path, FAKE_STATE_DIR / "dns.tier", id="dns-tier"),
         pytest.param(live_domains_path, FAKE_STATE_DIR / "live.domains", id="live-domains"),
         pytest.param(denied_domains_path, FAKE_STATE_DIR / "denied.domains", id="denied-domains"),
+        pytest.param(container_id_path, FAKE_STATE_DIR / "container.id", id="container-id"),
     ],
 )
 def test_path_derivation_functions(

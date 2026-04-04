@@ -176,6 +176,13 @@ def _handle_interactive(shield: Shield, container: str, *, raw: bool = False) ->
     run_interactive(shield.config.state_dir, container, raw=raw)
 
 
+def _handle_dbus_bridge(shield: Shield, container: str) -> None:
+    """Start D-Bus event bridge for interactive egress control."""
+    from .dbus_bridge import run_dbus_bridge
+
+    run_dbus_bridge(shield.config.state_dir, container)
+
+
 def _handle_preview(shield: Shield, *, down: bool = False, allow_all: bool = False) -> None:
     """Show ruleset that would be applied."""
     if allow_all and not down:
@@ -297,6 +304,12 @@ COMMANDS: tuple[CommandDef, ...] = (
                 help="Use raw JSON-lines protocol instead of human-friendly CLI",
             ),
         ),
+    ),
+    CommandDef(
+        name="dbus-bridge",
+        help="Start D-Bus event bridge for interactive egress control",
+        handler=_handle_dbus_bridge,
+        needs_container=True,
     ),
     # NOTE: CLI special-cases logs with --container optional for aggregated mode.
     # The terok integration layer always has a per-container Shield, so the

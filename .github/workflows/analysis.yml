@@ -46,7 +46,7 @@ jobs:
           key: venv-${{ runner.os }}-py${{ steps.setup-python.outputs.python-version }}-test-${{ hashFiles('**/pyproject.toml', '**/poetry.lock') }}
 
       - name: Install dependencies
-        run: poetry install --with test --no-interaction
+        run: poetry install --with test --with dbus --no-interaction
 
       - name: Run unit tests
         run: make test-unit

@@ -257,6 +257,10 @@ class HookMode:
             hooks_dir=state.hooks_dir(sd),
         )
 
+        # Persist container ID for D-Bus bridge bus name derivation
+        container_id = self._runner.podman_inspect(container, "{{.Id}}")
+        state.container_id_path(sd).write_text(container_id[:12] + "\n")
+
         # Detect DNS tier and upstream DNS
         tier = self._detect_dns_tier()
         mode = info.network_mode or "pasta"

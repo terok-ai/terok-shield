@@ -159,6 +159,12 @@ path = "terok_shield.lib.watchers"
 layer = "support"
 depends_on = []
 
+# D-Bus bridge — optional, requires dbus-fast + terok-dbus
+[[modules]]
+path = "terok_shield.lib.dbus_bridge"
+layer = "support"
+depends_on = []
+
 # Package root — public API facade
 [[modules]]
 path = "terok_shield"
@@ -173,5 +179,13 @@ depends_on = [
 
 [[modules]]
 path = "terok_shield.cli"
+layer = "cli"
+depends_on = [
+    "terok_shield.cli.dbus_bridge",
+]
+
+# D-Bus bridge CLI entry point
+[[modules]]
+path = "terok_shield.cli.dbus_bridge"
 layer = "cli"
 depends_on = []

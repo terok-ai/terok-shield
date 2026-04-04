@@ -79,7 +79,9 @@ def make_hook_mode(make_config: ConfigFactory) -> HookModeHarnessFactory:
         ruleset: mock.MagicMock | None = None,
     ) -> HookModeHarness:
         config = config or make_config()
-        runner = runner or mock.MagicMock()
+        if runner is None:
+            runner = mock.MagicMock()
+            runner.podman_inspect.return_value = "aabbccddee11223344556677"
         audit = audit or mock.MagicMock()
         dns = dns or mock.MagicMock()
         profiles = profiles or mock.MagicMock()
@@ -1241,6 +1243,32 @@ def test_pre_start_with_denied_ips_includes_deny_elements(
     ruleset = state.ruleset_path(config.state_dir).read_text()
     assert "deny_v4" in ruleset
     assert TEST_IP1 in ruleset
+
+
+# ── Container ID persistence ─────────────────────────────
+
+
+@mock.patch("terok_shield.core.mode_hook.has_global_hooks", return_value=True)
+def test_pre_start_persists_container_id(
+    _has_hooks: mock.Mock,
+    monkeypatch: pytest.MonkeyPatch,
+    make_hook_mode: HookModeHarnessFactory,
+    make_config: ConfigFactory,
+) -> None:
+    """pre_start() persists the short container ID to state_dir/container.id."""
+    _set_euid(monkeypatch, 0)
+    config = make_config()
+    harness = make_hook_mode(config=config)
+    harness.runner.run.return_value = _MODERN_PODMAN_INFO
+    harness.runner.podman_inspect.return_value = "abc123def456789abcdef0"
+    harness.profiles.compose_profiles.return_value = []
+
+    harness.mode.pre_start("test", ["dev-standard"])
+
+    harness.runner.podman_inspect.assert_any_call("test", "{{.Id}}")
+    id_file = state.container_id_path(config.state_dir)
+    assert id_file.is_file()
+    assert id_file.read_text().strip() == "abc123def456"
 
 
 def test_shield_up_interactive_uses_interactive_ruleset(

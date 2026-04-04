@@ -26,6 +26,7 @@ Bundle layout::
     ├── dnsmasq.log                    # dnsmasq query log (for shield watch)
     ├── resolv.conf                    # bind-mounted over /etc/resolv.conf (dnsmasq tier)
     ├── interactive                    # interactive tier marker (e.g. "nflog")
+    ├── container.id                   # podman container ID (short, 12-char hex)
     └── audit.jsonl                    # per-container audit log
 """
 
@@ -198,6 +199,11 @@ def read_effective_ips(state_dir: Path) -> list[str]:
     allowed = read_allowed_ips(state_dir)
     denied = read_denied_ips(state_dir)
     return [ip for ip in allowed if ip not in denied]
+
+
+def container_id_path(state_dir: Path) -> Path:
+    """Return the path to the persisted podman container ID file."""
+    return state_dir / "container.id"
 
 
 def ensure_state_dirs(state_dir: Path) -> None:
