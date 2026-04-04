@@ -613,8 +613,10 @@ def verify_ruleset(nft_output: str, *, interactive: bool = False) -> list[str]:
         # Verify the terminal deny-all rule specifically — not just the prefix
         # string, which also appears in deny-set rules (ip daddr @deny_v4 ...).
         # The terminal rule is a standalone log+reject without a daddr selector.
+        # nft output ordering varies by version (group before/after prefix),
+        # so match any log line containing the denied prefix.
         _terminal_deny_re = re.compile(
-            rf'^\s*log\s+group\s+\d+\s+prefix\s+"{re.escape(DENIED_LOG_PREFIX)}',
+            rf'^\s*log\s+.*prefix\s+"{re.escape(DENIED_LOG_PREFIX)}',
             re.MULTILINE,
         )
         if not _terminal_deny_re.search(nft_output):

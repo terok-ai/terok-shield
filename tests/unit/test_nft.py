@@ -587,6 +587,23 @@ def test_verify_ruleset_rejects_a_bypass_ruleset() -> None:
     assert any("terminal deny-all rule" in error for error in errors)
 
 
+def test_verify_ruleset_accepts_prefix_before_group_ordering() -> None:
+    """verify_ruleset() handles nft output where prefix appears before group.
+
+    Newer nft versions reorder log statement attributes: ``log prefix "..." group N``
+    instead of ``log group N prefix "..."``.  The terminal deny-all check must
+    accept both orderings.
+    """
+    ruleset = hook_ruleset()
+    # Simulate newer nft output ordering: swap group/prefix in log lines
+    reordered = ruleset.replace(
+        f'log group 100 prefix "{_DENY_LOG_PREFIX}',
+        f'log prefix "{_DENY_LOG_PREFIX}: " group 100',
+    )
+    assert reordered != ruleset  # sanity: replacement happened
+    assert verify_ruleset(reordered) == []
+
+
 def test_verify_ruleset_checks_private_ranges_by_rule_not_by_position() -> None:
     """Private-range rejects pass verification even if moved after the allow-set match."""
     ruleset = (
