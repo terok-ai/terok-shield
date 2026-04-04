@@ -56,6 +56,7 @@ from tests.testnet import (
     TEST_DOMAIN,
     TEST_DOMAIN2,
     TEST_IP1,
+    TEST_IP2,
 )
 
 _CONTAINER = "test-container"
@@ -1251,3 +1252,27 @@ class TestEnrichNflog:
         )
         enriched = _enrich_nflog([event], cache)
         assert enriched[0].domain == ""
+
+    def test_refreshes_cache_at_most_once_per_batch(self, tmp_path: Path) -> None:
+        """_enrich_nflog refreshes the cache only once even with multiple misses."""
+        cache = DomainCache(tmp_path)
+        ev1 = WatchEvent(
+            ts="t",
+            source="nflog",
+            action="blocked_connection",
+            container=_CONTAINER,
+            dest=TEST_IP1,
+            port=443,
+        )
+        ev2 = WatchEvent(
+            ts="t",
+            source="nflog",
+            action="blocked_connection",
+            container=_CONTAINER,
+            dest=TEST_IP2,
+            port=80,
+        )
+        original_refresh = cache.refresh
+        cache.refresh = MagicMock(side_effect=original_refresh)
+        _enrich_nflog([ev1, ev2], cache)
+        assert cache.refresh.call_count == 1

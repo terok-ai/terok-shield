@@ -72,13 +72,19 @@ def _emit_events(events: list[WatchEvent]) -> None:
 
 
 def _enrich_nflog(events: list[WatchEvent], cache: DomainCache) -> list[WatchEvent]:
-    """Attach cached domain names to NFLOG events that have a dest IP."""
+    """Attach cached domain names to NFLOG events that have a dest IP.
+
+    Refreshes the cache at most once per batch to avoid reparsing the
+    entire dnsmasq log for every cache miss.
+    """
     enriched: list[WatchEvent] = []
+    refreshed = False
     for ev in events:
         if ev.dest and not ev.domain:
             domain = cache.lookup(ev.dest)
-            if not domain:
+            if not domain and not refreshed:
                 cache.refresh()
+                refreshed = True
                 domain = cache.lookup(ev.dest)
             if domain:
                 from dataclasses import replace

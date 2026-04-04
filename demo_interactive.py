@@ -8,7 +8,7 @@
 import sys
 import time
 
-from terok_shield.cli.interactive import _INPUT_MAP, CliSessionIO
+from terok_shield.cli.interactive import CliSessionIO
 
 EVENTS = [
     (1, "140.82.121.4", 443, 6, "github.com"),
@@ -28,10 +28,10 @@ for evt in EVENTS:
         except (EOFError, KeyboardInterrupt):
             print()
             sys.exit(0)
-        if line in _INPUT_MAP:
+        result = io.parse_command(line)
+        if result is not None:
             break
-        io._prompt_head()
-    pid, action = io.parse_command(line)
+    pid, action = result
     io.emit_verdict_applied(pid, evt[1], action, ok=True)
 
 print("\nAll connections resolved.")
