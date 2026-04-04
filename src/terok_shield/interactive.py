@@ -146,10 +146,7 @@ class InteractiveSession:
         """
         buf = ""
         while _running:
-            # Refresh the reverse-DNS cache before processing events so that
-            # pending events see up-to-date IP→domain mappings.
-            now = time.monotonic()
-            if now - self._last_domain_refresh > _DOMAIN_REFRESH_INTERVAL:
+            if time.monotonic() - self._last_domain_refresh > _DOMAIN_REFRESH_INTERVAL:
                 self._refresh_domain_cache()
 
             try:
@@ -157,16 +154,24 @@ class InteractiveSession:
             except (OSError, ValueError):
                 break
 
-            if watcher.fileno() in (r if isinstance(r, int) else r.fileno() for r in readable):
-                for event in watcher.poll():
-                    if event.action == "queued_connection" and event.dest:
-                        self._handle_nflog_event(event)
-
-            if stdin_fd in (r if isinstance(r, int) else r.fileno() for r in readable):
+            fds = _readable_fds(readable)
+            if watcher.fileno() in fds:
+                self._drain_watcher(watcher)
+            if stdin_fd in fds:
                 result = self._read_stdin(buf)
                 if result is None:
                     break
                 buf = result
+
+    def _drain_watcher(self, watcher: NflogWatcher) -> None:
+        """Process all pending NFLOG events from the watcher.
+
+        Args:
+            watcher: The NFLOG netlink watcher to drain.
+        """
+        for event in watcher.poll():
+            if event.action == "queued_connection" and event.dest:
+                self._handle_nflog_event(event)
 
     def _handle_nflog_event(self, event: WatchEvent) -> None:
         """Process a queued-connection NFLOG event.
@@ -368,6 +373,14 @@ class InteractiveSession:
 
 
 # ── Helpers ────────────────────────────────────────────
+
+
+def _readable_fds(readable: list) -> set[int]:
+    """Extract file descriptor ints from a ``select.select()`` readable list.
+
+    Handles both raw int fds and objects with a ``fileno()`` method.
+    """
+    return {r if isinstance(r, int) else r.fileno() for r in readable}
 
 
 def _set_nonblocking(fd: int) -> None:

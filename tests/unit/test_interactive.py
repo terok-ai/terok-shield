@@ -133,8 +133,8 @@ class TestAppendUnique:
         assert TEST_IP1 in content
         assert TEST_IP2 in content
 
-    def test_creates_parent_dirs(self, tmp_path: Path) -> None:
-        """_append_unique creates the file (not parent dirs) as needed."""
+    def test_creates_file_if_missing(self, tmp_path: Path) -> None:
+        """_append_unique creates the file if it does not exist."""
         path = tmp_path / "test.list"
         _append_unique(path, TEST_IP1)
         assert path.is_file()
@@ -325,6 +325,73 @@ class TestApplyVerdict:
         m.assert_called_once_with([TEST_IP1], permanent=False)
 
 
+# ── InteractiveSession._nft_apply edge cases ─────────────
+
+
+class TestNftApplyEdgeCases:
+    """Tests for _nft_apply edge cases."""
+
+    def test_empty_lines_skipped(self, tmp_path: Path) -> None:
+        """_nft_apply skips empty lines in multi-line nft commands."""
+        session = _make_session(tmp_path)
+        result = session._nft_apply("add element foo\n\n\nadd element bar\n")
+        assert result is True
+        assert session._runner.nft_via_nsenter.call_count == 2
+
+    def test_is_dnsmasq_tier_oserror(self, tmp_path: Path) -> None:
+        """_is_dnsmasq_tier returns False on OSError reading the tier file."""
+        session = _make_session(tmp_path)
+        with mock.patch.object(Path, "is_file", side_effect=OSError("boom")):
+            assert session._is_dnsmasq_tier() is False
+
+
+# ── _drain_watcher / _readable_fds ──────────────────────
+
+
+class TestDrainWatcherAndReadableFds:
+    """Tests for the _drain_watcher method and _readable_fds helper."""
+
+    def test_drain_watcher_processes_queued_events(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """_drain_watcher processes queued_connection events."""
+        session = _make_session(tmp_path)
+        mock_watcher = mock.MagicMock()
+        mock_watcher.poll.return_value = [_make_event(TEST_IP1)]
+        session._drain_watcher(mock_watcher)
+        out = capsys.readouterr().out
+        assert "pending" in out
+
+    def test_drain_watcher_ignores_non_queued(self, tmp_path: Path) -> None:
+        """_drain_watcher ignores events that are not queued_connection."""
+        from terok_shield.watch import WatchEvent
+
+        session = _make_session(tmp_path)
+        mock_watcher = mock.MagicMock()
+        mock_watcher.poll.return_value = [
+            WatchEvent(
+                ts="t",
+                source="nflog",
+                action="blocked_connection",
+                container="c",
+                dest=TEST_IP1,
+                port=443,
+                proto=6,
+            )
+        ]
+        session._drain_watcher(mock_watcher)
+        assert TEST_IP1 not in session._seen_ips
+
+    def test_readable_fds_with_int_and_object(self) -> None:
+        """_readable_fds handles both raw ints and objects with fileno()."""
+        from terok_shield.interactive import _readable_fds
+
+        obj = mock.MagicMock()
+        obj.fileno.return_value = 42
+        result = _readable_fds([7, obj])
+        assert result == {7, 42}
+
+
 # ── InteractiveSession._refresh_domain_cache ──────────────
 
 
@@ -497,11 +564,16 @@ class TestInteractiveSessionRun:
 
     def test_loop_breaks_on_select_error(self, tmp_path: Path) -> None:
         """_loop() exits cleanly when select raises OSError."""
+        import terok_shield.interactive as mod
+
         session = _make_session(tmp_path)
         mock_watcher = mock.MagicMock()
         mock_watcher.fileno.return_value = 99
+        original = mod._running
+        mod._running = True
         with mock.patch("terok_shield.interactive.select.select", side_effect=OSError("broken")):
             session._loop(mock_watcher, 0)
+        mod._running = original
 
     def test_loop_processes_nflog_events(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
