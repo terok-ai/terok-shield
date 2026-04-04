@@ -13,10 +13,15 @@ from unittest import mock
 import pytest
 
 from terok_shield.cli.interactive import (
+    _INPUT_MAP,
     _NSENTER_ENV,
+    _RAW_ENV,
+    CliSessionIO,
     InteractiveSession,
+    JsonSessionIO,
     _append_unique,
     _handle_signal,
+    _main,
     _PendingPacket,
     run_interactive,
 )
@@ -516,7 +521,7 @@ class TestRunInteractive:
         state.interactive_path(tmp_path).write_text("nflog\n")
         with mock.patch("terok_shield.cli.interactive._nsenter_reexec") as mock_reexec:
             run_interactive(tmp_path, _CONTAINER)
-        mock_reexec.assert_called_once_with(tmp_path, _CONTAINER)
+        mock_reexec.assert_called_once_with(tmp_path, _CONTAINER, raw=False)
 
     def test_dispatches_to_session_inside_netns(self, tmp_path: Path) -> None:
         """run_interactive creates a session when already inside the container netns."""
@@ -536,41 +541,35 @@ class TestRunInteractive:
 
 
 class TestMainBlock:
-    """Tests for the ``if __name__ == '__main__'`` entry point."""
+    """Tests for the :func:`_main` entry point."""
 
     def test_wrong_argc_exits_2(self) -> None:
         """Exits with code 2 when argument count is wrong."""
-        import subprocess
-        import sys
-
-        result = subprocess.run(
-            [sys.executable, "-m", "terok_shield.cli.interactive"],  # noqa: S603
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 2
-        assert "Usage:" in result.stderr
+        with (
+            mock.patch("sys.argv", []),
+            pytest.raises(SystemExit) as ctx,
+        ):
+            _main()
+        assert ctx.value.code == 2
 
     def test_correct_args_calls_run_interactive(self, tmp_path: Path) -> None:
         """Correct argc dispatches to run_interactive with parsed args."""
-        import subprocess
-        import sys
+        with (
+            mock.patch("sys.argv", ["prog", str(tmp_path), "test-ctr"]),
+            mock.patch("terok_shield.cli.interactive.run_interactive") as mock_run,
+        ):
+            _main()
+        mock_run.assert_called_once_with(tmp_path, "test-ctr", raw=False)
 
-        result = subprocess.run(
-            [  # noqa: S603
-                sys.executable,
-                "-m",
-                "terok_shield.cli.interactive",
-                str(tmp_path),
-                "test-ctr",
-            ],
-            capture_output=True,
-            text=True,
-        )
-        # run_interactive will fail (no interactive tier), but the __main__
-        # block dispatched correctly — exit code 1, not 2.
-        assert result.returncode == 1
-        assert "nflog" in result.stderr
+    def test_raw_env_selects_raw_mode(self, tmp_path: Path) -> None:
+        """_main passes raw=True when _RAW_ENV is set."""
+        with (
+            mock.patch("sys.argv", ["prog", str(tmp_path), "test-ctr"]),
+            mock.patch.dict("os.environ", {_RAW_ENV: "1"}),
+            mock.patch("terok_shield.cli.interactive.run_interactive") as mock_run,
+        ):
+            _main()
+        mock_run.assert_called_once_with(tmp_path, "test-ctr", raw=True)
 
 
 # ── _nsenter_reexec ──────────────────────────────────────
@@ -588,7 +587,7 @@ class TestNsenterReexec:
             mock.patch("subprocess.run") as mock_run,
         ):
             mock_runner_cls.return_value.podman_inspect.return_value = "12345"
-            _nsenter_reexec(tmp_path, _CONTAINER)
+            _nsenter_reexec(tmp_path, _CONTAINER, raw=False)
 
         cmd = mock_run.call_args[0][0]
         assert cmd[:3] == ["podman", "unshare", "nsenter"]
@@ -598,6 +597,7 @@ class TestNsenterReexec:
         assert _CONTAINER in cmd
         env = mock_run.call_args[1]["env"]
         assert env[_NSENTER_ENV] == "1"
+        assert _RAW_ENV not in env
 
     def test_subprocess_failure_raises_systemexit(self, tmp_path: Path) -> None:
         """_nsenter_reexec raises SystemExit on subprocess failure."""
@@ -614,7 +614,7 @@ class TestNsenterReexec:
             pytest.raises(SystemExit) as ctx,
         ):
             mock_runner_cls.return_value.podman_inspect.return_value = "12345"
-            _nsenter_reexec(tmp_path, _CONTAINER)
+            _nsenter_reexec(tmp_path, _CONTAINER, raw=False)
         assert ctx.value.code == 42
 
 
@@ -779,3 +779,335 @@ class TestVerdictRemovesPending:
         with mock.patch.object(session, "_apply_verdict", return_value=False):
             session._process_command(json.dumps({"type": "verdict", "id": 1, "action": "accept"}))
         assert TEST_IP1 in session._pending_by_ip
+
+
+# ── JsonSessionIO ───────────────────────────────────────
+
+
+class TestJsonSessionIO:
+    """Tests for the JSON-lines machine protocol I/O."""
+
+    def test_emit_pending_writes_json_line(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """emit_pending prints a compact JSON line with all fields."""
+        io = JsonSessionIO()
+        io.emit_pending(1, TEST_IP1, 443, 6, DNSMASQ_DOMAIN)
+        out = json.loads(capsys.readouterr().out.strip())
+        assert out == {
+            "type": "pending",
+            "id": 1,
+            "dest": TEST_IP1,
+            "port": 443,
+            "proto": 6,
+            "domain": DNSMASQ_DOMAIN,
+        }
+
+    def test_emit_verdict_applied_writes_json_line(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """emit_verdict_applied prints a compact JSON line."""
+        io = JsonSessionIO()
+        io.emit_verdict_applied(1, TEST_IP1, "accept", ok=True)
+        out = json.loads(capsys.readouterr().out.strip())
+        assert out == {
+            "type": "verdict_applied",
+            "id": 1,
+            "dest": TEST_IP1,
+            "action": "accept",
+            "ok": True,
+        }
+
+    def test_parse_command_valid_verdict(self) -> None:
+        """parse_command returns (id, action) for a valid verdict."""
+        io = JsonSessionIO()
+        result = io.parse_command('{"type":"verdict","id":1,"action":"accept"}')
+        assert result == (1, "accept")
+
+    def test_parse_command_deny(self) -> None:
+        """parse_command handles deny action."""
+        io = JsonSessionIO()
+        result = io.parse_command('{"type":"verdict","id":2,"action":"deny"}')
+        assert result == (2, "deny")
+
+    def test_parse_command_invalid_json(self) -> None:
+        """parse_command returns None for invalid JSON."""
+        io = JsonSessionIO()
+        assert io.parse_command("not json") is None
+
+    def test_parse_command_non_dict(self) -> None:
+        """parse_command returns None for non-object JSON."""
+        io = JsonSessionIO()
+        assert io.parse_command("[1,2,3]") is None
+
+    def test_parse_command_wrong_type(self) -> None:
+        """parse_command returns None for unknown command type."""
+        io = JsonSessionIO()
+        assert io.parse_command('{"type":"other","id":1,"action":"accept"}') is None
+
+    def test_parse_command_bool_id(self) -> None:
+        """parse_command returns None when id is a boolean."""
+        io = JsonSessionIO()
+        assert io.parse_command('{"type":"verdict","id":true,"action":"accept"}') is None
+
+    def test_parse_command_invalid_action(self) -> None:
+        """parse_command returns None for unknown action."""
+        io = JsonSessionIO()
+        assert io.parse_command('{"type":"verdict","id":1,"action":"drop"}') is None
+
+    def test_emit_banner_is_noop(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """emit_banner produces no output for the machine protocol."""
+        io = JsonSessionIO()
+        io.emit_banner()
+        assert capsys.readouterr().out == ""
+
+
+# ── CliSessionIO ────────────────────────────────────────
+
+
+class TestCliSessionIO:
+    """Tests for the human-friendly CLI session I/O."""
+
+    def test_emit_pending_shows_blocked_with_domain(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """emit_pending renders a [BLOCKED] line with domain label."""
+        io = CliSessionIO()
+        io.emit_pending(1, TEST_IP1, 443, 6, DNSMASQ_DOMAIN)
+        out = capsys.readouterr().out
+        assert "[BLOCKED]" in out
+        assert TEST_IP1 in out
+        assert DNSMASQ_DOMAIN in out
+        assert ":443" in out
+
+    def test_emit_pending_shows_ip_without_domain(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """emit_pending shows just the IP when no domain is known."""
+        io = CliSessionIO()
+        io.emit_pending(1, TEST_IP1, 80, 6, "")
+        out = capsys.readouterr().out
+        assert "[BLOCKED]" in out
+        assert TEST_IP1 in out
+        assert ":80" in out
+
+    def test_emit_pending_queues_second_packet(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """A second pending packet is shown as queued."""
+        io = CliSessionIO()
+        io.emit_pending(1, TEST_IP1, 443, 6, DNSMASQ_DOMAIN)
+        io.emit_pending(2, TEST_IP2, 80, 6, DNSMASQ_DOMAIN2)
+        out = capsys.readouterr().out
+        assert "(queued)" in out
+
+    def test_emit_verdict_applied_accept(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Accept verdict shows a checkmark."""
+        io = CliSessionIO()
+        io.emit_pending(1, TEST_IP1, 443, 6, DNSMASQ_DOMAIN)
+        capsys.readouterr()  # discard pending output
+        io.emit_verdict_applied(1, TEST_IP1, "accept", ok=True)
+        out = capsys.readouterr().out
+        assert "\u2713" in out
+        assert "allowed" in out
+        assert DNSMASQ_DOMAIN in out
+
+    def test_emit_verdict_applied_deny(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Deny verdict shows a cross."""
+        io = CliSessionIO()
+        io.emit_pending(1, TEST_IP1, 443, 6, "")
+        capsys.readouterr()
+        io.emit_verdict_applied(1, TEST_IP1, "deny", ok=True)
+        out = capsys.readouterr().out
+        assert "\u2717" in out
+        assert "denied" in out
+
+    def test_emit_verdict_applied_failure(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Failed verdict shows an error marker and keeps the packet queued."""
+        io = CliSessionIO()
+        io.emit_pending(1, TEST_IP1, 443, 6, "")
+        capsys.readouterr()
+        io.emit_verdict_applied(1, TEST_IP1, "accept", ok=False)
+        out = capsys.readouterr().out
+        assert "failed" in out
+        # Packet must remain queued for retry.
+        assert 1 in io._queue
+        assert 1 in io._info
+
+    def test_verdict_prompts_next_queued(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """After resolving the first packet, the next queued one is prompted."""
+        io = CliSessionIO()
+        io.emit_pending(1, TEST_IP1, 443, 6, DNSMASQ_DOMAIN)
+        io.emit_pending(2, TEST_IP2, 80, 6, DNSMASQ_DOMAIN2)
+        capsys.readouterr()
+        io.emit_verdict_applied(1, TEST_IP1, "accept", ok=True)
+        out = capsys.readouterr().out
+        assert "[BLOCKED]" in out
+        assert DNSMASQ_DOMAIN2 in out
+
+    def test_parse_command_a(self) -> None:
+        """'a' maps to accept for the oldest pending packet."""
+        io = CliSessionIO()
+        io.emit_pending(1, TEST_IP1, 443, 6, "")
+        assert io.parse_command("a") == (1, "accept")
+
+    def test_parse_command_d(self) -> None:
+        """'d' maps to deny."""
+        io = CliSessionIO()
+        io.emit_pending(1, TEST_IP1, 443, 6, "")
+        assert io.parse_command("d") == (1, "deny")
+
+    def test_parse_command_allow(self) -> None:
+        """'allow' maps to accept."""
+        io = CliSessionIO()
+        io.emit_pending(1, TEST_IP1, 443, 6, "")
+        assert io.parse_command("allow") == (1, "accept")
+
+    def test_parse_command_deny(self) -> None:
+        """'deny' maps to deny."""
+        io = CliSessionIO()
+        io.emit_pending(1, TEST_IP1, 443, 6, "")
+        assert io.parse_command("deny") == (1, "deny")
+
+    def test_parse_command_case_insensitive(self) -> None:
+        """Input is case-insensitive."""
+        io = CliSessionIO()
+        io.emit_pending(1, TEST_IP1, 443, 6, "")
+        assert io.parse_command("Allow") == (1, "accept")
+        assert io.parse_command("DENY") == (1, "deny")
+
+    def test_parse_command_unknown_input(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Unknown input prints a hint, re-prompts, and returns None."""
+        io = CliSessionIO()
+        io.emit_pending(1, TEST_IP1, 443, 6, DNSMASQ_DOMAIN)
+        capsys.readouterr()
+        assert io.parse_command("x") is None
+        out = capsys.readouterr().out
+        assert "Unknown input" in out
+        # Prompt must be re-rendered after invalid input.
+        assert "allow/deny?" in out
+
+    def test_parse_command_empty_queue(self) -> None:
+        """Returns None when no packets are pending."""
+        io = CliSessionIO()
+        assert io.parse_command("a") is None
+
+    def test_prompt_head_missing_info(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """_prompt_head is a no-op when _info lacks the head-of-queue entry."""
+        io = CliSessionIO()
+        io._queue.append(99)  # ID with no matching _info entry
+        io._prompt_head()
+        assert capsys.readouterr().out == ""
+
+    def test_parse_fifo_order(self) -> None:
+        """Input targets the oldest pending packet (FIFO)."""
+        io = CliSessionIO()
+        io.emit_pending(1, TEST_IP1, 443, 6, "")
+        io.emit_pending(2, TEST_IP2, 80, 6, "")
+        result = io.parse_command("a")
+        assert result == (1, "accept")
+
+    def test_emit_banner(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """emit_banner prints a startup message."""
+        io = CliSessionIO()
+        io.emit_banner()
+        out = capsys.readouterr().out
+        assert "Watching" in out
+        assert "Ctrl-C" in out
+
+    def test_input_map_coverage(self) -> None:
+        """All expected input tokens are in _INPUT_MAP."""
+        assert _INPUT_MAP["a"] == "accept"
+        assert _INPUT_MAP["allow"] == "accept"
+        assert _INPUT_MAP["d"] == "deny"
+        assert _INPUT_MAP["deny"] == "deny"
+        assert len(_INPUT_MAP) == 4
+
+
+# ── --raw flag propagation ──────────────────────────────
+
+
+class TestSessionIOInjection:
+    """Tests for SessionIO injection into InteractiveSession."""
+
+    def test_falsy_session_io_is_preserved(self, tmp_path: Path) -> None:
+        """A non-None but falsy SessionIO is stored, not replaced by default."""
+
+        class _FalsyIO(JsonSessionIO):
+            def __bool__(self) -> bool:
+                return False
+
+        io = _FalsyIO()
+        session = InteractiveSession(
+            runner=mock.MagicMock(), state_dir=tmp_path, container="ctr", io=io
+        )
+        assert session._io is io
+
+
+class TestRawFlagPropagation:
+    """Tests for --raw flag through run_interactive and nsenter re-exec."""
+
+    def test_run_interactive_raw_false_uses_cli_io(self, tmp_path: Path) -> None:
+        """run_interactive defaults to CliSessionIO."""
+        state.interactive_path(tmp_path).write_text("nflog\n")
+        with (
+            mock.patch.dict("os.environ", {_NSENTER_ENV: "1"}),
+            mock.patch("terok_shield.cli.interactive.SubprocessRunner"),
+            mock.patch("terok_shield.cli.interactive.InteractiveSession") as mock_cls,
+        ):
+            run_interactive(tmp_path, _CONTAINER)
+        io_arg = mock_cls.call_args[1]["io"]
+        assert isinstance(io_arg, CliSessionIO)
+
+    def test_run_interactive_raw_true_uses_json_io(self, tmp_path: Path) -> None:
+        """run_interactive with raw=True uses JsonSessionIO."""
+        state.interactive_path(tmp_path).write_text("nflog\n")
+        with (
+            mock.patch.dict("os.environ", {_NSENTER_ENV: "1"}),
+            mock.patch("terok_shield.cli.interactive.SubprocessRunner"),
+            mock.patch("terok_shield.cli.interactive.InteractiveSession") as mock_cls,
+        ):
+            run_interactive(tmp_path, _CONTAINER, raw=True)
+        io_arg = mock_cls.call_args[1]["io"]
+        assert isinstance(io_arg, JsonSessionIO)
+
+    def test_nsenter_propagates_raw_env(self, tmp_path: Path) -> None:
+        """_nsenter_reexec sets _RAW_ENV when raw=True."""
+        from terok_shield.cli.interactive import _nsenter_reexec
+
+        with (
+            mock.patch("terok_shield.cli.interactive.SubprocessRunner") as mock_runner_cls,
+            mock.patch("subprocess.run") as mock_run,
+        ):
+            mock_runner_cls.return_value.podman_inspect.return_value = "12345"
+            _nsenter_reexec(tmp_path, _CONTAINER, raw=True)
+        env = mock_run.call_args[1]["env"]
+        assert env[_RAW_ENV] == "1"
+
+    def test_nsenter_omits_raw_env_when_false(self, tmp_path: Path) -> None:
+        """_nsenter_reexec does not set _RAW_ENV when raw=False."""
+        from terok_shield.cli.interactive import _nsenter_reexec
+
+        with (
+            mock.patch("terok_shield.cli.interactive.SubprocessRunner") as mock_runner_cls,
+            mock.patch("subprocess.run") as mock_run,
+        ):
+            mock_runner_cls.return_value.podman_inspect.return_value = "12345"
+            _nsenter_reexec(tmp_path, _CONTAINER, raw=False)
+        env = mock_run.call_args[1]["env"]
+        assert _RAW_ENV not in env
+
+    def test_nsenter_clears_inherited_raw_env(self, tmp_path: Path) -> None:
+        """_nsenter_reexec strips inherited _RAW_ENV when raw=False."""
+        from terok_shield.cli.interactive import _nsenter_reexec
+
+        with (
+            mock.patch.dict("os.environ", {_RAW_ENV: "1"}, clear=False),
+            mock.patch("terok_shield.cli.interactive.SubprocessRunner") as mock_runner_cls,
+            mock.patch("subprocess.run") as mock_run,
+        ):
+            mock_runner_cls.return_value.podman_inspect.return_value = "12345"
+            _nsenter_reexec(tmp_path, _CONTAINER, raw=False)
+        env = mock_run.call_args[1]["env"]
+        assert _RAW_ENV not in env
+
+    def test_run_interactive_passes_raw_to_nsenter(self, tmp_path: Path) -> None:
+        """run_interactive forwards raw=True to _nsenter_reexec."""
+        state.interactive_path(tmp_path).write_text("nflog\n")
+        with mock.patch("terok_shield.cli.interactive._nsenter_reexec") as mock_reexec:
+            run_interactive(tmp_path, _CONTAINER, raw=True)
+        mock_reexec.assert_called_once_with(tmp_path, _CONTAINER, raw=True)
