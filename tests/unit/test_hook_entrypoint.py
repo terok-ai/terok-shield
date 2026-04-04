@@ -40,10 +40,16 @@ _ROUTE_NO_DEFAULT = (
 )
 
 
-def _oci_json(pid: int = 42, state_dir: str = "/tmp/sd", version: int = 4) -> str:
+def _oci_json(
+    pid: int = 42,
+    state_dir: str = "/tmp/sd",
+    version: int = 4,
+    container_id: str = "abc123def456789abcdef0123456789abcdef0123456789abcdef0123456789a",
+) -> str:
     """Return a minimal OCI state JSON for hook_entrypoint.main()."""
     return json.dumps(
         {
+            "id": container_id,
             "pid": pid,
             "annotations": {
                 "terok.shield.state_dir": state_dir,
@@ -668,6 +674,22 @@ def test_main_dispatches_createruntime_and_returns_0(tmp_path: Path) -> None:
 
     assert rc == 0
     mock_cr.assert_called_once_with("42", sd)
+
+
+def test_main_persists_container_id(tmp_path: Path) -> None:
+    """main() writes the short container ID to state_dir/container.id."""
+    sd = tmp_path / "sd"
+    sd.mkdir()
+    full_id = "abc123def456789abcdef0123456789abcdef0123456789abcdef0123456789a"
+    oci = _oci_json(pid=42, state_dir=str(sd), container_id=full_id)
+
+    with mock.patch("terok_shield.resources.hook_entrypoint._createruntime"):
+        rc = _run_main(oci)
+
+    assert rc == 0
+    id_file = sd / "container.id"
+    assert id_file.is_file()
+    assert id_file.read_text().strip() == "abc123def456"
 
 
 def test_main_dispatches_poststop_and_returns_0(tmp_path: Path) -> None:

@@ -350,6 +350,13 @@ def main() -> int:
         if not pid:
             _log("terok-shield hook: missing pid in OCI state", log_path)
             return 1
+
+        # Persist container ID for D-Bus bridge bus name derivation.
+        # The OCI state includes "id" (full 64-char hex); store the short form.
+        container_id = str(oci.get("id") or "")
+        if container_id:
+            (sd / "container.id").write_text(container_id[:12] + "\n")
+
         _createruntime(pid, sd)
     except Exception as exc:  # noqa: BLE001
         _log(f"terok-shield hook: {exc}", log_path)

@@ -1249,26 +1249,23 @@ def test_pre_start_with_denied_ips_includes_deny_elements(
 
 
 @mock.patch("terok_shield.core.mode_hook.has_global_hooks", return_value=True)
-def test_pre_start_persists_container_id(
+def test_pre_start_does_not_inspect_container(
     _has_hooks: mock.Mock,
     monkeypatch: pytest.MonkeyPatch,
     make_hook_mode: HookModeHarnessFactory,
     make_config: ConfigFactory,
 ) -> None:
-    """pre_start() persists the short container ID to state_dir/container.id."""
+    """pre_start() must not call podman inspect (container doesn't exist yet)."""
     _set_euid(monkeypatch, 0)
     config = make_config()
     harness = make_hook_mode(config=config)
     harness.runner.run.return_value = _MODERN_PODMAN_INFO
-    harness.runner.podman_inspect.return_value = "abc123def456789abcdef0"
     harness.profiles.compose_profiles.return_value = []
 
     harness.mode.pre_start("test", ["dev-standard"])
 
-    harness.runner.podman_inspect.assert_any_call("test", "{{.Id}}")
-    id_file = state.container_id_path(config.state_dir)
-    assert id_file.is_file()
-    assert id_file.read_text().strip() == "abc123def456"
+    harness.runner.podman_inspect.assert_not_called()
+    assert not state.container_id_path(config.state_dir).exists()
 
 
 def test_shield_up_interactive_uses_interactive_ruleset(
