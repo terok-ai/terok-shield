@@ -91,7 +91,7 @@ class _ShieldInterface(ServiceInterface):
         request_id: "s",
         action: "s",
         ok: "b",
-    ) -> "sssb":
+    ) -> "ssssb":
         """Emit after a verdict has been applied to the nft ruleset."""
         return [container, dest, request_id, action, ok]
 
@@ -191,7 +191,7 @@ class ShieldBridge:
         try:
             self._bus.unexport(SHIELD_OBJECT_PATH, self._interface)
         except Exception:
-            pass
+            logger.debug("Unexport failed during stop", exc_info=True)
         logger.info("Bridge stopped for %s", self._container)
 
     async def submit_verdict(self, request_id: str, action: str) -> bool:
@@ -230,8 +230,9 @@ class ShieldBridge:
 
     async def _read_loop(self) -> None:
         """Read JSON lines from the subprocess stdout and emit D-Bus signals."""
-        assert self._process is not None
-        assert self._process.stdout is not None
+        if self._process is None or self._process.stdout is None:
+            logger.error("Read loop called without a running subprocess")
+            return
         try:
             async for raw_line in self._process.stdout:
                 line = raw_line.decode().strip()

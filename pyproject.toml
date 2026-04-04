@@ -45,7 +45,7 @@ optional = true
 
 [tool.poetry.group.dbus.dependencies]
 dbus-fast = ">=2.0"
-terok-dbus = {git = "https://github.com/terok-ai/terok-dbus.git", branch = "master"}
+terok-dbus = {git = "https://github.com/terok-ai/terok-dbus.git", rev = "4801d77"}
 
 [tool.poetry.group.docs.dependencies]
 mkdocs = ">=1.5,<2"
