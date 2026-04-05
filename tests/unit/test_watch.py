@@ -327,7 +327,8 @@ class TestDnsLogWatcher:
         domains = sd / "profile.domains"
         domains.write_text(f"{TEST_DOMAIN}\n")
         with patch(
-            "terok_shield.lib.watchers.dns_log.dnsmasq.read_merged_domains", side_effect=OSError("boom")
+            "terok_shield.lib.watchers.dns_log.dnsmasq.read_merged_domains",
+            side_effect=OSError("boom"),
         ):
             with pytest.raises(OSError, match="boom"):
                 DnsLogWatcher(log, sd, _CONTAINER)
@@ -789,7 +790,9 @@ class TestNflogWatcherCreate:
 
     def test_returns_none_on_oserror(self) -> None:
         """create() returns None when AF_NETLINK socket fails."""
-        with patch("terok_shield.lib.watchers.nflog.socket.socket", side_effect=OSError("no netlink")):
+        with patch(
+            "terok_shield.lib.watchers.nflog.socket.socket", side_effect=OSError("no netlink")
+        ):
             result = NflogWatcher.create(_CONTAINER)
         assert result is None
 
@@ -907,7 +910,8 @@ class TestDomainRefresh:
 
         # Force the clock past the refresh threshold
         with patch(
-            "terok_shield.lib.watchers.dns_log._monotonic", return_value=_DOMAIN_REFRESH_INTERVAL + 1.0
+            "terok_shield.lib.watchers.dns_log._monotonic",
+            return_value=_DOMAIN_REFRESH_INTERVAL + 1.0,
         ):
             events = watcher.poll()
         watcher.close()
