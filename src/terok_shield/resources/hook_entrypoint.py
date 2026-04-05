@@ -186,9 +186,16 @@ def _createruntime(pid: str, sd: Path) -> None:
         except OSError:
             pass
         _nsenter(pid, _find_dnsmasq(), f"--conf-file={dnsmasq_conf}")
-        if not pid_file.is_file():
+        try:
+            dnsmasq_pid = int(pid_file.read_text().strip())
+        except (OSError, ValueError):
             raise RuntimeError(
                 f"dnsmasq started but PID file not written at {pid_file}. "
+                "The container's DNS may not be functional."
+            )
+        if not _is_our_dnsmasq(dnsmasq_pid, dnsmasq_conf):
+            raise RuntimeError(
+                f"dnsmasq PID {dnsmasq_pid} is not the expected process. "
                 "The container's DNS may not be functional."
             )
 

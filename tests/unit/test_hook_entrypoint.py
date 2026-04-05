@@ -406,6 +406,7 @@ def test_createruntime_treats_permission_error_as_ns_exists(tmp_path: Path) -> N
         ),
         mock.patch("terok_shield.resources.hook_entrypoint._nsenter"),
         mock.patch("terok_shield.resources.hook_entrypoint._read_gateway", return_value=""),
+        mock.patch("terok_shield.resources.hook_entrypoint._read_gateway_v6", return_value=""),
     ):
         # Must not raise — PermissionError is treated as "namespace exists but inaccessible"
         hook_entrypoint._createruntime("1", sd)
@@ -429,7 +430,10 @@ def test_createruntime_applies_ruleset_without_gateway(tmp_path: Path) -> None:
 
     with mock.patch("terok_shield.resources.hook_entrypoint._nsenter") as mock_ns:
         with mock.patch("terok_shield.resources.hook_entrypoint._read_gateway", return_value=""):
-            hook_entrypoint._createruntime("1", sd)
+            with mock.patch(
+                "terok_shield.resources.hook_entrypoint._read_gateway_v6", return_value=""
+            ):
+                hook_entrypoint._createruntime("1", sd)
 
     # Only one nsenter call — apply the ruleset via stdin (not file path)
     assert mock_ns.call_count == 1
@@ -451,10 +455,13 @@ def test_createruntime_populates_gateway_set_when_discovered(tmp_path: Path) -> 
             "terok_shield.resources.hook_entrypoint._read_gateway", return_value="10.0.2.2"
         ):
             with mock.patch(
-                "terok_shield.resources.hook_entrypoint._find_nft",
-                return_value="/usr/sbin/nft",
+                "terok_shield.resources.hook_entrypoint._read_gateway_v6", return_value=""
             ):
-                hook_entrypoint._createruntime("1", sd)
+                with mock.patch(
+                    "terok_shield.resources.hook_entrypoint._find_nft",
+                    return_value="/usr/sbin/nft",
+                ):
+                    hook_entrypoint._createruntime("1", sd)
 
     # Two nsenter calls: apply ruleset + add element to gateway_v4
     assert mock_ns.call_count == 2
@@ -489,7 +496,13 @@ def test_createruntime_starts_dnsmasq_when_conf_present(tmp_path: Path) -> None:
         "terok_shield.resources.hook_entrypoint._nsenter", side_effect=_fake_nsenter
     ) as mock_ns:
         with mock.patch("terok_shield.resources.hook_entrypoint._read_gateway", return_value=""):
-            hook_entrypoint._createruntime("1", sd)
+            with mock.patch(
+                "terok_shield.resources.hook_entrypoint._read_gateway_v6", return_value=""
+            ):
+                with mock.patch(
+                    "terok_shield.resources.hook_entrypoint._is_our_dnsmasq", return_value=True
+                ):
+                    hook_entrypoint._createruntime("1", sd)
 
     # nsenter called twice: apply ruleset + launch dnsmasq (no resolv.conf write)
     assert mock_ns.call_count == 2
