@@ -4,7 +4,7 @@ build-backend = "poetry_dynamic_versioning.backend"
 
 [tool.poetry]
 name = "terok-shield"
-version = "0.6.2"
+version = "0.6.3"
 description = "nftables-based egress firewalling for Podman containers"
 readme = "README.md"
 license = "Apache-2.0"
@@ -45,7 +45,7 @@ optional = true
 
 [tool.poetry.group.dbus.dependencies]
 dbus-fast = ">=2.0"
-terok-dbus = {url = "https://github.com/terok-ai/terok-dbus/releases/download/v0.2.0/terok_dbus-0.2.0-py3-none-any.whl"}
+terok-dbus = {url = "https://github.com/terok-ai/terok-dbus/releases/download/v0.3.0/terok_dbus-0.3.0-py3-none-any.whl"}
 
 [tool.poetry.group.docs.dependencies]
 mkdocs = ">=1.5,<2"
