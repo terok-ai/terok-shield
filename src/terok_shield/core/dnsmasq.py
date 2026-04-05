@@ -24,49 +24,25 @@ from .run import CommandRunner, ExecError
 
 logger = logging.getLogger(__name__)
 
-# ── Constants ────────────────────────────────────────────
-
 # Strict domain label validation (RFC 1035 + wildcards).
-# Allows: a-z, 0-9, hyphens, dots, leading wildcard (*.).
 _DOMAIN_RE = re.compile(r"^(\*\.)?([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$")
 
 
-# ── Capability probing ───────────────────────────────────
+# ── Capability probing ──────────────────────────────────
 
 
 def has_nftset_support(runner: CommandRunner) -> bool:
     """Return True if the installed dnsmasq supports ``--nftset``.
 
-    Parses the ``dnsmasq --version`` compile-time options line for the
-    ``nftset`` feature flag.  Returns False if dnsmasq is not installed
-    or its version output contains ``no-nftset`` (explicitly disabled).
-
-    Example output with support::
-
-        Compile time options: IPv6 GNU-getopt ... nftset auth ...
-
-    Example output without support::
-
-        Compile time options: IPv6 GNU-getopt ... no-nftset auth ...
+    Parses ``dnsmasq --version`` compile-time options for the ``nftset``
+    feature flag.  Returns False if dnsmasq is not installed or its
+    output contains ``no-nftset`` (explicitly disabled).
     """
     out = runner.run(["dnsmasq", "--version"], check=False)
     return bool(re.search(r"\bnftset\b", out)) and not bool(re.search(r"\bno-nftset\b", out))
 
 
-# ── Config generation ────────────────────────────────────
-
-
-def _validate_domain(domain: str) -> str:
-    """Validate a domain name against injection.
-
-    Raises ValueError on invalid input.
-    """
-    d = domain.strip().lower()
-    if not d:
-        raise ValueError("Empty domain name")
-    if not _DOMAIN_RE.fullmatch(d):
-        raise ValueError(f"Invalid domain name: {d!r}")
-    return d
+# ── Config generation ───────────────────────────────────
 
 
 def nftset_entry(domain: str) -> str:
@@ -127,7 +103,7 @@ def generate_config(
     return "\n".join(lines) + "\n"
 
 
-# ── Lifecycle ────────────────────────────────────────────
+# ── Lifecycle ───────────────────────────────────────────
 
 
 def launch(
@@ -186,50 +162,13 @@ def launch(
         )
 
 
-def _read_pid(state_dir: Path) -> int | None:
-    """Read the dnsmasq PID from state, or None if missing/invalid."""
-    pid_path = state.dnsmasq_pid_path(state_dir)
-    try:
-        return int(pid_path.read_text().strip())
-    except (OSError, ValueError):
-        return None
-
-
-def _is_our_dnsmasq(pid_int: int, state_dir: Path) -> bool:
-    """Return True if the PID belongs to *this container's* dnsmasq.
-
-    Parses ``/proc/{pid}/cmdline`` as a NUL-separated argv vector and
-    checks that argv[0] is the ``dnsmasq`` binary (exact name or absolute
-    path) and that ``--conf-file=<our-conf>`` is present as a separate
-    argument.  Substring matching is not used, preventing false positives
-    from monitoring tools that embed these strings in their own arguments.
-    """
-    conf_arg = b"--conf-file=" + str(state.dnsmasq_conf_path(state_dir)).encode()
-    try:
-        raw = Path(f"/proc/{pid_int}/cmdline").read_bytes()
-    except OSError:
-        return False
-    args = raw.rstrip(b"\x00").split(b"\x00")
-    if not args:
-        return False
-    exe = args[0]
-    return (exe == b"dnsmasq" or exe.endswith(b"/dnsmasq")) and conf_arg in args
-
-
-def _clear_pid_file(state_dir: Path) -> None:
-    """Remove the dnsmasq PID file (best-effort)."""
-    try:
-        state.dnsmasq_pid_path(state_dir).unlink()
-    except OSError:
-        pass
-
-
 def kill(state_dir: Path) -> None:
     """Kill dnsmasq for a container (best-effort cleanup).
 
     Reads the PID from the state directory and sends SIGTERM.
     Silently ignores missing PID files, stale PIDs, and permission errors.
-    Verifies PID identity before signaling to avoid killing unrelated processes.
+    Verifies PID identity before signaling to avoid killing unrelated
+    processes.
 
     Needed because dnsmasq runs in the host PID namespace (we only
     ``nsenter -n`` into the network namespace).  When the container stops,
@@ -289,6 +228,9 @@ def reload(state_dir: Path, upstream_dns: str, domains: list[str]) -> None:
             f"dnsmasq (pid {pid_int}) is dead — container DNS is broken. "
             "Restart the container to recover."
         ) from e
+
+
+# ── Domain file operations ──────────────────────────────
 
 
 def add_domain(state_dir: Path, domain: str) -> bool:
@@ -374,7 +316,7 @@ def read_domains(domains_path: Path) -> list[str]:
 
 
 def read_merged_domains(state_dir: Path) -> list[str]:
-    """Read and merge domains: (profile + live) - denied.
+    """Compute effective domains: (profile + live) - denied.
 
     Returns a deduplicated, stable-order list.
     """
@@ -389,6 +331,9 @@ def read_merged_domains(state_dir: Path) -> list[str]:
             seen.add(d)
             merged.append(d)
     return merged
+
+
+# ── Container DNS setup ─────────────────────────────────
 
 
 def write_resolv_conf(pid: str, nameserver: str = DNSMASQ_BIND) -> None:
@@ -409,3 +354,57 @@ def write_resolv_conf(pid: str, nameserver: str = DNSMASQ_BIND) -> None:
         raise ValueError(f"nameserver must be a valid IP address, got {nameserver!r}") from None
     resolv_path = Path(f"/proc/{pid}/root/etc/resolv.conf")
     resolv_path.write_text(f"nameserver {nameserver}\n")
+
+
+# ── Private helpers ─────────────────────────────────────
+
+
+def _validate_domain(domain: str) -> str:
+    """Validate a domain name against injection.
+
+    Raises ValueError on invalid input.
+    """
+    d = domain.strip().lower()
+    if not d:
+        raise ValueError("Empty domain name")
+    if not _DOMAIN_RE.fullmatch(d):
+        raise ValueError(f"Invalid domain name: {d!r}")
+    return d
+
+
+def _read_pid(state_dir: Path) -> int | None:
+    """Read the dnsmasq PID from state, or None if missing/invalid."""
+    pid_path = state.dnsmasq_pid_path(state_dir)
+    try:
+        return int(pid_path.read_text().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _is_our_dnsmasq(pid_int: int, state_dir: Path) -> bool:
+    """Return True if the PID belongs to *this container's* dnsmasq.
+
+    Parses ``/proc/{pid}/cmdline`` as a NUL-separated argv vector and
+    checks that argv[0] is the ``dnsmasq`` binary (exact name or absolute
+    path) and that ``--conf-file=<our-conf>`` is present as a separate
+    argument.  Substring matching is not used, preventing false positives
+    from monitoring tools that embed these strings in their own arguments.
+    """
+    conf_arg = b"--conf-file=" + str(state.dnsmasq_conf_path(state_dir)).encode()
+    try:
+        raw = Path(f"/proc/{pid_int}/cmdline").read_bytes()
+    except OSError:
+        return False
+    args = raw.rstrip(b"\x00").split(b"\x00")
+    if not args:
+        return False
+    exe = args[0]
+    return (exe == b"dnsmasq" or exe.endswith(b"/dnsmasq")) and conf_arg in args
+
+
+def _clear_pid_file(state_dir: Path) -> None:
+    """Remove the dnsmasq PID file (best-effort)."""
+    try:
+        state.dnsmasq_pid_path(state_dir).unlink()
+    except OSError:
+        pass

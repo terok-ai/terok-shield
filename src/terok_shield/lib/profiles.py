@@ -1,10 +1,11 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""Profile loading and composition from .txt allowlists.
+"""Allowlist profile loading and composition.
 
-Provides ``ProfileLoader`` -- finds, reads, and merges allowlist
-profiles from user and bundled directories.
+Finds, reads, and merges ``.txt`` allowlist profiles from user and
+bundled directories.  User profiles override bundled ones with the
+same name, so site-specific customisation works without forking.
 """
 
 from importlib import resources as importlib_resources
@@ -13,17 +14,6 @@ from pathlib import Path
 from ..common.validation import parse_entries as _parse_entries, validate_safe_name
 
 _BUNDLED_PACKAGE = "terok_shield.resources.dns"
-
-
-# ── Pure helpers ─────────────────────────────────────────
-
-
-def _bundled_dir() -> Path:
-    """Return the path to the bundled DNS allowlists directory."""
-    return Path(str(importlib_resources.files(_BUNDLED_PACKAGE)))
-
-
-# ── ProfileLoader ────────────────────────────────────────
 
 
 class ProfileLoader:
@@ -47,17 +37,6 @@ class ProfileLoader:
         """
         self._user_dir = user_dir
         self._bundled_dir = bundled_dir or _bundled_dir()
-
-    def _find_profile(self, name: str) -> Path | None:
-        """Find a profile file by name.  User profiles override bundled."""
-        validate_safe_name(name)
-        user_path = self._user_dir / f"{name}.txt"
-        if user_path.is_file():
-            return user_path
-        bundled_path = self._bundled_dir / f"{name}.txt"
-        if bundled_path.is_file():
-            return bundled_path
-        return None
 
     def load_profile(self, name: str) -> list[str]:
         """Load a profile by name and return its entries.
@@ -98,3 +77,19 @@ class ProfileLoader:
             if directory.is_dir():
                 names.update(f.stem for f in directory.glob("*.txt"))
         return sorted(names)
+
+    def _find_profile(self, name: str) -> Path | None:
+        """Find a profile file by name.  User profiles override bundled."""
+        validate_safe_name(name)
+        user_path = self._user_dir / f"{name}.txt"
+        if user_path.is_file():
+            return user_path
+        bundled_path = self._bundled_dir / f"{name}.txt"
+        if bundled_path.is_file():
+            return bundled_path
+        return None
+
+
+def _bundled_dir() -> Path:
+    """Return the path to the bundled DNS allowlists directory."""
+    return Path(str(importlib_resources.files(_BUNDLED_PACKAGE)))
