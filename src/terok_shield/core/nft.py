@@ -1,15 +1,14 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""nftables ruleset generation.
+"""nftables ruleset generation and verification.
 
-+=====================================================+
-|  SECURITY BOUNDARY -- read this file first.         |
-|                                                     |
-|  Every nftables ruleset is generated here.          |
-|  All inputs are validated before interpolation.     |
-|  Only stdlib + nft_constants.py imports allowed.    |
-+=====================================================+
+Generates per-container nftables rulesets (deny-all and bypass modes),
+provides set operations for runtime allowlist/denylist management, and
+verifies applied rulesets against security invariants.
+
+Security boundary: only stdlib + nft_constants.py imports allowed.
+All inputs are validated before interpolation into nft commands.
 """
 
 import ipaddress
@@ -30,176 +29,20 @@ from .nft_constants import (
 )
 
 _SAFE_TIMEOUT_RE = re.compile(r"^\d+[smhd]$")
-
-# ── Validation ───────────────────────────────────────────
-
-
-def _safe_port(port: int) -> int:
-    """Validate a port number.  Raises ValueError for out-of-range or non-int."""
-    if isinstance(port, bool) or not isinstance(port, int):
-        raise ValueError(f"Port must be an integer, got {type(port).__name__}")
-    if not 1 <= port <= 65535:
-        raise ValueError(f"Port out of range: {port}")
-    return port
+_SAFE_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
-def safe_ip(value: str) -> str:
-    """Validate and normalize an IPv4 or IPv6 address or CIDR notation.
-
-    Prevents nft command injection by ensuring the value is a valid
-    IP address or network.  Returns the canonical string form so that
-    string comparisons across state files (profile.allowed, live.allowed,
-    deny.list) are reliable regardless of input notation.
-
-    Raises ValueError on invalid input.
-    """
-    v = value.strip()
-    try:
-        if "/" in v:
-            return str(ipaddress.ip_network(v, strict=False))
-        return str(ipaddress.ip_address(v))
-    except ValueError as e:
-        raise ValueError(f"Invalid IP/CIDR: {v!r}") from e
-
-
-def _is_v4(value: str) -> bool:
-    """Return True if a validated IP string is IPv4."""
-    try:
-        if "/" in value:
-            return isinstance(ipaddress.ip_network(value, strict=False), ipaddress.IPv4Network)
-        return isinstance(ipaddress.ip_address(value), ipaddress.IPv4Address)
-    except ValueError:
-        return False
-
-
-def _try_validate(ip: str) -> bool:
-    """Return True if ip is a valid IP address/CIDR, False otherwise."""
-    try:
-        safe_ip(ip)
-        return True
-    except ValueError:
-        return False
-
-
-def _safe_timeout(value: str) -> str:
-    """Validate an nft timeout value (e.g. ``30m``, ``1h``, ``60s``).
-
-    Raises ValueError on invalid input.  Prevents injection via
-    timeout strings in nft set declarations.
-    """
-    if not _SAFE_TIMEOUT_RE.fullmatch(value):
-        raise ValueError(f"Invalid nft timeout: {value!r} (expected e.g. '30m', '1h', '60s')")
-    return value
-
-
-# ── Private helpers ──────────────────────────────────────
-
-
-def _private_range_rules() -> str:
-    """Generate private-range reject rules (RFC 1918 + RFC 4193/4291).
-
-    Auto-detects address family for the ``daddr`` selector and uses
-    cross-family ``icmpx`` reject for all ranges.
-    """
-    return "\n".join(
-        f"        {'ip' if _is_v4(net) else 'ip6'} daddr {net}"
-        f' log group {NFLOG_GROUP} prefix "{PRIVATE_LOG_PREFIX}: " reject with icmpx admin-prohibited'
-        for net in PRIVATE_RANGES
-    )
-
-
-def _audit_deny_rule() -> str:
-    """Generate the deny-all rule with audit logging.
-
-    Uses ``icmpx`` for cross-family reject in ``inet`` tables --
-    auto-selects ICMP (IPv4) or ICMPv6 (IPv6).
-    """
-    return (
-        f'        log group {NFLOG_GROUP} prefix "{DENIED_LOG_PREFIX}: " counter\n'
-        "        reject with icmpx admin-prohibited"
-    )
-
-
-def _audit_allow_rules() -> str:
-    """Generate audit rules for allowed traffic (IPv4 + IPv6).
-
-    No rate limit -- only new connections reach these rules because
-    ``ct state established,related accept`` is earlier in the chain.
-    """
-    return (
-        f'        ip daddr @allow_v4 log group {NFLOG_GROUP} prefix "{ALLOWED_LOG_PREFIX}: " counter accept\n'
-        f'        ip6 daddr @allow_v6 log group {NFLOG_GROUP} prefix "{ALLOWED_LOG_PREFIX}: " counter accept'
-    )
-
-
-def _deny_set_rules() -> str:
-    """Generate deny-set match rules (IPv4 + IPv6).
-
-    Packets matching the deny sets are immediately rejected with an ICMP error.
-    Placed after allow-set rules, before private-range reject.
-    """
-    return (
-        f'        ip daddr @deny_v4 log group {NFLOG_GROUP} prefix "{DENIED_LOG_PREFIX}: " counter reject with icmpx admin-prohibited\n'
-        f'        ip6 daddr @deny_v6 log group {NFLOG_GROUP} prefix "{DENIED_LOG_PREFIX}: " counter reject with icmpx admin-prohibited'
-    )
-
-
-def _interactive_reject_rule() -> str:
-    """Generate the NFLOG+reject terminal rule for interactive mode.
-
-    Rejects unmatched packets immediately but logs them with the QUEUED prefix
-    so the interactive handler can detect them via NFLOG.
-    """
-    return (
-        f'        log group {NFLOG_GROUP} prefix "{QUEUED_LOG_PREFIX}: " '
-        f"counter reject with icmpx admin-prohibited"
-    )
-
-
-def _loopback_port_rules(ports: tuple[int, ...]) -> str:
-    """Generate nft accept rules for host-loopback-proxy ports.
-
-    Traffic to ``PASTA_HOST_LOOPBACK_MAP`` (169.254.1.2) goes via pasta's
-    virtual interface, not ``lo``.  pasta's ``--map-host-loopback`` translates
-    this address to ``127.0.0.1`` on the host, enabling container→host
-    loopback access without the pasta 2.x "two loopbacks" splice bug.
-    These rules are placed before the private-range reject block so that
-    link-local traffic to 169.254.1.2 is accepted for the allowed ports.
-    """
-    return "\n".join(
-        f"            tcp dport {p} ip daddr {PASTA_HOST_LOOPBACK_MAP} accept" for p in ports
-    )
-
-
-def _gateway_port_rules(ports: tuple[int, ...]) -> str:
-    """Generate nft accept rules for gateway ports using dynamic gateway sets.
-
-    References ``@gateway_v4`` and ``@gateway_v6`` sets, which are populated
-    at container creation by the OCI hook reading ``/proc/{pid}/net/route``.
-    Placed before private-range reject rules so gateway traffic (e.g. to
-    slirp4netns 10.0.2.2) is not blocked by RFC 1918 filtering.
-    Returns empty string if *ports* is empty.
-    """
-    if not ports:
-        return ""
-    lines = []
-    for p in ports:
-        lines.append(f"        tcp dport {p} ip daddr @gateway_v4 accept")
-        lines.append(f"        tcp dport {p} ip6 daddr @gateway_v6 accept")
-    return "\n".join(lines)
-
-
-# ── RulesetBuilder ───────────────────────────────────────
+# ── RulesetBuilder ──────────────────────────────────────
 
 
 class RulesetBuilder:
-    """Builder pattern for nftables ruleset generation and verification.
+    """Builder for nftables ruleset generation and verification.
 
     Security boundary: only stdlib + nft_constants imports.
     All inputs validated before interpolation.
 
-    Binds ``dns`` and ``loopback_ports`` once at construction -- these
-    were previously threaded as parameters to every function call.
+    Binds ``dns`` and ``loopback_ports`` once at construction so
+    callers do not repeat them on every generation or verification call.
     """
 
     def __init__(
@@ -265,21 +108,7 @@ class RulesetBuilder:
         return add_elements_dual(ips, permanent=bool(self._set_timeout))
 
 
-# ── Module-level free functions (unchanged API) ──────────
-
-
-def _set_declaration(name: str, family: str, set_timeout: str = "") -> str:
-    """Generate an nft set declaration with optional timeout.
-
-    Args:
-        name: Set name (e.g. ``allow_v4``).
-        family: Address type (``ipv4_addr`` or ``ipv6_addr``).
-        set_timeout: Element timeout (e.g. ``30m``).  When set, adds
-            ``timeout`` flag so elements auto-expire.
-    """
-    if set_timeout:
-        return f"set {name} {{ type {family}; flags interval, timeout; timeout {set_timeout}; }}"
-    return f"set {name} {{ type {family}; flags interval; }}"
+# ── Ruleset generation ──────────────────────────────────
 
 
 def hook_ruleset(
@@ -328,6 +157,9 @@ def hook_ruleset(
     set_v6 = _set_declaration("allow_v6", "ipv6_addr", set_timeout)
     set_deny_v4 = _set_declaration("deny_v4", "ipv4_addr")
     set_deny_v6 = _set_declaration("deny_v6", "ipv6_addr")
+    allow_rules = _audit_allow_rules()
+    deny_rules = _deny_set_rules()
+    private_rules = _private_range_rules()
     terminal_rule = _interactive_reject_rule() if interactive else _audit_deny_rule()
     return textwrap.dedent(f"""\
         table {NFT_TABLE} {{
@@ -344,9 +176,9 @@ def hook_ruleset(
                 ct state established,related accept
                 udp dport 53 {dns_af} daddr {dns} accept
                 tcp dport 53 {dns_af} daddr {dns} accept{infra_block}\
-        {_audit_allow_rules()}
-        {_deny_set_rules()}
-        {_private_range_rules()}
+        {allow_rules}
+        {deny_rules}
+        {private_rules}
         {terminal_rule}
             }}
 
@@ -398,7 +230,8 @@ def bypass_ruleset(
     dns_af = "ip" if _is_v4(dns) else "ip6"
     set_v4 = _set_declaration("allow_v4", "ipv4_addr", set_timeout)
     set_v6 = _set_declaration("allow_v6", "ipv6_addr", set_timeout)
-    private_block = "" if allow_all else f"\n{_private_range_rules()}"
+    private_rules = _private_range_rules()
+    private_block = "" if allow_all else f"\n{private_rules}"
     bypass_log = (
         f'        ct state new log group {NFLOG_GROUP} prefix "{BYPASS_LOG_PREFIX}: " counter'
     )
@@ -430,49 +263,21 @@ def bypass_ruleset(
     """)
 
 
-# ── Set operations ───────────────────────────────────────
-
-
-_SAFE_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-_ALLOW_V4 = "allow_v4"
-_ALLOW_V6 = "allow_v6"
-
-
-def _safe_ident(value: str) -> str:
-    """Validate an nft identifier (table/set name) against injection.
-
-    Raises:
-        ValueError: If the identifier contains unsafe characters.
-    """
-    if not _SAFE_IDENT.fullmatch(value):
-        raise ValueError(f"Unsafe nft identifier: {value!r}")
-    return value
-
-
-def add_elements(
-    set_name: str, ips: list[str], table: str = NFT_TABLE, *, timeout_zero: bool = False
-) -> str:
-    """Generate nft command to add validated IPs to a set.
-
-    Both ``set_name`` and ``table`` are validated against injection.
-    Returns empty string if no valid IPs.
+def _set_declaration(name: str, family: str, set_timeout: str = "") -> str:
+    """Generate an nft set declaration with optional timeout.
 
     Args:
-        timeout_zero: When ``True``, each element is annotated with
-            ``timeout 0s`` so it never expires, even in sets that carry a
-            default element timeout (dnsmasq tier).
+        name: Set name (e.g. ``allow_v4``).
+        family: Address type (``ipv4_addr`` or ``ipv6_addr``).
+        set_timeout: Element timeout (e.g. ``30m``).  When set, adds
+            ``timeout`` flag so elements auto-expire.
     """
-    _safe_ident(set_name)
-    for part in table.split():
-        _safe_ident(part)
-    valid = [safe_ip(ip) for ip in ips if _try_validate(ip)]
-    if not valid:
-        return ""
-    if timeout_zero:
-        elements = ", ".join(f"{ip} timeout 0s" for ip in valid)
-    else:
-        elements = ", ".join(valid)
-    return f"add element {table} {set_name} {{ {elements} }}\n"
+    if set_timeout:
+        return f"set {name} {{ type {family}; flags interval, timeout; timeout {set_timeout}; }}"
+    return f"set {name} {{ type {family}; flags interval; }}"
+
+
+# ── Set operations ──────────────────────────────────────
 
 
 def add_elements_dual(ips: list[str], *, permanent: bool = False) -> str:
@@ -497,17 +302,13 @@ def add_elements_dual(ips: list[str], *, permanent: bool = False) -> str:
             continue
         (v4 if _is_v4(sanitized) else v6).append(sanitized)
     parts: list[str] = []
-    cmd = add_elements(_ALLOW_V4, v4, timeout_zero=permanent)
+    cmd = add_elements("allow_v4", v4, timeout_zero=permanent)
     if cmd:
         parts.append(cmd)
-    cmd = add_elements(_ALLOW_V6, v6, timeout_zero=permanent)
+    cmd = add_elements("allow_v6", v6, timeout_zero=permanent)
     if cmd:
         parts.append(cmd)
     return "".join(parts)
-
-
-_DENY_V4 = "deny_v4"
-_DENY_V6 = "deny_v6"
 
 
 def add_deny_elements_dual(ips: list[str]) -> str:
@@ -525,10 +326,10 @@ def add_deny_elements_dual(ips: list[str]) -> str:
             continue
         (v4 if _is_v4(sanitized) else v6).append(sanitized)
     parts: list[str] = []
-    cmd = add_elements(_DENY_V4, v4)
+    cmd = add_elements("deny_v4", v4)
     if cmd:
         parts.append(cmd)
-    cmd = add_elements(_DENY_V6, v6)
+    cmd = add_elements("deny_v6", v6)
     if cmd:
         parts.append(cmd)
     return "".join(parts)
@@ -549,32 +350,56 @@ def delete_deny_elements_dual(ips: list[str]) -> str:
             continue
         (v4 if _is_v4(sanitized) else v6).append(sanitized)
     parts: list[str] = []
-    if v4:
-        elements = ", ".join(v4)
-        parts.append(f"delete element {NFT_TABLE} {_DENY_V4} {{ {elements} }}\n")
-    if v6:
-        elements = ", ".join(v6)
-        parts.append(f"delete element {NFT_TABLE} {_DENY_V6} {{ {elements} }}\n")
+    cmd = delete_elements("deny_v4", v4)
+    if cmd:
+        parts.append(cmd)
+    cmd = delete_elements("deny_v6", v6)
+    if cmd:
+        parts.append(cmd)
     return "".join(parts)
 
 
-# ── Verification ─────────────────────────────────────────
+def add_elements(
+    set_name: str, ips: list[str], table: str = NFT_TABLE, *, timeout_zero: bool = False
+) -> str:
+    """Generate nft command to add validated IPs to a set.
 
+    Both ``set_name`` and ``table`` are validated against injection.
+    Returns empty string if no valid IPs.
 
-def _verify_private_blocks(nft_output: str) -> list[str]:
-    """Check private-range reject rules (RFC 1918 + RFC 4193/4291) are present.
-
-    Uses a regex to match reject rule context (``ip[6] daddr <net> ... reject``)
-    rather than bare CIDR presence, so set elements don't produce false passes.
-    Auto-detects address family from the CIDR.
+    Args:
+        timeout_zero: When ``True``, each element is annotated with
+            ``timeout 0s`` so it never expires, even in sets that carry a
+            default element timeout (dnsmasq tier).
     """
-    errors: list[str] = []
-    for net in PRIVATE_RANGES:
-        selector = "ip" if _is_v4(net) else "ip6"
-        pattern = rf"{selector} daddr {re.escape(net)}.*reject"
-        if not re.search(pattern, nft_output):
-            errors.append(f"Private-range reject rule for {net} missing")
-    return errors
+    set_name = _safe_ident(set_name)
+    table = " ".join(_safe_ident(part) for part in table.split())
+    valid = [safe_ip(ip) for ip in ips if _try_validate(ip)]
+    if not valid:
+        return ""
+    if timeout_zero:
+        elements = ", ".join(f"{ip} timeout 0s" for ip in valid)
+    else:
+        elements = ", ".join(valid)
+    return f"add element {table} {set_name} {{ {elements} }}\n"
+
+
+def delete_elements(set_name: str, ips: list[str], table: str = NFT_TABLE) -> str:
+    """Generate nft command to delete validated IPs from a set.
+
+    Both ``set_name`` and ``table`` are validated against injection.
+    Returns empty string if no valid IPs.
+    """
+    set_name = _safe_ident(set_name)
+    table = " ".join(_safe_ident(part) for part in table.split())
+    valid = [safe_ip(ip) for ip in ips if _try_validate(ip)]
+    if not valid:
+        return ""
+    elements = ", ".join(valid)
+    return f"delete element {table} {set_name} {{ {elements} }}\n"
+
+
+# ── Verification ────────────────────────────────────────
 
 
 def verify_ruleset(nft_output: str, *, interactive: bool = False) -> list[str]:
@@ -652,3 +477,188 @@ def verify_bypass_ruleset(nft_output: str, *, allow_all: bool = False) -> list[s
     if not allow_all:
         errors.extend(_verify_private_blocks(nft_output))
     return errors
+
+
+def _verify_private_blocks(nft_output: str) -> list[str]:
+    """Check private-range reject rules (RFC 1918 + RFC 4193/4291) are present.
+
+    Uses a regex to match reject rule context (``ip[6] daddr <net> ... reject``)
+    rather than bare CIDR presence, so set elements don't produce false passes.
+    Auto-detects address family from the CIDR.
+    """
+    errors: list[str] = []
+    for net in PRIVATE_RANGES:
+        selector = "ip" if _is_v4(net) else "ip6"
+        pattern = rf"{selector} daddr {re.escape(net)}.*reject"
+        if not re.search(pattern, nft_output):
+            errors.append(f"Private-range reject rule for {net} missing")
+    return errors
+
+
+# ── Rule fragment generators ────────────────────────────
+
+
+def _audit_allow_rules() -> str:
+    """Generate audit rules for allowed traffic (IPv4 + IPv6).
+
+    No rate limit -- only new connections reach these rules because
+    ``ct state established,related accept`` is earlier in the chain.
+    """
+    return (
+        f'        ip daddr @allow_v4 log group {NFLOG_GROUP} prefix "{ALLOWED_LOG_PREFIX}: " counter accept\n'
+        f'        ip6 daddr @allow_v6 log group {NFLOG_GROUP} prefix "{ALLOWED_LOG_PREFIX}: " counter accept'
+    )
+
+
+def _audit_deny_rule() -> str:
+    """Generate the deny-all rule with audit logging.
+
+    Uses ``icmpx`` for cross-family reject in ``inet`` tables --
+    auto-selects ICMP (IPv4) or ICMPv6 (IPv6).
+    """
+    return (
+        f'        log group {NFLOG_GROUP} prefix "{DENIED_LOG_PREFIX}: " counter\n'
+        "        reject with icmpx admin-prohibited"
+    )
+
+
+def _deny_set_rules() -> str:
+    """Generate deny-set match rules (IPv4 + IPv6).
+
+    Packets matching the deny sets are immediately rejected with an ICMP error.
+    Placed after allow-set rules, before private-range reject.
+    """
+    return (
+        f'        ip daddr @deny_v4 log group {NFLOG_GROUP} prefix "{DENIED_LOG_PREFIX}: " counter reject with icmpx admin-prohibited\n'
+        f'        ip6 daddr @deny_v6 log group {NFLOG_GROUP} prefix "{DENIED_LOG_PREFIX}: " counter reject with icmpx admin-prohibited'
+    )
+
+
+def _interactive_reject_rule() -> str:
+    """Generate the NFLOG+reject terminal rule for interactive mode.
+
+    Rejects unmatched packets immediately but logs them with the QUEUED prefix
+    so the interactive handler can detect them via NFLOG.
+    """
+    return (
+        f'        log group {NFLOG_GROUP} prefix "{QUEUED_LOG_PREFIX}: " '
+        f"counter reject with icmpx admin-prohibited"
+    )
+
+
+def _private_range_rules() -> str:
+    """Generate private-range reject rules (RFC 1918 + RFC 4193/4291).
+
+    Auto-detects address family for the ``daddr`` selector and uses
+    cross-family ``icmpx`` reject for all ranges.
+    """
+    return "\n".join(
+        f"        {'ip' if _is_v4(net) else 'ip6'} daddr {net}"
+        f' log group {NFLOG_GROUP} prefix "{PRIVATE_LOG_PREFIX}: " reject with icmpx admin-prohibited'
+        for net in PRIVATE_RANGES
+    )
+
+
+def _loopback_port_rules(ports: tuple[int, ...]) -> str:
+    """Generate nft accept rules for host-loopback-proxy ports.
+
+    Traffic to ``PASTA_HOST_LOOPBACK_MAP`` (169.254.1.2) goes via pasta's
+    virtual interface, not ``lo``.  pasta's ``--map-host-loopback`` translates
+    this address to ``127.0.0.1`` on the host, enabling container→host
+    loopback access without the pasta 2.x "two loopbacks" splice bug.
+    These rules are placed before the private-range reject block so that
+    link-local traffic to 169.254.1.2 is accepted for the allowed ports.
+    """
+    return "\n".join(
+        f"            tcp dport {p} ip daddr {PASTA_HOST_LOOPBACK_MAP} accept" for p in ports
+    )
+
+
+def _gateway_port_rules(ports: tuple[int, ...]) -> str:
+    """Generate nft accept rules for gateway ports using dynamic gateway sets.
+
+    References ``@gateway_v4`` and ``@gateway_v6`` sets, which are populated
+    at container creation by the OCI hook reading ``/proc/{pid}/net/route``.
+    Placed before private-range reject rules so gateway traffic (e.g. to
+    slirp4netns 10.0.2.2) is not blocked by RFC 1918 filtering.
+    Returns empty string if *ports* is empty.
+    """
+    if not ports:
+        return ""
+    lines = []
+    for p in ports:
+        lines.append(f"        tcp dport {p} ip daddr @gateway_v4 accept")
+        lines.append(f"        tcp dport {p} ip6 daddr @gateway_v6 accept")
+    return "\n".join(lines)
+
+
+# ── Validation ──────────────────────────────────────────
+
+
+def safe_ip(value: str) -> str:
+    """Validate and normalize an IPv4 or IPv6 address or CIDR notation.
+
+    Prevents nft command injection by ensuring the value is a valid
+    IP address or network.  Returns the canonical string form so that
+    string comparisons across state files (profile.allowed, live.allowed,
+    deny.list) are reliable regardless of input notation.
+
+    Raises ValueError on invalid input.
+    """
+    v = value.strip()
+    try:
+        if "/" in v:
+            return str(ipaddress.ip_network(v, strict=False))
+        return str(ipaddress.ip_address(v))
+    except ValueError as e:
+        raise ValueError(f"Invalid IP/CIDR: {v!r}") from e
+
+
+def _safe_port(port: int) -> int:
+    """Validate a port number.  Raises ValueError for out-of-range or non-int."""
+    if isinstance(port, bool) or not isinstance(port, int):
+        raise ValueError(f"Port must be an integer, got {type(port).__name__}")
+    if not 1 <= port <= 65535:
+        raise ValueError(f"Port out of range: {port}")
+    return port
+
+
+def _is_v4(value: str) -> bool:
+    """Return True if a validated IP string is IPv4."""
+    try:
+        if "/" in value:
+            return isinstance(ipaddress.ip_network(value, strict=False), ipaddress.IPv4Network)
+        return isinstance(ipaddress.ip_address(value), ipaddress.IPv4Address)
+    except ValueError:
+        return False
+
+
+def _try_validate(ip: str) -> bool:
+    """Return True if ip is a valid IP address/CIDR, False otherwise."""
+    try:
+        safe_ip(ip)
+        return True
+    except ValueError:
+        return False
+
+
+def _safe_timeout(value: str) -> str:
+    """Validate an nft timeout value (e.g. ``30m``, ``1h``, ``60s``).
+
+    Raises ValueError on invalid input.  Prevents injection via
+    timeout strings in nft set declarations.
+    """
+    if not _SAFE_TIMEOUT_RE.fullmatch(value):
+        raise ValueError(f"Invalid nft timeout: {value!r} (expected e.g. '30m', '1h', '60s')")
+    return value
+
+
+def _safe_ident(value: str) -> str:
+    """Validate an nft identifier (table/set name) against injection.
+
+    Raises:
+        ValueError: If the identifier contains unsafe characters.
+    """
+    if not _SAFE_IDENT_RE.fullmatch(value):
+        raise ValueError(f"Unsafe nft identifier: {value!r}")
+    return value

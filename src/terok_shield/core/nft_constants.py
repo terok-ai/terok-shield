@@ -1,10 +1,9 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""Shared nftables constants — single source of truth.
+"""nftables table names, network defaults, and log prefixes.
 
-This module contains only literals (no logic, no non-stdlib imports)
-so it can be safely imported by the nft.py security boundary.
+Pure literals with no logic — safe for import by the nft.py security boundary.
 """
 
 NFT_TABLE = "inet terok_shield"
