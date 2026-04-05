@@ -41,6 +41,11 @@ HOOKS_DIR_PERSIST_VERSION = (99, 0, 0)
 # Hook JSON filename used to detect terok-shield global hooks.
 HOOK_JSON_FILENAME = "terok-shield-createRuntime.json"
 
+USER_HOOKS_DIR = Path("~/.local/share/containers/oci/hooks.d")
+
+
+# ── Podman version and capabilities ────────────────────
+
 
 @dataclass(frozen=True)
 class PodmanInfo:
@@ -81,27 +86,6 @@ class PodmanInfo:
         return "pasta"
 
 
-def _parse_version(version_str: str) -> tuple[int, ...]:
-    """Parse a version string like ``5.4.2`` into an int tuple.
-
-    Extracts leading digits from each dotted component, so
-    ``5.6.0-rc1`` parses as ``(5, 6, 0)`` rather than ``(5, 6)``.
-    """
-    parts: list[int] = []
-    for part in version_str.split("."):
-        digits = ""
-        for ch in part:
-            if ch.isdigit():
-                digits += ch
-            else:
-                break
-        if digits:
-            parts.append(int(digits))
-        else:
-            break
-    return tuple(parts) if parts else (0,)
-
-
 def parse_podman_info(json_str: str) -> PodmanInfo:
     """Parse ``podman info -f json`` output into a :class:`PodmanInfo`.
 
@@ -128,35 +112,28 @@ def parse_podman_info(json_str: str) -> PodmanInfo:
     )
 
 
-# ── containers.conf hooks_dir detection ───────────────────
+def _parse_version(version_str: str) -> tuple[int, ...]:
+    """Parse a version string like ``5.4.2`` into an int tuple.
 
-
-def _user_containers_conf() -> Path:
-    """Return the user-level ``containers.conf`` path (XDG)."""
-    xdg = os.environ.get("XDG_CONFIG_HOME")
-    base = Path(xdg) if xdg else Path.home() / ".config"
-    return base / "containers" / "containers.conf"
-
-
-def _parse_hooks_dir_from_conf(path: Path) -> list[str]:
-    """Extract ``hooks_dir`` list from a ``containers.conf`` TOML file.
-
-    Returns an empty list if the file is missing, unreadable, or does
-    not contain ``[engine] hooks_dir``.
+    Extracts leading digits from each dotted component, so
+    ``5.6.0-rc1`` parses as ``(5, 6, 0)`` rather than ``(5, 6)``.
     """
-    if not path.is_file():
-        return []
-    try:
-        with path.open("rb") as f:
-            data = tomllib.load(f)
-    except (OSError, tomllib.TOMLDecodeError):
-        return []
-    hooks = data.get("engine", {}).get("hooks_dir", [])
-    if isinstance(hooks, list):
-        return [str(h) for h in hooks if isinstance(h, str) and h]
-    if isinstance(hooks, str) and hooks:
-        return [hooks]
-    return []
+    parts: list[int] = []
+    for part in version_str.split("."):
+        digits = ""
+        for ch in part:
+            if ch.isdigit():
+                digits += ch
+            else:
+                break
+        if digits:
+            parts.append(int(digits))
+        else:
+            break
+    return tuple(parts) if parts else (0,)
+
+
+# ── Hooks directory detection and setup ────────────────
 
 
 def find_hooks_dirs() -> list[Path]:
@@ -194,7 +171,100 @@ def has_global_hooks(hooks_dirs: list[Path] | None = None) -> bool:
     return any((d / HOOK_JSON_FILENAME).is_file() for d in hooks_dirs)
 
 
-# ── Network detection (resolv.conf, routing table) ───────
+def system_hooks_dir() -> Path:
+    """Return the best system-level hooks directory.
+
+    Prefers existing directories; falls back to ``/etc/containers/oci/hooks.d``.
+    """
+    for d in _SYSTEM_HOOKS_DIRS:
+        if d.is_dir():
+            return d
+    return _SYSTEM_HOOKS_DIRS[-1]
+
+
+def ensure_containers_conf_hooks_dir(hooks_dir: Path) -> None:
+    """Ensure ``~/.config/containers/containers.conf`` includes *hooks_dir*.
+
+    Creates the file if absent.  Inserts ``hooks_dir`` into the existing
+    ``[engine]`` section, or appends a new section if none exists.
+    Warns (does not fail) if ``hooks_dir`` is already set differently.
+
+    Uses line-based text manipulation to preserve comments and formatting.
+    """
+    conf_path = _user_containers_conf()
+    hooks_str = str(hooks_dir)
+    hooks_line = f'hooks_dir = ["{hooks_str}"]'
+
+    if not conf_path.is_file():
+        conf_path.parent.mkdir(parents=True, exist_ok=True)
+        conf_path.write_text(f"[engine]\n{hooks_line}\n")
+        return
+
+    existing = _parse_hooks_dir_from_conf(conf_path)
+    if not existing:
+        _insert_hooks_line(conf_path, hooks_line)
+        return
+
+    if hooks_str in existing or str(hooks_dir.expanduser()) in existing:
+        return  # already configured
+    print(
+        f"Warning: {conf_path} already has hooks_dir = {existing}\n"
+        f"Add {hooks_str!r} to the list manually if needed."
+    )
+
+
+def global_hooks_hint() -> str:
+    """Short hint telling the user to run ``terok-shield setup``."""
+    return (
+        "Per-container --hooks-dir does not persist on container restart\n"
+        "(ref: https://github.com/containers/podman/issues/17935).\n"
+        "\n"
+        "Run 'terok-shield setup' to install global hooks."
+    )
+
+
+def _user_containers_conf() -> Path:
+    """Return the user-level ``containers.conf`` path (XDG)."""
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    base = Path(xdg) if xdg else Path.home() / ".config"
+    return base / "containers" / "containers.conf"
+
+
+def _parse_hooks_dir_from_conf(path: Path) -> list[str]:
+    """Extract ``hooks_dir`` list from a ``containers.conf`` TOML file.
+
+    Returns an empty list if the file is missing, unreadable, or does
+    not contain ``[engine] hooks_dir``.
+    """
+    if not path.is_file():
+        return []
+    try:
+        with path.open("rb") as f:
+            data = tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError):
+        return []
+    hooks = data.get("engine", {}).get("hooks_dir", [])
+    if isinstance(hooks, list):
+        return [str(h) for h in hooks if isinstance(h, str) and h]
+    if isinstance(hooks, str) and hooks:
+        return [hooks]
+    return []
+
+
+def _insert_hooks_line(conf_path: Path, hooks_line: str) -> None:
+    """Insert *hooks_line* after ``[engine]`` in *conf_path*, or append a new section."""
+    lines = conf_path.read_text().splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        if line.strip() == "[engine]":
+            lines.insert(i + 1, hooks_line + "\n")
+            conf_path.write_text("".join(lines))
+            return
+    # No [engine] section — append one
+    with conf_path.open("a") as f:
+        f.write(f"\n[engine]\n{hooks_line}\n")
+
+
+# ── Network detection ──────────────────────────────────
 
 
 def parse_resolv_conf(text: str) -> str:
@@ -227,71 +297,3 @@ def parse_proc_net_route(text: str) -> str:
             except (ValueError, struct.error):
                 continue
     return ""
-
-
-USER_HOOKS_DIR = Path("~/.local/share/containers/oci/hooks.d")
-
-
-def system_hooks_dir() -> Path:
-    """Return the best system-level hooks directory.
-
-    Prefers existing directories; falls back to ``/etc/containers/oci/hooks.d``.
-    """
-    for d in _SYSTEM_HOOKS_DIRS:
-        if d.is_dir():
-            return d
-    return _SYSTEM_HOOKS_DIRS[-1]
-
-
-def global_hooks_hint() -> str:
-    """Short hint telling the user to run ``terok-shield setup``."""
-    return (
-        "Per-container --hooks-dir does not persist on container restart\n"
-        "(ref: https://github.com/containers/podman/issues/17935).\n"
-        "\n"
-        "Run 'terok-shield setup' to install global hooks."
-    )
-
-
-def _insert_hooks_line(conf_path: Path, hooks_line: str) -> None:
-    """Insert *hooks_line* after ``[engine]`` in *conf_path*, or append a new section."""
-    lines = conf_path.read_text().splitlines(keepends=True)
-    for i, line in enumerate(lines):
-        if line.strip() == "[engine]":
-            lines.insert(i + 1, hooks_line + "\n")
-            conf_path.write_text("".join(lines))
-            return
-    # No [engine] section — append one
-    with conf_path.open("a") as f:
-        f.write(f"\n[engine]\n{hooks_line}\n")
-
-
-def ensure_containers_conf_hooks_dir(hooks_dir: Path) -> None:
-    """Ensure ``~/.config/containers/containers.conf`` includes *hooks_dir*.
-
-    Creates the file if absent.  Inserts ``hooks_dir`` into the existing
-    ``[engine]`` section, or appends a new section if none exists.
-    Warns (does not fail) if ``hooks_dir`` is already set differently.
-
-    Uses line-based text manipulation to preserve comments and formatting.
-    """
-    conf_path = _user_containers_conf()
-    hooks_str = str(hooks_dir)
-    hooks_line = f'hooks_dir = ["{hooks_str}"]'
-
-    if not conf_path.is_file():
-        conf_path.parent.mkdir(parents=True, exist_ok=True)
-        conf_path.write_text(f"[engine]\n{hooks_line}\n")
-        return
-
-    existing = _parse_hooks_dir_from_conf(conf_path)
-    if not existing:
-        _insert_hooks_line(conf_path, hooks_line)
-        return
-
-    if hooks_str in existing or str(hooks_dir.expanduser()) in existing:
-        return  # already configured
-    print(
-        f"Warning: {conf_path} already has hooks_dir = {existing}\n"
-        f"Add {hooks_str!r} to the list manually if needed."
-    )

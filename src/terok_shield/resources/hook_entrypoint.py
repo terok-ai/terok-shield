@@ -44,249 +44,7 @@ _BUNDLE_VERSION = 4
 _TABLE = "inet terok_shield"
 
 
-def _bootstrap_env() -> None:
-    """Ensure critical environment variables are set before running podman unshare.
-
-    OCI hooks (crun/runc) may be invoked with a stripped environment — no HOME,
-    no XDG_RUNTIME_DIR, and sometimes no PATH.  ``podman unshare`` reads
-    ``/etc/subuid``, ``~/.config/containers/``, and the rootless podman socket
-    via these variables.  Without them it exits 1 silently.
-
-    Only sets variables that are absent; never overrides values the runtime did
-    pass through.
-    """
-    uid = os.getuid()
-
-    if not os.environ.get("HOME"):
-        try:
-            home = pwd.getpwuid(uid).pw_dir
-        except KeyError:
-            home = "/root" if uid == 0 else f"/home/{uid}"
-        os.environ["HOME"] = home
-
-    if not os.environ.get("XDG_RUNTIME_DIR"):
-        os.environ["XDG_RUNTIME_DIR"] = f"/run/user/{uid}"
-
-    if not os.environ.get("PATH"):
-        os.environ["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-
-
-def _find_podman() -> str:
-    """Return the path to the podman binary, falling back to /usr/bin/podman."""
-    return shutil.which("podman") or "/usr/bin/podman"
-
-
-def _find_nsenter() -> str:
-    """Return the path to the nsenter binary, falling back to /usr/bin/nsenter."""
-    return shutil.which("nsenter") or "/usr/bin/nsenter"
-
-
-def _find_nft() -> str:
-    """Return the path to the nft binary, falling back to /usr/sbin/nft."""
-    return shutil.which("nft") or "/usr/sbin/nft"
-
-
-def _find_dnsmasq() -> str:
-    """Return the path to the dnsmasq binary, falling back to /usr/sbin/dnsmasq."""
-    return shutil.which("dnsmasq") or "/usr/sbin/dnsmasq"
-
-
-def _nsenter(pid: str, *cmd: str, stdin: str | None = None) -> None:
-    """Run *cmd* inside the container's network namespace.
-
-    Two execution contexts are handled automatically:
-
-    **OCI hook context (crun invokes the hook)** — crun runs inside podman's
-    rootless user namespace (NS_ROOTLESS, where ``os.getuid() == 0`` and
-    ``CAP_NET_ADMIN`` is available).  The hook inherits that namespace, so
-    ``nsenter -n -t <pid>`` is sufficient: no ``podman unshare`` is needed and
-    calling it from NS_ROOTLESS would fail (cannot nest into the same namespace).
-
-    **Shell / manual invocation context** — the caller is in the initial user
-    namespace (NS_INIT, uid != 0, no elevated capabilities).  ``podman unshare``
-    enters NS_ROOTLESS first to gain ``CAP_NET_ADMIN``, then ``nsenter -n``
-    enters the container's network namespace.  This mirrors
-    ``SubprocessRunner.nft_via_nsenter()`` in run.py.
-
-    Captures both stdout and stderr — some nft versions write errors to stdout.
-    """
-    if os.getuid() == 0:
-        # Already in NS_ROOTLESS (crun hook context): CAP_NET_ADMIN is available.
-        ns_cmd = [_find_nsenter(), "-n", "-t", pid, "--", *cmd]
-    else:
-        # In NS_INIT (shell): enter NS_ROOTLESS first via podman unshare.
-        ns_cmd = [_find_podman(), "unshare", _find_nsenter(), "-n", "-t", pid, "--", *cmd]
-    try:
-        result = subprocess.run(  # nosec B603
-            ns_cmd,
-            input=stdin,
-            text=True,
-            capture_output=True,
-            timeout=30,
-        )
-    except subprocess.TimeoutExpired:
-        raise RuntimeError(f"nsenter command timed out after 30 s: cmd={cmd!r}")
-    if result.returncode != 0:
-        # Combine stdout and stderr — some nft versions write errors to stdout.
-        combined = (result.stderr + result.stdout).strip()
-        raise RuntimeError(
-            f"nsenter command failed (exit {result.returncode}) cmd={cmd!r}"
-            + (f":\n{combined}" if combined else " (no output)")
-        )
-
-
-def _read_gateway(pid: str) -> str:
-    """Read the default IPv4 gateway from the container's routing table.
-
-    Parses ``/proc/{pid}/net/route`` (the kernel routing table for the
-    container's network namespace).  Returns an empty string when no default
-    route is present (e.g. pasta mode) or when parsing fails — fail-closed:
-    the nft ruleset is still applied, gateway sets stay empty.
-    """
-    try:
-        for line in Path(f"/proc/{pid}/net/route").read_text().splitlines()[1:]:
-            fields = line.split()
-            if len(fields) >= 3 and fields[1] == "00000000":
-                gw = socket.inet_ntoa(struct.pack("=I", int(fields[2], 16)))
-                ipaddress.ip_address(gw)  # validate — raises ValueError if malformed
-                return gw
-    except (OSError, ValueError, struct.error):
-        pass
-    return ""
-
-
-def _read_gateway_v6(pid: str) -> str:
-    """Read the default IPv6 gateway from the container's routing table.
-
-    Parses ``/proc/{pid}/net/ipv6_route``.  Each line has 10 space-separated
-    hex fields; the default route has dest_net=32 zeros and prefix_len=00.
-    The nexthop (field index 4) is a 128-bit address stored as 32 hex chars.
-    Returns an empty string when no default route is present or parsing fails.
-    """
-    try:
-        for line in Path(f"/proc/{pid}/net/ipv6_route").read_text().splitlines():
-            fields = line.split()
-            if len(fields) >= 5 and fields[0] == "0" * 32 and fields[1] == "00":
-                addr = ipaddress.IPv6Address(bytes.fromhex(fields[4]))
-                if not addr.is_unspecified:
-                    return addr.compressed
-    except (OSError, ValueError):
-        pass
-    return ""
-
-
-def _createruntime(pid: str, sd: Path) -> None:
-    """Apply the pre-generated ruleset and optionally start dnsmasq."""
-    # Verify the target PID's network namespace file exists before invoking nsenter.
-    # Use stat() rather than exists(): Path.exists() silently swallows PermissionError
-    # in Python 3.14+, whereas stat() reliably raises it.  PermissionError means the
-    # file is present but we can't read it (non-root caller) — that's fine, proceed.
-    # Any other OSError (FileNotFoundError, etc.) means the PID is gone.
-    ns_net = Path(f"/proc/{pid}/ns/net")
-    try:
-        ns_net.stat()
-    except PermissionError:
-        pass  # Namespace file exists but cannot be stat'd from this context — proceed.
-    except OSError:
-        raise RuntimeError(f"network namespace file missing for pid {pid}: {ns_net}")
-
-    ruleset = sd / "ruleset.nft"
-    if not ruleset.exists():
-        raise RuntimeError(f"ruleset.nft not found: {ruleset}")
-    nft = _find_nft()
-    # Read the ruleset in Python and feed it to nft via stdin ("-f -").
-    # nft runs as iptables_t (SELinux domain); that domain cannot read files
-    # in data_home_t (~/.local/share/…).  Piping via stdin bypasses the
-    # file-read restriction — the hook process (not nft) reads the file.
-    # This matches the pre-PR hook which also piped the ruleset via stdin.
-    _nsenter(pid, nft, "-f", "-", stdin=ruleset.read_text())
-
-    # Discover gateways from routing tables, persist, and populate nft sets.
-    # Clear any stale files from a previous run so shield_up() doesn't
-    # repopulate the wrong gateway into a reused state directory.
-    for gw, file_name, set_name in (
-        (_read_gateway(pid), "gateway", "gateway_v4"),
-        (_read_gateway_v6(pid), "gateway_v6", "gateway_v6"),
-    ):
-        gw_file = sd / file_name
-        if gw:
-            gw_file.write_text(f"{gw}\n")
-            _nsenter(pid, nft, "add", "element", _TABLE, set_name, f"{{ {gw} }}")
-        else:
-            try:
-                gw_file.unlink()
-            except OSError:
-                pass
-
-    # Start per-container dnsmasq if config was pre-generated by pre_start()
-    dnsmasq_conf = sd / "dnsmasq.conf"
-    if dnsmasq_conf.exists():
-        # resolv.conf is pre-written by pre_start() and bind-mounted :ro via
-        # --volume, so DNS is already pointing to 127.0.0.1 before this hook
-        # runs.  No write needed here.
-        _nsenter(pid, _find_dnsmasq(), f"--conf-file={dnsmasq_conf}")
-
-
-def _is_our_dnsmasq(pid_int: int, conf_path: Path) -> bool:
-    """Return True if pid_int is a dnsmasq process using our conf file.
-
-    Parses ``/proc/{pid}/cmdline`` as a NUL-separated argv vector.
-    Requires argv[0] to be the dnsmasq binary (exact name or absolute path)
-    and ``--conf-file=<our-conf>`` to be present as a separate argument.
-    Mirrors ``terok_shield.dnsmasq._is_our_dnsmasq()`` without any imports.
-    """
-    conf_arg = b"--conf-file=" + str(conf_path).encode()
-    try:
-        raw = Path(f"/proc/{pid_int}/cmdline").read_bytes()
-    except OSError:
-        return False
-    args = raw.rstrip(b"\x00").split(b"\x00")
-    if not args:
-        return False
-    exe = args[0]
-    return (exe == b"dnsmasq" or exe.endswith(b"/dnsmasq")) and conf_arg in args
-
-
-def _poststop(sd: Path) -> None:
-    """Send SIGTERM to the per-container dnsmasq process (best-effort).
-
-    Verifies PID identity against ``/proc/{pid}/cmdline`` before signalling
-    to avoid hitting an unrelated process when the original dnsmasq PID is
-    recycled after container stop.
-    """
-    pid_file = sd / "dnsmasq.pid"
-    conf_path = sd / "dnsmasq.conf"
-    if not pid_file.exists():
-        return
-    try:
-        pid_int = int(pid_file.read_text().strip())
-    except (ValueError, OSError):
-        return
-    if not _is_our_dnsmasq(pid_int, conf_path):
-        try:
-            pid_file.unlink()
-        except OSError:
-            pass
-        return
-    try:
-        os.kill(pid_int, 15)
-    except OSError:
-        pass
-
-
-def _log(msg: str, log_path: Path | None = None) -> None:
-    """Write *msg* to stderr and to a persistent log file (best-effort).
-
-    The OCI runtime (crun/runc) typically swallows hook stderr.  Writing to a
-    file in the state directory (or /tmp as fallback) makes errors visible.
-    """
-    print(msg, file=sys.stderr)
-    path = log_path or Path("/tmp/terok-hook-error.log")  # nosec B108
-    try:
-        with path.open("a") as f:
-            f.write(f"{msg}\n")
-    except OSError:
-        pass
+# ── Entry point ────────────────────────────────────────
 
 
 def main() -> int:
@@ -362,6 +120,272 @@ def main() -> int:
         _log(f"terok-shield hook: {exc}", log_path)
         return 1
     return 0
+
+
+# ── Stage handlers ─────────────────────────────────────
+
+
+def _createruntime(pid: str, sd: Path) -> None:
+    """Apply the pre-generated ruleset and optionally start dnsmasq."""
+    # Verify the target PID's network namespace file exists before invoking nsenter.
+    # Use stat() rather than exists(): Path.exists() silently swallows PermissionError
+    # in Python 3.14+, whereas stat() reliably raises it.  PermissionError means the
+    # file is present but we can't read it (non-root caller) — that's fine, proceed.
+    # Any other OSError (FileNotFoundError, etc.) means the PID is gone.
+    ns_net = Path(f"/proc/{pid}/ns/net")
+    try:
+        ns_net.stat()
+    except PermissionError:
+        pass  # Namespace file exists but cannot be stat'd from this context — proceed.
+    except OSError:
+        raise RuntimeError(f"network namespace file missing for pid {pid}: {ns_net}")
+
+    ruleset = sd / "ruleset.nft"
+    if not ruleset.exists():
+        raise RuntimeError(f"ruleset.nft not found: {ruleset}")
+    nft = _find_nft()
+    # Read the ruleset in Python and feed it to nft via stdin ("-f -").
+    # nft runs as iptables_t (SELinux domain); that domain cannot read files
+    # in data_home_t (~/.local/share/…).  Piping via stdin bypasses the
+    # file-read restriction — the hook process (not nft) reads the file.
+    # This matches the pre-PR hook which also piped the ruleset via stdin.
+    _nsenter(pid, nft, "-f", "-", stdin=ruleset.read_text())
+
+    # Discover gateways from routing tables, persist, and populate nft sets.
+    # Clear any stale files from a previous run so shield_up() doesn't
+    # repopulate the wrong gateway into a reused state directory.
+    for gw, file_name, set_name in (
+        (_read_gateway(pid), "gateway", "gateway_v4"),
+        (_read_gateway_v6(pid), "gateway_v6", "gateway_v6"),
+    ):
+        gw_file = sd / file_name
+        if gw:
+            gw_file.write_text(f"{gw}\n")
+            _nsenter(pid, nft, "add", "element", _TABLE, set_name, f"{{ {gw} }}")
+        else:
+            try:
+                gw_file.unlink()
+            except OSError:
+                pass
+
+    # Start per-container dnsmasq if config was pre-generated by pre_start()
+    dnsmasq_conf = sd / "dnsmasq.conf"
+    if dnsmasq_conf.exists():
+        # resolv.conf is pre-written by pre_start() and bind-mounted :ro via
+        # --volume, so DNS is already pointing to 127.0.0.1 before this hook
+        # runs.  No write needed here.
+        _nsenter(pid, _find_dnsmasq(), f"--conf-file={dnsmasq_conf}")
+
+
+def _poststop(sd: Path) -> None:
+    """Send SIGTERM to the per-container dnsmasq process (best-effort).
+
+    Verifies PID identity against ``/proc/{pid}/cmdline`` before signalling
+    to avoid hitting an unrelated process when the original dnsmasq PID is
+    recycled after container stop.
+    """
+    pid_file = sd / "dnsmasq.pid"
+    conf_path = sd / "dnsmasq.conf"
+    if not pid_file.exists():
+        return
+    try:
+        pid_int = int(pid_file.read_text().strip())
+    except (ValueError, OSError):
+        return
+    if not _is_our_dnsmasq(pid_int, conf_path):
+        try:
+            pid_file.unlink()
+        except OSError:
+            pass
+        return
+    try:
+        os.kill(pid_int, 15)
+    except OSError:
+        pass
+
+
+# ── Namespace execution ────────────────────────────────
+
+
+def _nsenter(pid: str, *cmd: str, stdin: str | None = None) -> None:
+    """Run *cmd* inside the container's network namespace.
+
+    Two execution contexts are handled automatically:
+
+    **OCI hook context (crun invokes the hook)** — crun runs inside podman's
+    rootless user namespace (NS_ROOTLESS, where ``os.getuid() == 0`` and
+    ``CAP_NET_ADMIN`` is available).  The hook inherits that namespace, so
+    ``nsenter -n -t <pid>`` is sufficient: no ``podman unshare`` is needed and
+    calling it from NS_ROOTLESS would fail (cannot nest into the same namespace).
+
+    **Shell / manual invocation context** — the caller is in the initial user
+    namespace (NS_INIT, uid != 0, no elevated capabilities).  ``podman unshare``
+    enters NS_ROOTLESS first to gain ``CAP_NET_ADMIN``, then ``nsenter -n``
+    enters the container's network namespace.  This mirrors
+    ``SubprocessRunner.nft_via_nsenter()`` in run.py.
+
+    Captures both stdout and stderr — some nft versions write errors to stdout.
+    """
+    if os.getuid() == 0:
+        # Already in NS_ROOTLESS (crun hook context): CAP_NET_ADMIN is available.
+        ns_cmd = [_find_nsenter(), "-n", "-t", pid, "--", *cmd]
+    else:
+        # In NS_INIT (shell): enter NS_ROOTLESS first via podman unshare.
+        ns_cmd = [_find_podman(), "unshare", _find_nsenter(), "-n", "-t", pid, "--", *cmd]
+    try:
+        result = subprocess.run(  # nosec B603
+            ns_cmd,
+            input=stdin,
+            text=True,
+            capture_output=True,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"nsenter command timed out after 30 s: cmd={cmd!r}")
+    if result.returncode != 0:
+        # Combine stdout and stderr — some nft versions write errors to stdout.
+        combined = (result.stderr + result.stdout).strip()
+        raise RuntimeError(
+            f"nsenter command failed (exit {result.returncode}) cmd={cmd!r}"
+            + (f":\n{combined}" if combined else " (no output)")
+        )
+
+
+# ── Gateway discovery ──────────────────────────────────
+
+
+def _read_gateway(pid: str) -> str:
+    """Read the default IPv4 gateway from the container's routing table.
+
+    Parses ``/proc/{pid}/net/route`` (the kernel routing table for the
+    container's network namespace).  Returns an empty string when no default
+    route is present (e.g. pasta mode) or when parsing fails — fail-closed:
+    the nft ruleset is still applied, gateway sets stay empty.
+    """
+    try:
+        for line in Path(f"/proc/{pid}/net/route").read_text().splitlines()[1:]:
+            fields = line.split()
+            if len(fields) >= 3 and fields[1] == "00000000":
+                gw = socket.inet_ntoa(struct.pack("=I", int(fields[2], 16)))
+                ipaddress.ip_address(gw)  # validate — raises ValueError if malformed
+                return gw
+    except (OSError, ValueError, struct.error):
+        pass
+    return ""
+
+
+def _read_gateway_v6(pid: str) -> str:
+    """Read the default IPv6 gateway from the container's routing table.
+
+    Parses ``/proc/{pid}/net/ipv6_route``.  Each line has 10 space-separated
+    hex fields; the default route has dest_net=32 zeros and prefix_len=00.
+    The nexthop (field index 4) is a 128-bit address stored as 32 hex chars.
+    Returns an empty string when no default route is present or parsing fails.
+    """
+    try:
+        for line in Path(f"/proc/{pid}/net/ipv6_route").read_text().splitlines():
+            fields = line.split()
+            if len(fields) >= 5 and fields[0] == "0" * 32 and fields[1] == "00":
+                addr = ipaddress.IPv6Address(bytes.fromhex(fields[4]))
+                if not addr.is_unspecified:
+                    return addr.compressed
+    except (OSError, ValueError):
+        pass
+    return ""
+
+
+# ── Process identity ───────────────────────────────────
+
+
+def _is_our_dnsmasq(pid_int: int, conf_path: Path) -> bool:
+    """Return True if pid_int is a dnsmasq process using our conf file.
+
+    Parses ``/proc/{pid}/cmdline`` as a NUL-separated argv vector.
+    Requires argv[0] to be the dnsmasq binary (exact name or absolute path)
+    and ``--conf-file=<our-conf>`` to be present as a separate argument.
+    Mirrors ``terok_shield.dnsmasq._is_our_dnsmasq()`` without any imports.
+    """
+    conf_arg = b"--conf-file=" + str(conf_path).encode()
+    try:
+        raw = Path(f"/proc/{pid_int}/cmdline").read_bytes()
+    except OSError:
+        return False
+    args = raw.rstrip(b"\x00").split(b"\x00")
+    if not args:
+        return False
+    exe = args[0]
+    return (exe == b"dnsmasq" or exe.endswith(b"/dnsmasq")) and conf_arg in args
+
+
+# ── Environment bootstrap ─────────────────────────────
+
+
+def _bootstrap_env() -> None:
+    """Ensure critical environment variables are set before running podman unshare.
+
+    OCI hooks (crun/runc) may be invoked with a stripped environment — no HOME,
+    no XDG_RUNTIME_DIR, and sometimes no PATH.  ``podman unshare`` reads
+    ``/etc/subuid``, ``~/.config/containers/``, and the rootless podman socket
+    via these variables.  Without them it exits 1 silently.
+
+    Only sets variables that are absent; never overrides values the runtime did
+    pass through.
+    """
+    uid = os.getuid()
+
+    if not os.environ.get("HOME"):
+        try:
+            home = pwd.getpwuid(uid).pw_dir
+        except KeyError:
+            home = "/root" if uid == 0 else f"/home/{uid}"
+        os.environ["HOME"] = home
+
+    if not os.environ.get("XDG_RUNTIME_DIR"):
+        os.environ["XDG_RUNTIME_DIR"] = f"/run/user/{uid}"
+
+    if not os.environ.get("PATH"):
+        os.environ["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+
+# ── Binary finders ─────────────────────────────────────
+
+
+def _find_podman() -> str:
+    """Return the path to the podman binary, falling back to /usr/bin/podman."""
+    return shutil.which("podman") or "/usr/bin/podman"
+
+
+def _find_nsenter() -> str:
+    """Return the path to the nsenter binary, falling back to /usr/bin/nsenter."""
+    return shutil.which("nsenter") or "/usr/bin/nsenter"
+
+
+def _find_nft() -> str:
+    """Return the path to the nft binary, falling back to /usr/sbin/nft."""
+    return shutil.which("nft") or "/usr/sbin/nft"
+
+
+def _find_dnsmasq() -> str:
+    """Return the path to the dnsmasq binary, falling back to /usr/sbin/dnsmasq."""
+    return shutil.which("dnsmasq") or "/usr/sbin/dnsmasq"
+
+
+# ── Logging ────────────────────────────────────────────
+
+
+def _log(msg: str, log_path: Path | None = None) -> None:
+    """Write *msg* to stderr and to a persistent log file (best-effort).
+
+    The OCI runtime (crun/runc) typically swallows hook stderr.  Writing to a
+    file in the state directory (or /tmp as fallback) makes errors visible.
+    """
+    print(msg, file=sys.stderr)
+    path = log_path or Path("/tmp/terok-hook-error.log")  # nosec B108
+    try:
+        with path.open("a") as f:
+            f.write(f"{msg}\n")
+    except OSError:
+        pass
 
 
 if __name__ == "__main__":  # pragma: no cover

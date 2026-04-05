@@ -62,28 +62,6 @@ _SOCK_EE_FMT = "@IBBBxII"
 _SOCK_EE_SIZE = struct.calcsize(_SOCK_EE_FMT)
 
 
-def _parse_icmp_error(ancdata: list) -> dict | None:
-    """Extract ICMP error fields from recvmsg ancillary data, or return None."""
-    for cmsg_level, cmsg_type, cmsg_data in ancdata:
-        if cmsg_level != _SOL_IP or cmsg_type != _IP_RECVERR:
-            continue
-        if len(cmsg_data) < _SOCK_EE_SIZE:
-            continue
-        ee_errno, ee_origin, ee_type, ee_code, _, _ = struct.unpack(
-            _SOCK_EE_FMT, cmsg_data[:_SOCK_EE_SIZE]
-        )
-        if ee_origin != _SO_EE_ORIGIN_ICMP:
-            continue
-        return {
-            "result": "icmp-error",
-            "icmp_type": ee_type,
-            "icmp_code": ee_code,
-            "icmp_code_name": _ICMP_UNREACH_CODES.get(ee_code, f"code-{ee_code}"),
-            "errno": ee_errno,
-        }
-    return None
-
-
 def probe(host: str, port: int = 443, timeout: float = 3.0) -> dict:
     """Probe *host*:*port* and return a result dict.
 
@@ -158,6 +136,31 @@ def main() -> int:
 
     print(json.dumps(result))
     return 0
+
+
+# ── Private helpers ────────────────────────────────────
+
+
+def _parse_icmp_error(ancdata: list) -> dict | None:
+    """Extract ICMP error fields from recvmsg ancillary data, or return None."""
+    for cmsg_level, cmsg_type, cmsg_data in ancdata:
+        if cmsg_level != _SOL_IP or cmsg_type != _IP_RECVERR:
+            continue
+        if len(cmsg_data) < _SOCK_EE_SIZE:
+            continue
+        ee_errno, ee_origin, ee_type, ee_code, _, _ = struct.unpack(
+            _SOCK_EE_FMT, cmsg_data[:_SOCK_EE_SIZE]
+        )
+        if ee_origin != _SO_EE_ORIGIN_ICMP:
+            continue
+        return {
+            "result": "icmp-error",
+            "icmp_type": ee_type,
+            "icmp_code": ee_code,
+            "icmp_code_name": _ICMP_UNREACH_CODES.get(ee_code, f"code-{ee_code}"),
+            "errno": ee_errno,
+        }
+    return None
 
 
 if __name__ == "__main__":
