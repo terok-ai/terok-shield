@@ -143,6 +143,8 @@ class ShieldBridge:
         """Per-container well-known bus name."""
         return bus_name_for_container(self.container_id)
 
+    # ── Lifecycle ────────────────────────────────────────
+
     async def start(self) -> None:
         """Spawn the interactive subprocess and begin the event relay loop.
 
@@ -183,64 +185,7 @@ class ShieldBridge:
             self._process.pid,
         )
 
-    async def stop(self) -> None:
-        """Terminate the subprocess and clean up resources.
-
-        Runs cleanup to completion even if the caller's task is
-        cancelled, then re-raises ``CancelledError``.
-        """
-        await self._cancel_read_task()
-        cancelled = await self._terminate_process()
-        self._unexport_bus()
-        logger.info("Bridge stopped for %s", self._container)
-        if cancelled:
-            raise asyncio.CancelledError
-
-    async def _cancel_read_task(self) -> None:
-        """Cancel the read-loop task and await its completion."""
-        if not self._read_task or self._read_task.done():
-            return
-        self._read_task.cancel()
-        try:
-            await self._read_task
-        except asyncio.CancelledError:  # NOSONAR(S5754) expected from cancel() above
-            pass
-
-    async def _terminate_process(self) -> bool:
-        """Terminate the subprocess, escalating to kill on timeout.
-
-        Returns ``True`` if a ``CancelledError`` was caught during
-        the wait (external cancellation of ``stop()``).
-        """
-        if not self._process or self._process.returncode is not None:
-            return False
-        try:
-            self._process.terminate()
-        except ProcessLookupError:
-            logger.debug("Subprocess already exited before terminate")
-            return False
-        try:
-            await asyncio.wait_for(self._process.wait(), timeout=5.0)
-        except asyncio.CancelledError:  # NOSONAR(S5754) re-raised by stop() via flag
-            return True
-        except TimeoutError:
-            try:
-                self._process.kill()
-            except ProcessLookupError:
-                logger.debug("Subprocess already exited before kill")
-            else:
-                try:
-                    await self._process.wait()
-                except asyncio.CancelledError:  # NOSONAR(S5754) re-raised by stop()
-                    return True
-        return False
-
-    def _unexport_bus(self) -> None:
-        """Remove the Shield1 interface from the bus."""
-        try:
-            self._bus.unexport(SHIELD_OBJECT_PATH, self._interface)
-        except Exception:
-            logger.debug("Unexport failed during stop", exc_info=True)
+    # ── Event relay ──────────────────────────────────────
 
     async def submit_verdict(self, request_id: str, action: str) -> bool:
         """Write a verdict command to the subprocess stdin.
@@ -334,3 +279,64 @@ class ShieldBridge:
             )
         else:
             logger.debug("Ignoring unknown event type: %s", event_type)
+
+    # ── Shutdown ─────────────────────────────────────────
+
+    async def stop(self) -> None:
+        """Terminate the subprocess and clean up resources.
+
+        Runs cleanup to completion even if the caller's task is
+        cancelled, then re-raises ``CancelledError``.
+        """
+        await self._cancel_read_task()
+        cancelled = await self._terminate_process()
+        self._unexport_bus()
+        logger.info("Bridge stopped for %s", self._container)
+        if cancelled:
+            raise asyncio.CancelledError
+
+    async def _cancel_read_task(self) -> None:
+        """Cancel the read-loop task and await its completion."""
+        if not self._read_task or self._read_task.done():
+            return
+        self._read_task.cancel()
+        try:
+            await self._read_task
+        except asyncio.CancelledError:  # NOSONAR(S5754) expected from cancel() above
+            pass
+
+    async def _terminate_process(self) -> bool:
+        """Terminate the subprocess, escalating to kill on timeout.
+
+        Returns ``True`` if a ``CancelledError`` was caught during
+        the wait (external cancellation of ``stop()``).
+        """
+        if not self._process or self._process.returncode is not None:
+            return False
+        try:
+            self._process.terminate()
+        except ProcessLookupError:
+            logger.debug("Subprocess already exited before terminate")
+            return False
+        try:
+            await asyncio.wait_for(self._process.wait(), timeout=5.0)
+        except asyncio.CancelledError:  # NOSONAR(S5754) re-raised by stop() via flag
+            return True
+        except TimeoutError:
+            try:
+                self._process.kill()
+            except ProcessLookupError:
+                logger.debug("Subprocess already exited before kill")
+            else:
+                try:
+                    await self._process.wait()
+                except asyncio.CancelledError:  # NOSONAR(S5754) re-raised by stop()
+                    return True
+        return False
+
+    def _unexport_bus(self) -> None:
+        """Remove the Shield1 interface from the bus."""
+        try:
+            self._bus.unexport(SHIELD_OBJECT_PATH, self._interface)
+        except Exception:
+            logger.debug("Unexport failed during stop", exc_info=True)
