@@ -280,6 +280,60 @@ class HookMode:
             self._podman_info = parse_podman_info(output)
         return self._podman_info
 
+    # ── Live operations (domain) ───────────────────────
+
+    def allow_domain(self, domain: str) -> None:
+        """Add a domain to the dnsmasq config and signal reload.
+
+        Delegates to ``dnsmasq.add_domain()``, which persists the domain to
+        ``live.domains`` (not ``profile.domains``) and removes any matching
+        entry from ``denied.domains``.  When dnsmasq is running, a SIGHUP is
+        sent so the change takes effect immediately without a container restart.
+        These entries are runtime additions: they survive dnsmasq reloads but
+        are separate from the pre-start ``profile.domains`` list.
+
+        The IP-level allow (nft set update) is handled separately by
+        ``allow_ip()`` — this method is the domain-tracking counterpart
+        that ensures future IP rotations are also captured.
+
+        No-op when the container is not using the dnsmasq DNS tier (the
+        static IP-level allow already happened via ``allow_ip()``).
+        """
+        sd = self._config.state_dir.resolve()
+        if not _is_dnsmasq_tier(sd):
+            return
+        if not dnsmasq.add_domain(sd, domain):
+            return  # already present
+        self._reload_dnsmasq(sd)
+
+    def deny_domain(self, domain: str) -> None:
+        """Remove a domain from the dnsmasq config and signal reload.
+
+        Counterpart of ``allow_domain()``.  Removes the domain so dnsmasq
+        stops auto-populating nft sets for it on future DNS queries.
+
+        No-op when the container is not using the dnsmasq DNS tier.
+        """
+        sd = self._config.state_dir.resolve()
+        if not _is_dnsmasq_tier(sd):
+            return
+        if not dnsmasq.remove_domain(sd, domain):
+            return  # not present
+        self._reload_dnsmasq(sd)
+
+    def _reload_dnsmasq(self, state_dir: Path) -> None:
+        """Regenerate dnsmasq config and send SIGHUP.
+
+        No-op if dnsmasq is not running (PID file absent).
+        Raises RuntimeError if dnsmasq is dead (stale PID).
+        """
+        upstream = self._read_upstream_dns()
+        if not upstream:
+            raise RuntimeError("Cannot reload dnsmasq: upstream DNS not persisted in state")
+
+        domains = dnsmasq.read_merged_domains(state_dir)
+        dnsmasq.reload(state_dir, upstream, domains)
+
     # ── Live operations (IP) ────────────────────────────
 
     def allow_ip(self, container: str, ip: str) -> None:
@@ -395,60 +449,6 @@ class HookMode:
                     self._runner.nft_via_nsenter(container, *parts)
                 except ExecError:
                     pass
-
-    # ── Live operations (domain) ────────────────────────
-
-    def allow_domain(self, domain: str) -> None:
-        """Add a domain to the dnsmasq config and signal reload.
-
-        Delegates to ``dnsmasq.add_domain()``, which persists the domain to
-        ``live.domains`` (not ``profile.domains``) and removes any matching
-        entry from ``denied.domains``.  When dnsmasq is running, a SIGHUP is
-        sent so the change takes effect immediately without a container restart.
-        These entries are runtime additions: they survive dnsmasq reloads but
-        are separate from the pre-start ``profile.domains`` list.
-
-        The IP-level allow (nft set update) is handled separately by
-        ``allow_ip()`` — this method is the domain-tracking counterpart
-        that ensures future IP rotations are also captured.
-
-        No-op when the container is not using the dnsmasq DNS tier (the
-        static IP-level allow already happened via ``allow_ip()``).
-        """
-        sd = self._config.state_dir.resolve()
-        if not _is_dnsmasq_tier(sd):
-            return
-        if not dnsmasq.add_domain(sd, domain):
-            return  # already present
-        self._reload_dnsmasq(sd)
-
-    def deny_domain(self, domain: str) -> None:
-        """Remove a domain from the dnsmasq config and signal reload.
-
-        Counterpart of ``allow_domain()``.  Removes the domain so dnsmasq
-        stops auto-populating nft sets for it on future DNS queries.
-
-        No-op when the container is not using the dnsmasq DNS tier.
-        """
-        sd = self._config.state_dir.resolve()
-        if not _is_dnsmasq_tier(sd):
-            return
-        if not dnsmasq.remove_domain(sd, domain):
-            return  # not present
-        self._reload_dnsmasq(sd)
-
-    def _reload_dnsmasq(self, state_dir: Path) -> None:
-        """Regenerate dnsmasq config and send SIGHUP.
-
-        No-op if dnsmasq is not running (PID file absent).
-        Raises RuntimeError if dnsmasq is dead (stale PID).
-        """
-        upstream = self._read_upstream_dns()
-        if not upstream:
-            raise RuntimeError("Cannot reload dnsmasq: upstream DNS not persisted in state")
-
-        domains = dnsmasq.read_merged_domains(state_dir)
-        dnsmasq.reload(state_dir, upstream, domains)
 
     # ── State transitions ───────────────────────────────
 
