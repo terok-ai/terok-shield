@@ -31,11 +31,6 @@ from .nft_constants import (
 _SAFE_TIMEOUT_RE = re.compile(r"^\d+[smhd]$")
 _SAFE_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
-_ALLOW_V4 = "allow_v4"
-_ALLOW_V6 = "allow_v6"
-_DENY_V4 = "deny_v4"
-_DENY_V6 = "deny_v6"
-
 
 # ── RulesetBuilder ──────────────────────────────────────
 
@@ -303,10 +298,10 @@ def add_elements_dual(ips: list[str], *, permanent: bool = False) -> str:
             continue
         (v4 if _is_v4(sanitized) else v6).append(sanitized)
     parts: list[str] = []
-    cmd = add_elements(_ALLOW_V4, v4, timeout_zero=permanent)
+    cmd = add_elements("allow_v4", v4, timeout_zero=permanent)
     if cmd:
         parts.append(cmd)
-    cmd = add_elements(_ALLOW_V6, v6, timeout_zero=permanent)
+    cmd = add_elements("allow_v6", v6, timeout_zero=permanent)
     if cmd:
         parts.append(cmd)
     return "".join(parts)
@@ -327,10 +322,10 @@ def add_deny_elements_dual(ips: list[str]) -> str:
             continue
         (v4 if _is_v4(sanitized) else v6).append(sanitized)
     parts: list[str] = []
-    cmd = add_elements(_DENY_V4, v4)
+    cmd = add_elements("deny_v4", v4)
     if cmd:
         parts.append(cmd)
-    cmd = add_elements(_DENY_V6, v6)
+    cmd = add_elements("deny_v6", v6)
     if cmd:
         parts.append(cmd)
     return "".join(parts)
@@ -353,10 +348,10 @@ def delete_deny_elements_dual(ips: list[str]) -> str:
     parts: list[str] = []
     if v4:
         elements = ", ".join(v4)
-        parts.append(f"delete element {NFT_TABLE} {_DENY_V4} {{ {elements} }}\n")
+        parts.append(f"delete element {NFT_TABLE} deny_v4 {{ {elements} }}\n")
     if v6:
         elements = ", ".join(v6)
-        parts.append(f"delete element {NFT_TABLE} {_DENY_V6} {{ {elements} }}\n")
+        parts.append(f"delete element {NFT_TABLE} deny_v6 {{ {elements} }}\n")
     return "".join(parts)
 
 
