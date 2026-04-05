@@ -24,10 +24,11 @@ _HOOK_STAGES = ("createRuntime", "poststop")
 
 
 def install_hooks(*, hook_entrypoint: Path, hooks_dir: Path) -> None:
-    """Install OCI hooks for a single container's state bundle.
+    """Write OCI hook entrypoint and JSON descriptors to a given directory.
 
-    Called by ``HookMode.pre_start()`` to write the entrypoint and
-    hook JSONs into the per-container state directory.
+    Currently only used for global hooks (user or root) because podman
+    does not fire per-container hooks on ``podman start`` — only on
+    ``podman run``.  The per-container path is kept for near-future use.
 
     Args:
         hook_entrypoint: Where to write the entrypoint script.
