@@ -30,10 +30,12 @@ _SYSTEM_CONF_PATHS = (
 )
 
 # Minimum podman version where --hooks-dir persists on restart.
-# Ref: containers/podman#17935 — originally gated at (5, 6, 0) but
-# podman 5.8.0 still drops per-container --hooks-dir on stop/start
-# (issue #121, #122).  Set to (99, 0, 0) to effectively disable
-# per-container hooks until podman reliably persists them.
+# WORKAROUND(hooks-dir-persist): podman drops per-container --hooks-dir
+# on stop/start even on 5.8.0 (containers/podman#17935, #121, #122).
+# Originally gated at (5, 6, 0), set to (99, 0, 0) to effectively
+# disable per-container hooks until podman reliably persists them.
+# When lowered, per-container hooks become the default and global
+# hook installation is no longer required.
 HOOKS_DIR_PERSIST_VERSION = (99, 0, 0)
 
 # Hook JSON filename used to detect terok-shield global hooks.

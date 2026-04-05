@@ -81,6 +81,20 @@ make spdx NAME="Real Human Name" FILES="src/terok_shield/new_file.py"  # Add SPD
     # SPDX-License-Identifier: Apache-2.0
     ```
   When modifying an existing file, always run `make spdx` with the contributor's name to add their copyright line. NAME must be a real person's name (ASCII-only), not a project name. Use a single year (year of first contribution), not a range. Ask the user for their name if unknown. Files covered by `REUSE.toml` glob patterns (`.md`, `.yml`, `.toml`, `.json`, etc.) do not need inline headers.
+- **Workaround markers**: When an external limitation (upstream bug, platform deficiency) forces the code into an unnatural shape, use `WORKAROUND(tag-name)` comments:
+  - **Canonical site** — full explanation with issue links and removal condition:
+    ```python
+    # WORKAROUND(hooks-dir-persist): podman drops per-container --hooks-dir
+    # on stop/start even on 5.8.0 (containers/podman#17935, #121, #122).
+    # ... full explanation and removal conditions ...
+    HOOKS_DIR_PERSIST_VERSION = (99, 0, 0)
+    ```
+  - **Impact sites** — brief one-line reference (no re-explanation):
+    ```python
+    # WORKAROUND(hooks-dir-persist): currently always takes the global path
+    if info.hooks_dir_persists:
+    ```
+  - `grep 'WORKAROUND(hooks-dir-persist)'` finds every affected site. One canonical explanation, distributed awareness.
 - **Documentation filenames**: Markdown files under `docs/` use `lowercase.md` naming (e.g. `getting_started.md`, `cli.md`, `modes.md`) to match the MkDocs `index.md` convention. Root-level project files (e.g. `README.md`, `AGENTS.md`) stay UPPERCASE per standard convention.
 
 ## Security Boundary

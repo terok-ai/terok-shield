@@ -26,9 +26,10 @@ _HOOK_STAGES = ("createRuntime", "poststop")
 def install_hooks(*, hook_entrypoint: Path, hooks_dir: Path) -> None:
     """Write OCI hook entrypoint and JSON descriptors to a given directory.
 
-    Currently only used for global hooks (user or root) because podman
-    does not fire per-container hooks on ``podman start`` — only on
-    ``podman run``.  The per-container path is kept for near-future use.
+    WORKAROUND(hooks-dir-persist): currently only used for global hooks
+    (user or root) because podman does not persist per-container
+    ``--hooks-dir`` across stop/start.  The per-container code path is
+    kept for near-future use.
 
     Args:
         hook_entrypoint: Where to write the entrypoint script.

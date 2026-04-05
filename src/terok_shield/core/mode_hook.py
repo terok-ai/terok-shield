@@ -4,13 +4,10 @@
 """Hook mode: OCI hooks + per-container netns.
 
 Uses OCI hooks to apply per-container nftables rules inside each
-container's network namespace.  No root required -- only podman and nft.
-The stdlib-only ``hook_entrypoint.py`` applies the pre-generated ruleset at
-container creation; this module handles DNS pre-resolution, live
+container's network namespace.  No root required — only podman and nft.
+The stdlib-only ``hook_entrypoint.py`` applies the pre-generated ruleset
+at container creation; this module handles DNS pre-resolution, live
 allow/deny, and shield lifecycle (up/down/state).
-
-Provides ``HookMode`` (Strategy pattern, implements ``ShieldModeBackend``).
-Hook file installation lives in :mod:`hook_install`.
 """
 
 import logging
@@ -67,69 +64,12 @@ if TYPE_CHECKING:
     from .run import CommandRunner
 
 
-# ── Private helpers ──────────────────────────────────────
-
-
-def _upstream_dns_for_mode(network_mode: str) -> str:
-    """Return the upstream DNS forwarder address for a network mode.
-
-    Raises ValueError for unrecognised modes so new modes (e.g. bridge)
-    get an explicit implementation rather than a silent wrong default.
-    """
-    if network_mode == "slirp4netns":
-        return SLIRP4NETNS_DNS
-    if network_mode == "pasta":
-        return PASTA_DNS
-    raise ValueError(
-        f"Cannot determine upstream DNS for network mode {network_mode!r}. "
-        "Add support for this mode in _upstream_dns_for_mode()."
-    )
-
-
-def _split_domains_ips(entries: list[str]) -> tuple[list[str], list[str]]:
-    """Split profile entries into (domains, raw_ips).
-
-    Domains are forwarded to dnsmasq for runtime resolution via ``--nftset``.
-    Raw IPs are resolved/cached as before and loaded into nft sets at hook time.
-    """
-    domains: list[str] = []
-    raw_ips: list[str] = []
-    for entry in entries:
-        if _is_ip(entry):
-            raw_ips.append(entry)
-        else:
-            domains.append(entry)
-    return domains, raw_ips
-
-
-def _is_dnsmasq_tier(state_dir: Path) -> bool:
-    """Return True when the container's DNS tier is dnsmasq (or unknown).
-
-    ``allow_domain`` / ``deny_domain`` are dnsmasq-specific enhancements
-    (future IP rotation tracking via ``--nftset``).  On dig/getent tiers
-    the static IP-level allow/deny in ``allow_ip``/``deny_ip`` already ran;
-    the domain-tracking step is simply not available and callers skip it.
-
-    Returns True when ``dns_tier_path`` is absent (pre_start not yet run —
-    pass-through so the caller can still attempt the dnsmasq operation).
-    """
-    tier_path = state.dns_tier_path(state_dir)
-    if not tier_path.is_file():
-        return True
-    return tier_path.read_text().strip() == DnsTier.DNSMASQ.value
-
-
-# ── HookMode (Strategy) ─────────────────────────────────
-
-
 class HookMode:
-    """Strategy: hook-mode shield backend (implements ``ShieldModeBackend``).
+    """Hook-mode shield backend (Strategy, implements ``ShieldModeBackend``).
 
     Manages the full lifecycle of OCI-hook-based container firewalling:
-    pre-start DNS resolution (including hook installation), live
-    allow/deny, bypass, and ruleset preview.  Collaborates with
-    ``RulesetBuilder``, ``CommandRunner``, ``AuditLogger``,
-    ``DnsResolver``, and ``ProfileLoader`` via constructor injection.
+    pre-start DNS resolution and hook installation, live allow/deny,
+    bypass (down/up), and ruleset preview.
     """
 
     def __init__(
@@ -159,6 +99,100 @@ class HookMode:
         self._profiles = profiles
         self._ruleset = ruleset
         self._podman_info: PodmanInfo | None = None
+
+    # ── Setup (pre_start) ───────────────────────────────
+
+    def pre_start(self, container: str, profiles: list[str]) -> list[str]:
+        """Prepare for container start in hook mode.
+
+        Installs hooks, composes profiles, resolves DNS, writes
+        allowlist, detects DNS tier, sets annotations, and returns
+        the podman CLI arguments needed for shield protection.
+
+        Raises:
+            ShieldNeedsSetup: When global hooks are not installed
+                (see ``WORKAROUND(hooks-dir-persist)``).
+        """
+        sd = self._config.state_dir.resolve()
+        info = self._get_podman_info()
+        interactive = self._config.interactive
+
+        # Ensure state dirs and install hooks (idempotent)
+        state.ensure_state_dirs(sd)
+        install_hooks(
+            hook_entrypoint=state.hook_entrypoint(sd),
+            hooks_dir=state.hooks_dir(sd),
+        )
+
+        # Detect DNS tier and upstream DNS
+        tier = self._detect_dns_tier()
+        mode = info.network_mode or "pasta"
+        upstream_dns = _upstream_dns_for_mode(mode)
+
+        # Resolve DNS, write allowlists, generate ruleset + dnsmasq config
+        entries = self._profiles.compose_profiles(profiles)
+        self._resolve_and_write_allowlists(sd, tier, entries)
+        state.upstream_dns_path(sd).write_text(f"{upstream_dns}\n")
+        state.dns_tier_path(sd).write_text(f"{tier.value}\n")
+        self._write_ruleset(sd, tier, upstream_dns)
+        self._write_dnsmasq_config_or_scrub(sd, tier, upstream_dns)
+
+        # Build podman args
+        args = self._build_network_args(mode)
+
+        # Redirect container DNS through per-container dnsmasq via volume mount.
+        # See commit history for detailed rationale on why --dns cannot be used.
+        if tier == DnsTier.DNSMASQ:
+            args += ["--volume", f"{state.resolv_conf_path(sd)}:/etc/resolv.conf:ro,Z"]
+
+        # Annotations: profiles, name, state_dir, loopback_ports, version, dns
+        ports_str = ",".join(str(p) for p in self._config.loopback_ports)
+        args += [
+            "--annotation",
+            f"{ANNOTATION_KEY}={','.join(profiles)}",
+            "--annotation",
+            f"{ANNOTATION_NAME_KEY}={container}",
+            "--annotation",
+            f"{ANNOTATION_STATE_DIR_KEY}={sd}",
+            "--annotation",
+            f"{ANNOTATION_LOOPBACK_PORTS_KEY}={ports_str}",
+            "--annotation",
+            f"{ANNOTATION_VERSION_KEY}={state.BUNDLE_VERSION}",
+            "--annotation",
+            f"{ANNOTATION_AUDIT_ENABLED_KEY}={str(self._config.audit_enabled).lower()}",
+            "--annotation",
+            f"{ANNOTATION_UPSTREAM_DNS_KEY}={upstream_dns}",
+            "--annotation",
+            f"{ANNOTATION_DNS_TIER_KEY}={tier.value}",
+            "--annotation",
+            f"{ANNOTATION_INTERACTIVE_KEY}={str(interactive).lower()}",
+        ]
+
+        # WORKAROUND(hooks-dir-persist): currently always takes the global path
+        if info.hooks_dir_persists:
+            args += ["--hooks-dir", str(state.hooks_dir(sd))]
+        elif has_global_hooks():
+            self._audit.log_event(
+                container,
+                "setup",
+                detail=(
+                    f"podman {'.'.join(str(v) for v in info.version)}: "
+                    "using global hooks dir (--hooks-dir does not persist on restart)"
+                ),
+            )
+        else:
+            raise ShieldNeedsSetup(
+                f"Podman {'.'.join(str(v) for v in info.version)} detected.\n\n"
+                + global_hooks_hint()
+            )
+
+        args += [
+            "--cap-drop",
+            "NET_ADMIN",
+            "--cap-drop",
+            "NET_RAW",
+        ]
+        return args
 
     def _resolve_and_write_allowlists(self, sd: Path, tier: DnsTier, entries: list[str]) -> None:
         """Resolve profile entries and write allowlist files for the detected tier."""
@@ -236,104 +270,8 @@ class HookMode:
             f"host.containers.internal:{PASTA_HOST_LOOPBACK_MAP}",
         ]
 
-    def pre_start(self, container: str, profiles: list[str]) -> list[str]:
-        """Prepare for container start in hook mode.
-
-        Installs hooks (idempotent), composes profiles, resolves DNS
-        domains, writes allowlist, detects DNS tier, sets annotations,
-        and returns the podman CLI arguments needed for shield protection.
-
-        Raises:
-            ShieldNeedsSetup: On podman < 5.6.0 without global hooks.
-        """
-        sd = self._config.state_dir.resolve()
-        info = self._get_podman_info()
-        interactive = self._config.interactive
-
-        # Ensure state dirs and install hooks (idempotent)
-        state.ensure_state_dirs(sd)
-        install_hooks(
-            hook_entrypoint=state.hook_entrypoint(sd),
-            hooks_dir=state.hooks_dir(sd),
-        )
-
-        # Detect DNS tier and upstream DNS
-        tier = self._detect_dns_tier()
-        mode = info.network_mode or "pasta"
-        upstream_dns = _upstream_dns_for_mode(mode)
-
-        # Resolve DNS, write allowlists, generate ruleset + dnsmasq config
-        entries = self._profiles.compose_profiles(profiles)
-        self._resolve_and_write_allowlists(sd, tier, entries)
-        state.upstream_dns_path(sd).write_text(f"{upstream_dns}\n")
-        state.dns_tier_path(sd).write_text(f"{tier.value}\n")
-        self._write_ruleset(sd, tier, upstream_dns)
-        self._write_dnsmasq_config_or_scrub(sd, tier, upstream_dns)
-
-        # Build podman args
-        args = self._build_network_args(mode)
-
-        # Redirect container DNS through per-container dnsmasq via volume mount.
-        # See commit history for detailed rationale on why --dns cannot be used.
-        if tier == DnsTier.DNSMASQ:
-            args += ["--volume", f"{state.resolv_conf_path(sd)}:/etc/resolv.conf:ro,Z"]
-
-        # Annotations: profiles, name, state_dir, loopback_ports, version, dns
-        ports_str = ",".join(str(p) for p in self._config.loopback_ports)
-        args += [
-            "--annotation",
-            f"{ANNOTATION_KEY}={','.join(profiles)}",
-            "--annotation",
-            f"{ANNOTATION_NAME_KEY}={container}",
-            "--annotation",
-            f"{ANNOTATION_STATE_DIR_KEY}={sd}",
-            "--annotation",
-            f"{ANNOTATION_LOOPBACK_PORTS_KEY}={ports_str}",
-            "--annotation",
-            f"{ANNOTATION_VERSION_KEY}={state.BUNDLE_VERSION}",
-            "--annotation",
-            f"{ANNOTATION_AUDIT_ENABLED_KEY}={str(self._config.audit_enabled).lower()}",
-            "--annotation",
-            f"{ANNOTATION_UPSTREAM_DNS_KEY}={upstream_dns}",
-            "--annotation",
-            f"{ANNOTATION_DNS_TIER_KEY}={tier.value}",
-            "--annotation",
-            f"{ANNOTATION_INTERACTIVE_KEY}={str(interactive).lower()}",
-        ]
-
-        # Hooks dir: per-container on modern podman, global on old podman
-        if info.hooks_dir_persists:
-            args += ["--hooks-dir", str(state.hooks_dir(sd))]
-        elif has_global_hooks():
-            self._audit.log_event(
-                container,
-                "setup",
-                detail=(
-                    f"podman {'.'.join(str(v) for v in info.version)}: "
-                    "using global hooks dir (--hooks-dir does not persist on restart)"
-                ),
-            )
-        else:
-            raise ShieldNeedsSetup(
-                f"Podman {'.'.join(str(v) for v in info.version)} detected.\n\n"
-                + global_hooks_hint()
-            )
-
-        args += [
-            "--cap-drop",
-            "NET_ADMIN",
-            "--cap-drop",
-            "NET_RAW",
-        ]
-        return args
-
     def _detect_dns_tier(self) -> DnsTier:
-        """Detect the best available DNS resolution tier.
-
-        Delegates to the shared :func:`detect_dns_tier` helper.
-        Probes the installed dnsmasq for ``--nftset`` support before
-        selecting the dnsmasq tier.
-        """
+        """Detect the best available DNS resolution tier."""
         return detect_dns_tier(self._runner.has, lambda: dnsmasq.has_nftset_support(self._runner))
 
     def _get_podman_info(self) -> PodmanInfo:
@@ -343,23 +281,61 @@ class HookMode:
             self._podman_info = parse_podman_info(output)
         return self._podman_info
 
-    def _set_for_ip(self, ip: str) -> str:
-        """Return the nft set name for an IP address."""
-        return "allow_v4" if is_ipv4(ip) else "allow_v6"
+    # ── Live operations (domain) ───────────────────────
 
-    def _live_path(self) -> Path:
-        """Return the resolved path to live.allowed (prevents path traversal)."""
-        return state.live_allowed_path(self._config.state_dir).resolve()
+    def allow_domain(self, domain: str) -> None:
+        """Add a domain to the dnsmasq config and signal reload.
 
-    def _nft_apply_best_effort(self, container: str, nft_cmd: str) -> None:
-        """Run multi-line nft commands via nsenter, swallowing errors."""
-        for line in nft_cmd.strip().splitlines():
-            parts = line.strip().split()
-            if parts:
-                try:
-                    self._runner.nft_via_nsenter(container, *parts)
-                except ExecError:
-                    pass
+        Delegates to ``dnsmasq.add_domain()``, which persists the domain to
+        ``live.domains`` (not ``profile.domains``) and removes any matching
+        entry from ``denied.domains``.  When dnsmasq is running, a SIGHUP is
+        sent so the change takes effect immediately without a container restart.
+        These entries are runtime additions: they survive dnsmasq reloads but
+        are separate from the pre-start ``profile.domains`` list.
+
+        The IP-level allow (nft set update) is handled separately by
+        ``allow_ip()`` — this method is the domain-tracking counterpart
+        that ensures future IP rotations are also captured.
+
+        No-op when the container is not using the dnsmasq DNS tier (the
+        static IP-level allow already happened via ``allow_ip()``).
+        """
+        sd = self._config.state_dir.resolve()
+        if not _is_dnsmasq_tier(sd):
+            return
+        if not dnsmasq.add_domain(sd, domain):
+            return  # already present
+        self._reload_dnsmasq(sd)
+
+    def deny_domain(self, domain: str) -> None:
+        """Remove a domain from the dnsmasq config and signal reload.
+
+        Counterpart of ``allow_domain()``.  Removes the domain so dnsmasq
+        stops auto-populating nft sets for it on future DNS queries.
+
+        No-op when the container is not using the dnsmasq DNS tier.
+        """
+        sd = self._config.state_dir.resolve()
+        if not _is_dnsmasq_tier(sd):
+            return
+        if not dnsmasq.remove_domain(sd, domain):
+            return  # not present
+        self._reload_dnsmasq(sd)
+
+    def _reload_dnsmasq(self, state_dir: Path) -> None:
+        """Regenerate dnsmasq config and send SIGHUP.
+
+        No-op if dnsmasq is not running (PID file absent).
+        Raises RuntimeError if dnsmasq is dead (stale PID).
+        """
+        upstream = self._read_upstream_dns()
+        if not upstream:
+            raise RuntimeError("Cannot reload dnsmasq: upstream DNS not persisted in state")
+
+        domains = dnsmasq.read_merged_domains(state_dir)
+        dnsmasq.reload(state_dir, upstream, domains)
+
+    # ── Live operations (IP) ────────────────────────────
 
     def allow_ip(self, container: str, ip: str) -> None:
         """Live-allow an IP for a running container via nsenter."""
@@ -457,128 +433,25 @@ class HookMode:
                 with dp.open("a") as f:
                     f.write(f"{ip}\n")
 
-    def allow_domain(self, domain: str) -> None:
-        """Add a domain to the dnsmasq config and signal reload.
+    def _set_for_ip(self, ip: str) -> str:
+        """Return the nft set name for an IP address."""
+        return "allow_v4" if is_ipv4(ip) else "allow_v6"
 
-        Delegates to ``dnsmasq.add_domain()``, which persists the domain to
-        ``live.domains`` (not ``profile.domains``) and removes any matching
-        entry from ``denied.domains``.  When dnsmasq is running, a SIGHUP is
-        sent so the change takes effect immediately without a container restart.
-        These entries are runtime additions: they survive dnsmasq reloads but
-        are separate from the pre-start ``profile.domains`` list.
+    def _live_path(self) -> Path:
+        """Return the resolved path to live.allowed (prevents path traversal)."""
+        return state.live_allowed_path(self._config.state_dir).resolve()
 
-        The IP-level allow (nft set update) is handled separately by
-        ``allow_ip()`` — this method is the domain-tracking counterpart
-        that ensures future IP rotations are also captured.
+    def _nft_apply_best_effort(self, container: str, nft_cmd: str) -> None:
+        """Run multi-line nft commands via nsenter, swallowing errors."""
+        for line in nft_cmd.strip().splitlines():
+            parts = line.strip().split()
+            if parts:
+                try:
+                    self._runner.nft_via_nsenter(container, *parts)
+                except ExecError:
+                    pass
 
-        No-op when the container is not using the dnsmasq DNS tier (the
-        static IP-level allow already happened via ``allow_ip()``).
-        """
-        sd = self._config.state_dir.resolve()
-        if not _is_dnsmasq_tier(sd):
-            return
-        if not dnsmasq.add_domain(sd, domain):
-            return  # already present
-        self._reload_dnsmasq(sd)
-
-    def deny_domain(self, domain: str) -> None:
-        """Remove a domain from the dnsmasq config and signal reload.
-
-        Counterpart of ``allow_domain()``.  Removes the domain so dnsmasq
-        stops auto-populating nft sets for it on future DNS queries.
-
-        No-op when the container is not using the dnsmasq DNS tier.
-        """
-        sd = self._config.state_dir.resolve()
-        if not _is_dnsmasq_tier(sd):
-            return
-        if not dnsmasq.remove_domain(sd, domain):
-            return  # not present
-        self._reload_dnsmasq(sd)
-
-    def _reload_dnsmasq(self, state_dir: Path) -> None:
-        """Regenerate dnsmasq config and send SIGHUP.
-
-        No-op if dnsmasq is not running (PID file absent).
-        Raises RuntimeError if dnsmasq is dead (stale PID).
-        """
-        upstream = self._read_upstream_dns()
-        if not upstream:
-            raise RuntimeError("Cannot reload dnsmasq: upstream DNS not persisted in state")
-
-        domains = dnsmasq.read_merged_domains(state_dir)
-        dnsmasq.reload(state_dir, upstream, domains)
-
-    def list_rules(self, container: str) -> str:
-        """List current nft rules for a running container."""
-        try:
-            return self._runner.nft_via_nsenter(
-                container,
-                "list",
-                "table",
-                "inet",
-                "terok_shield",
-                check=False,
-            )
-        except ExecError:
-            return ""
-
-    def _read_container_dns(self, container: str) -> str:
-        """Read DNS nameserver from a running container's resolv.conf.
-
-        Uses ``/proc/{pid}/root/etc/resolv.conf`` via ``podman unshare``
-        to access the container's rootfs without entering its mount
-        namespace (avoids requiring ``cat`` inside the container).
-        """
-        pid = self._runner.podman_inspect(container, "{{.State.Pid}}")
-        output = self._runner.run(
-            ["podman", "unshare", "cat", f"/proc/{pid}/root/etc/resolv.conf"],
-            check=False,
-        )
-        dns = parse_resolv_conf(output)
-        if not dns:
-            raise RuntimeError(
-                f"Cannot determine DNS for container {container}: no nameserver in resolv.conf"
-            )
-        return dns
-
-    def _read_upstream_dns(self) -> str | None:
-        """Read persisted upstream DNS from state (written by the OCI hook).
-
-        Returns None if the file is absent (pre-dnsmasq container or
-        container started before this feature).
-        """
-        sd = self._config.state_dir.resolve()
-        path = state.upstream_dns_path(sd)
-        if not path.is_file():
-            return None
-        value = path.read_text().strip()
-        return value or None
-
-    def _container_ruleset(self, container: str) -> RulesetBuilder:
-        """Build a RulesetBuilder with the container's actual DNS settings.
-
-        Prefers persisted upstream DNS (from pre_start) over resolv.conf,
-        because dnsmasq mode rewrites resolv.conf to ``127.0.0.1``.
-        Reads persisted DNS tier to set nft element timeouts for dnsmasq mode.
-        """
-        upstream = self._read_upstream_dns()
-        dns = upstream if upstream else self._read_container_dns(container)
-
-        # Read persisted DNS tier to determine if set timeouts are needed
-        sd = self._config.state_dir.resolve()
-        tier_path = state.dns_tier_path(sd)
-        set_timeout = ""
-        if tier_path.is_file():
-            tier_str = tier_path.read_text().strip()
-            if tier_str == DnsTier.DNSMASQ.value:
-                set_timeout = NFT_SET_TIMEOUT_DNSMASQ
-
-        return RulesetBuilder(
-            dns=dns,
-            loopback_ports=self._config.loopback_ports,
-            set_timeout=set_timeout,
-        )
+    # ── State transitions ───────────────────────────────
 
     def shield_down(self, container: str, *, allow_all: bool = False) -> None:
         """Switch a running container to bypass mode."""
@@ -646,6 +519,64 @@ class HookMode:
         if errors:
             raise RuntimeError(f"Ruleset verification failed: {'; '.join(errors)}")
 
+    def _container_ruleset(self, container: str) -> RulesetBuilder:
+        """Build a RulesetBuilder with the container's actual DNS settings.
+
+        Prefers persisted upstream DNS (from pre_start) over resolv.conf,
+        because dnsmasq mode rewrites resolv.conf to ``127.0.0.1``.
+        """
+        upstream = self._read_upstream_dns()
+        dns = upstream if upstream else self._read_container_dns(container)
+
+        # Read persisted DNS tier to determine if set timeouts are needed
+        sd = self._config.state_dir.resolve()
+        tier_path = state.dns_tier_path(sd)
+        set_timeout = ""
+        if tier_path.is_file():
+            tier_str = tier_path.read_text().strip()
+            if tier_str == DnsTier.DNSMASQ.value:
+                set_timeout = NFT_SET_TIMEOUT_DNSMASQ
+
+        return RulesetBuilder(
+            dns=dns,
+            loopback_ports=self._config.loopback_ports,
+            set_timeout=set_timeout,
+        )
+
+    def _read_upstream_dns(self) -> str | None:
+        """Read persisted upstream DNS from state (written by pre_start).
+
+        Returns None if the file is absent (pre-dnsmasq container or
+        container started before this feature).
+        """
+        sd = self._config.state_dir.resolve()
+        path = state.upstream_dns_path(sd)
+        if not path.is_file():
+            return None
+        value = path.read_text().strip()
+        return value or None
+
+    def _read_container_dns(self, container: str) -> str:
+        """Read DNS nameserver from a running container's resolv.conf.
+
+        Uses ``/proc/{pid}/root/etc/resolv.conf`` via ``podman unshare``
+        to access the container's rootfs without entering its mount
+        namespace (avoids requiring ``cat`` inside the container).
+        """
+        pid = self._runner.podman_inspect(container, "{{.State.Pid}}")
+        output = self._runner.run(
+            ["podman", "unshare", "cat", f"/proc/{pid}/root/etc/resolv.conf"],
+            check=False,
+        )
+        dns = parse_resolv_conf(output)
+        if not dns:
+            raise RuntimeError(
+                f"Cannot determine DNS for container {container}: no nameserver in resolv.conf"
+            )
+        return dns
+
+    # ── Queries ─────────────────────────────────────────
+
     def shield_state(self, container: str) -> ShieldState:
         """Query the live nft ruleset to determine the container's shield state."""
         output = self.list_rules(container)
@@ -666,8 +597,74 @@ class HookMode:
 
         return ShieldState.ERROR
 
+    def list_rules(self, container: str) -> str:
+        """List current nft rules for a running container."""
+        try:
+            return self._runner.nft_via_nsenter(
+                container,
+                "list",
+                "table",
+                "inet",
+                "terok_shield",
+                check=False,
+            )
+        except ExecError:
+            return ""
+
     def preview(self, *, down: bool = False, allow_all: bool = False) -> str:
         """Generate the ruleset that would be applied to a container."""
         if down:
             return self._ruleset.build_bypass(allow_all=allow_all)
         return self._ruleset.build_hook(interactive=self._config.interactive)
+
+
+# ── Module-level helpers ────────────────────────────────
+
+
+def _upstream_dns_for_mode(network_mode: str) -> str:
+    """Return the upstream DNS forwarder address for a network mode.
+
+    Raises ValueError for unrecognised modes so new modes (e.g. bridge)
+    get an explicit implementation rather than a silent wrong default.
+    """
+    if network_mode == "slirp4netns":
+        return SLIRP4NETNS_DNS
+    if network_mode == "pasta":
+        return PASTA_DNS
+    raise ValueError(
+        f"Cannot determine upstream DNS for network mode {network_mode!r}. "
+        "Add support for this mode in _upstream_dns_for_mode()."
+    )
+
+
+def _split_domains_ips(entries: list[str]) -> tuple[list[str], list[str]]:
+    """Split profile entries into (domains, raw_ips).
+
+    Domains are forwarded to dnsmasq for runtime resolution via ``--nftset``.
+    Raw IPs are resolved/cached as before and loaded into nft sets at hook time.
+    """
+    domains: list[str] = []
+    raw_ips: list[str] = []
+    for entry in entries:
+        if _is_ip(entry):
+            raw_ips.append(entry)
+        else:
+            domains.append(entry)
+    return domains, raw_ips
+
+
+def _is_dnsmasq_tier(state_dir: Path) -> bool:
+    """Return True when the container's DNS tier is dnsmasq (or unknown).
+
+    ``allow_domain`` / ``deny_domain`` are dnsmasq-specific enhancements
+    (future IP rotation tracking via ``--nftset``).  On dig/getent tiers
+    the static IP-level allow/deny in ``allow_ip``/``deny_ip`` already ran;
+    the domain-tracking step is simply not available and callers skip it.
+
+    Returns True when ``dns_tier_path`` is absent (pre_start not yet run —
+    pass-through so the caller can still attempt the dnsmasq operation).
+    """
+    tier_path = state.dns_tier_path(state_dir)
+    if not tier_path.is_file():
+        return True
+    return tier_path.read_text().strip() == DnsTier.DNSMASQ.value
