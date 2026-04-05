@@ -31,7 +31,14 @@ from terok_shield.core.nft_constants import (
     QUEUED_LOG_PREFIX,
 )
 from terok_shield.lib.watchers import (
-    _DOMAIN_REFRESH_INTERVAL,
+    AuditLogWatcher,
+    DnsLogWatcher,
+    DomainCache,
+    NflogWatcher,
+    WatchEvent,
+)
+from terok_shield.lib.watchers.dns_log import _DOMAIN_REFRESH_INTERVAL, _QUERY_RE
+from terok_shield.lib.watchers.nflog import (
     _NFA_HDR,
     _NFGEN_HDR,
     _NFNL_SUBSYS_ULOG,
@@ -39,12 +46,6 @@ from terok_shield.lib.watchers import (
     _NFULA_PREFIX,
     _NFULNL_MSG_PACKET,
     _NLMSG_HDR,
-    _QUERY_RE,
-    AuditLogWatcher,
-    DnsLogWatcher,
-    DomainCache,
-    NflogWatcher,
-    WatchEvent,
     _build_nflog_bind_msg,
     _extract_ip_dest,
     _parse_nflog_attrs,
@@ -326,7 +327,7 @@ class TestDnsLogWatcher:
         domains = sd / "profile.domains"
         domains.write_text(f"{TEST_DOMAIN}\n")
         with patch(
-            "terok_shield.lib.watchers.dnsmasq.read_merged_domains", side_effect=OSError("boom")
+            "terok_shield.lib.watchers.dns_log.dnsmasq.read_merged_domains", side_effect=OSError("boom")
         ):
             with pytest.raises(OSError, match="boom"):
                 DnsLogWatcher(log, sd, _CONTAINER)
@@ -788,7 +789,7 @@ class TestNflogWatcherCreate:
 
     def test_returns_none_on_oserror(self) -> None:
         """create() returns None when AF_NETLINK socket fails."""
-        with patch("terok_shield.lib.watchers.socket.socket", side_effect=OSError("no netlink")):
+        with patch("terok_shield.lib.watchers.nflog.socket.socket", side_effect=OSError("no netlink")):
             result = NflogWatcher.create(_CONTAINER)
         assert result is None
 
@@ -799,7 +800,7 @@ class TestNflogWatcherCreate:
         ack_payload = struct.pack("=i", 0)
         ack = _NLMSG_HDR.pack(_NLMSG_HDR.size + len(ack_payload), 2, 0, 0, 0) + ack_payload
         mock_sock.recv.return_value = ack
-        with patch("terok_shield.lib.watchers.socket.socket", return_value=mock_sock):
+        with patch("terok_shield.lib.watchers.nflog.socket.socket", return_value=mock_sock):
             result = NflogWatcher.create(_CONTAINER)
         assert result is not None
         assert isinstance(result, NflogWatcher)
@@ -812,7 +813,7 @@ class TestNflogWatcherCreate:
 
     def test_returns_none_on_attribute_error(self) -> None:
         """create() returns None on non-Linux where AF_NETLINK is missing."""
-        with patch("terok_shield.lib.watchers.socket.socket", side_effect=AttributeError):
+        with patch("terok_shield.lib.watchers.nflog.socket.socket", side_effect=AttributeError):
             result = NflogWatcher.create(_CONTAINER)
         assert result is None
 
@@ -820,7 +821,7 @@ class TestNflogWatcherCreate:
         """create() returns None and closes the socket when recv times out."""
         mock_sock = MagicMock(spec=socket.socket)
         mock_sock.recv.side_effect = OSError("timed out")
-        with patch("terok_shield.lib.watchers.socket.socket", return_value=mock_sock):
+        with patch("terok_shield.lib.watchers.nflog.socket.socket", return_value=mock_sock):
             result = NflogWatcher.create(_CONTAINER)
         assert result is None
         mock_sock.close.assert_called_once()
@@ -832,7 +833,7 @@ class TestNflogWatcherCreate:
         ack_payload = struct.pack("=i", -1)
         ack = _NLMSG_HDR.pack(_NLMSG_HDR.size + len(ack_payload), 2, 0, 0, 0) + ack_payload
         mock_sock.recv.return_value = ack
-        with patch("terok_shield.lib.watchers.socket.socket", return_value=mock_sock):
+        with patch("terok_shield.lib.watchers.nflog.socket.socket", return_value=mock_sock):
             result = NflogWatcher.create(_CONTAINER)
         assert result is None
         mock_sock.close.assert_called_once()
@@ -843,7 +844,7 @@ class TestNflogWatcherCreate:
         ack_payload = struct.pack("=i", 0)
         ack = _NLMSG_HDR.pack(_NLMSG_HDR.size + len(ack_payload), 2, 0, 0, 0) + ack_payload
         mock_sock.recv.return_value = ack
-        with patch("terok_shield.lib.watchers.socket.socket", return_value=mock_sock):
+        with patch("terok_shield.lib.watchers.nflog.socket.socket", return_value=mock_sock):
             result = NflogWatcher.create(_CONTAINER)
         assert result is not None
         result.close()
@@ -894,7 +895,7 @@ class TestDomainRefresh:
         log.write_text("")
 
         # Monotonic clock: returns 0 during init to set _last_refresh
-        with patch("terok_shield.lib.watchers._monotonic", return_value=0.0):
+        with patch("terok_shield.lib.watchers.dns_log._monotonic", return_value=0.0):
             watcher = DnsLogWatcher(log, sd, _CONTAINER)
 
         # Add BLOCKED_DOMAIN to allowed set *after* watcher was created
@@ -906,7 +907,7 @@ class TestDomainRefresh:
 
         # Force the clock past the refresh threshold
         with patch(
-            "terok_shield.lib.watchers._monotonic", return_value=_DOMAIN_REFRESH_INTERVAL + 1.0
+            "terok_shield.lib.watchers.dns_log._monotonic", return_value=_DOMAIN_REFRESH_INTERVAL + 1.0
         ):
             events = watcher.poll()
         watcher.close()
