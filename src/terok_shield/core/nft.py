@@ -372,9 +372,8 @@ def add_elements(
             ``timeout 0s`` so it never expires, even in sets that carry a
             default element timeout (dnsmasq tier).
     """
-    _safe_ident(set_name)
-    for part in table.split():
-        _safe_ident(part)
+    set_name = _safe_ident(set_name)
+    table = " ".join(_safe_ident(part) for part in table.split())
     valid = [safe_ip(ip) for ip in ips if _try_validate(ip)]
     if not valid:
         return ""
@@ -391,9 +390,8 @@ def delete_elements(set_name: str, ips: list[str], table: str = NFT_TABLE) -> st
     Both ``set_name`` and ``table`` are validated against injection.
     Returns empty string if no valid IPs.
     """
-    _safe_ident(set_name)
-    for part in table.split():
-        _safe_ident(part)
+    set_name = _safe_ident(set_name)
+    table = " ".join(_safe_ident(part) for part in table.split())
     valid = [safe_ip(ip) for ip in ips if _try_validate(ip)]
     if not valid:
         return ""
