@@ -33,6 +33,7 @@ class TestHookEntrypointImportIsolation:
             "pathlib",
             "pwd",
             "shutil",
+            "signal",
             "socket",
             "struct",
             "subprocess",

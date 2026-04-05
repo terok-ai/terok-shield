@@ -24,6 +24,7 @@ import json
 import os
 import pwd
 import shutil
+import signal
 import socket
 import struct
 import subprocess  # nosec B404
@@ -237,7 +238,7 @@ def _poststop(sd: Path) -> None:
             pass
         return
     try:
-        os.kill(pid_int, 15)
+        os.kill(pid_int, signal.SIGTERM)
     except OSError:
         pass
 
