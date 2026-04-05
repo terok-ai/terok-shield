@@ -9,6 +9,7 @@ reports/
 /.idea
 .complexipy_cache/
 docs/ci_map.md
+docs/module_map.md
 docs/test_map.md
 site/
 /tmp/

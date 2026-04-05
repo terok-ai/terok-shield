@@ -60,6 +60,9 @@ plugins:
       quality_report_codecov_treemap_path: docs/assets/coverage_treemap.svg
       test_map: true
       test_map_path: test_map.md
+      module_map: true
+      module_map_path: module_map.md
+      module_map_title: "Module Map"
       ref_pages: true
       ref_pages_path: reference
   - literate-nav:
@@ -101,8 +104,9 @@ nav:
     - Security & Design: security.md
     - Architecture: design.md
     - Contributing: developer.md
-    - Code Quality: quality_report.md
+    - Code Metrics: quality_report.md
     - CI Workflow Map: ci_map.md
+    - Module Map: module_map.md
     - Integration Test Map: test_map.md
   - API Reference: reference/
 
