@@ -5,9 +5,11 @@
 
 Constructs ``ShieldConfig`` from ``config.yml``, XDG conventions, and
 environment variables, then routes each subcommand through the
-``COMMANDS`` registry (``cli.registry``).  Commands that need standalone
-CLI logic (``prepare``, ``run``, ``setup``) are handled directly here;
-all others delegate to ``Shield`` (the public API facade).
+``COMMANDS`` registry (``cli.registry``).  Five commands with standalone
+CLI logic are handled directly by ``_dispatch`` — ``setup`` and ``logs``
+(which bypass Shield entirely) and ``prepare``, ``run``, ``resolve``
+(which need Shield but carry extra CLI concerns).  All others delegate
+to their registry handler via ``Shield`` (the public API facade).
 """
 
 import argparse
