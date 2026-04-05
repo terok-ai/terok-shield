@@ -39,6 +39,7 @@ plugins:
   - gen-files:
       scripts:
         - docs/gen_config_reference.py
+        - docs/gen_narrative_overview.py
   - mkdocstrings:
       handlers:
         python:
@@ -104,6 +105,7 @@ nav:
     - Code Quality: quality_report.md
     - CI Workflow Map: ci_map.md
     - Integration Test Map: test_map.md
+    - Narrative Overview: narrative-overview.md
   - API Reference: reference/
 
 extra:
