@@ -157,6 +157,9 @@ def hook_ruleset(
     set_v6 = _set_declaration("allow_v6", "ipv6_addr", set_timeout)
     set_deny_v4 = _set_declaration("deny_v4", "ipv4_addr")
     set_deny_v6 = _set_declaration("deny_v6", "ipv6_addr")
+    allow_rules = _audit_allow_rules()
+    deny_rules = _deny_set_rules()
+    private_rules = _private_range_rules()
     terminal_rule = _interactive_reject_rule() if interactive else _audit_deny_rule()
     return textwrap.dedent(f"""\
         table {NFT_TABLE} {{
@@ -173,9 +176,9 @@ def hook_ruleset(
                 ct state established,related accept
                 udp dport 53 {dns_af} daddr {dns} accept
                 tcp dport 53 {dns_af} daddr {dns} accept{infra_block}\
-        {_audit_allow_rules()}
-        {_deny_set_rules()}
-        {_private_range_rules()}
+        {allow_rules}
+        {deny_rules}
+        {private_rules}
         {terminal_rule}
             }}
 
