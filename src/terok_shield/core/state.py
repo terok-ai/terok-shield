@@ -3,10 +3,10 @@
 
 """Per-container state bundle layout contract.
 
-Defines the canonical directory structure for a container's state
-bundle and provides pure path-derivation functions.  Zero dependencies
-beyond ``pathlib`` — this module is the single source of truth for
-where files live within a state directory.
+Every shielded container gets an isolated state directory.  This module
+is the single source of truth for where files live within it — all paths
+are derived from a single ``state_dir`` root.  Zero dependencies beyond
+``pathlib``.
 
 Bundle layout::
 
@@ -17,10 +17,15 @@ Bundle layout::
     ├── terok-shield-hook              # entrypoint script (stdlib-only Python)
     ├── ruleset.nft                    # pre-generated nft ruleset (written by pre_start)
     ├── gateway                        # discovered gateway IP (written by OCI hook)
+    ├── gateway_v6                     # discovered IPv6 gateway
+    ├── upstream.dns                   # upstream DNS address
+    ├── dns.tier                       # active DNS tier (dig/getent/dnsmasq)
     ├── profile.allowed                # IPs from DNS resolution
     ├── profile.domains                # domain names for dnsmasq config
     ├── live.allowed                   # IPs from allow/deny
+    ├── live.domains                   # domain overrides from allow_domain
     ├── deny.list                      # persistent deny overrides
+    ├── denied.domains                 # denied domains from deny_domain
     ├── dnsmasq.conf                   # generated dnsmasq configuration
     ├── dnsmasq.pid                    # dnsmasq PID (in container netns)
     ├── dnsmasq.log                    # dnsmasq query log (for shield watch)
@@ -40,6 +45,9 @@ The OCI hook hard-fails if the annotation version does not match.
 """
 
 
+# ── OCI hook paths ──────────────────────────────────────
+
+
 def hooks_dir(state_dir: Path) -> Path:
     """Return the OCI hooks directory within the state bundle."""
     return state_dir / "hooks"
@@ -55,49 +63,12 @@ def hook_json_path(state_dir: Path, stage: str) -> Path:
     return hooks_dir(state_dir) / f"terok-shield-{stage}.json"
 
 
-def profile_allowed_path(state_dir: Path) -> Path:
-    """Return the path to the profile-derived allowlist file."""
-    return state_dir / "profile.allowed"
-
-
-def live_allowed_path(state_dir: Path) -> Path:
-    """Return the path to the live allow/deny allowlist file."""
-    return state_dir / "live.allowed"
-
-
-def deny_path(state_dir: Path) -> Path:
-    """Return the path to the persistent denylist file."""
-    return state_dir / "deny.list"
-
-
-def audit_path(state_dir: Path) -> Path:
-    """Return the path to the per-container audit log."""
-    return state_dir / "audit.jsonl"
-
-
-def profile_domains_path(state_dir: Path) -> Path:
-    """Return the path to the profile domain names list (for dnsmasq config)."""
-    return state_dir / "profile.domains"
-
-
-def dnsmasq_conf_path(state_dir: Path) -> Path:
-    """Return the path to the generated dnsmasq configuration file."""
-    return state_dir / "dnsmasq.conf"
-
-
-def dnsmasq_pid_path(state_dir: Path) -> Path:
-    """Return the path to the dnsmasq PID file."""
-    return state_dir / "dnsmasq.pid"
-
-
-def dnsmasq_log_path(state_dir: Path) -> Path:
-    """Return the path to the dnsmasq query log (tailed by ``shield watch``)."""
-    return state_dir / "dnsmasq.log"
-
-
 def ruleset_path(state_dir: Path) -> Path:
     """Return the path to the pre-generated nft ruleset file."""
     return state_dir / "ruleset.nft"
+
+
+# ── Network discovery ───────────────────────────────────
 
 
 def gateway_path(state_dir: Path) -> Path:
@@ -120,22 +91,22 @@ def dns_tier_path(state_dir: Path) -> Path:
     return state_dir / "dns.tier"
 
 
-def interactive_path(state_dir: Path) -> Path:
-    """Return the path to the interactive tier marker file."""
-    return state_dir / "interactive"
+# ── Allowlists and denylists ───────────────────────────
 
 
-def read_interactive_tier(state_dir: Path) -> str | None:
-    """Read the interactive tier from the state bundle.
+def profile_allowed_path(state_dir: Path) -> Path:
+    """Return the path to the profile-derived allowlist file."""
+    return state_dir / "profile.allowed"
 
-    Returns ``"nflog"`` (or whatever tier string is stored) if the file
-    exists and contains a non-empty value, otherwise ``None``.
-    """
-    path = interactive_path(state_dir)
-    if not path.is_file():
-        return None
-    value = path.read_text().strip()
-    return value or None
+
+def profile_domains_path(state_dir: Path) -> Path:
+    """Return the path to the profile domain names list (for dnsmasq config)."""
+    return state_dir / "profile.domains"
+
+
+def live_allowed_path(state_dir: Path) -> Path:
+    """Return the path to the live allow/deny allowlist file."""
+    return state_dir / "live.allowed"
 
 
 def live_domains_path(state_dir: Path) -> Path:
@@ -143,9 +114,32 @@ def live_domains_path(state_dir: Path) -> Path:
     return state_dir / "live.domains"
 
 
+def deny_path(state_dir: Path) -> Path:
+    """Return the path to the persistent denylist file."""
+    return state_dir / "deny.list"
+
+
 def denied_domains_path(state_dir: Path) -> Path:
     """Return the path to the denied domains file (from deny_domain)."""
     return state_dir / "denied.domains"
+
+
+# ── Dnsmasq tier ────────────────────────────────────────
+
+
+def dnsmasq_conf_path(state_dir: Path) -> Path:
+    """Return the path to the generated dnsmasq configuration file."""
+    return state_dir / "dnsmasq.conf"
+
+
+def dnsmasq_pid_path(state_dir: Path) -> Path:
+    """Return the path to the dnsmasq PID file."""
+    return state_dir / "dnsmasq.pid"
+
+
+def dnsmasq_log_path(state_dir: Path) -> Path:
+    """Return the path to the dnsmasq query log (tailed by ``shield watch``)."""
+    return state_dir / "dnsmasq.log"
 
 
 def resolv_conf_path(state_dir: Path) -> Path:
@@ -161,11 +155,49 @@ def resolv_conf_path(state_dir: Path) -> Path:
     return state_dir / "resolv.conf"
 
 
-def read_allowed_ips(state_dir: Path) -> list[str]:
-    """Read IPs from both profile.allowed and live.allowed, merged and deduplicated.
+# ── Container identity and observability ────────────────
 
-    Returns a stable-order list: profile IPs first, then live IPs, with
-    duplicates removed (first occurrence wins).
+
+def interactive_path(state_dir: Path) -> Path:
+    """Return the path to the interactive tier marker file."""
+    return state_dir / "interactive"
+
+
+def container_id_path(state_dir: Path) -> Path:
+    """Return the path to the persisted podman container ID file."""
+    return state_dir / "container.id"
+
+
+def audit_path(state_dir: Path) -> Path:
+    """Return the path to the per-container audit log."""
+    return state_dir / "audit.jsonl"
+
+
+# ── State readers ───────────────────────────────────────
+#
+# The path functions above are pure derivations.  The functions below
+# read file contents and compute derived state (merging, deduplication,
+# set subtraction).
+
+
+def read_interactive_tier(state_dir: Path) -> str | None:
+    """Read the interactive tier from the state bundle.
+
+    Returns ``"nflog"`` (or whatever tier string is stored) if the file
+    exists and contains a non-empty value, otherwise ``None``.
+    """
+    path = interactive_path(state_dir)
+    if not path.is_file():
+        return None
+    value = path.read_text().strip()
+    return value or None
+
+
+def read_allowed_ips(state_dir: Path) -> list[str]:
+    """Merge IPs from profile.allowed and live.allowed, deduplicated.
+
+    Returns a stable-order list: profile IPs first, then live IPs,
+    with duplicates removed (first occurrence wins).
     """
     ips: list[str] = []
     for path in (profile_allowed_path(state_dir), live_allowed_path(state_dir)):
@@ -192,7 +224,7 @@ def read_denied_ips(state_dir: Path) -> set[str]:
 
 
 def read_effective_ips(state_dir: Path) -> list[str]:
-    """Compute effective allowed IPs: (profile ∪ live) - deny.
+    """Compute effective allowed IPs: (profile ∪ live) − deny.
 
     Returns a stable-order list with denied IPs subtracted.
     """
@@ -201,9 +233,7 @@ def read_effective_ips(state_dir: Path) -> list[str]:
     return [ip for ip in allowed if ip not in denied]
 
 
-def container_id_path(state_dir: Path) -> Path:
-    """Return the path to the persisted podman container ID file."""
-    return state_dir / "container.id"
+# ── Setup ───────────────────────────────────────────────
 
 
 def ensure_state_dirs(state_dir: Path) -> None:
