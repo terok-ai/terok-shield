@@ -21,6 +21,8 @@ persisted to ``live.allowed``; denied IPs are added to the deny sets and
 persisted to ``deny.list``.
 """
 
+# Needed for forward-referencing SessionIO in InteractiveSession annotations.
+# Remove once we target Python 3.14+ (PEP 649 makes evaluation lazy by default).
 from __future__ import annotations
 
 import json

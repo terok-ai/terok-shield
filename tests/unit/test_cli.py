@@ -449,6 +449,8 @@ def test_run_and_separator_validation(
         pytest.param("--hooks-dir=/tmp", id="hooks-dir-equals"),
         pytest.param("--cap-add=NET_ADMIN", id="cap-add-equals"),
         pytest.param("--cap-drop=ALL", id="cap-drop-equals"),
+        pytest.param("--net", id="net-alias"),
+        pytest.param("--net=host", id="net-alias-equals"),
     ],
 )
 def test_run_rejects_shield_managed_flags(

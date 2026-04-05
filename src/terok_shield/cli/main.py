@@ -272,6 +272,11 @@ _SHIELD_MANAGED_FLAGS = frozenset(
     }
 )
 
+# Podman flag aliases that map to a canonical shield-managed flag.
+_FLAG_ALIASES: dict[str, str] = {
+    "--net": "--network",
+}
+
 
 def _find_podman() -> str:
     """Locate the podman binary for the ``run`` subcommand."""
@@ -289,6 +294,7 @@ def _reject_shield_managed_flags(podman_args: list[str]) -> None:
     for arg in podman_args:
         if arg.startswith("--"):
             flag = arg.split("=", 1)[0]
+            flag = _FLAG_ALIASES.get(flag, flag)
             if flag in _SHIELD_MANAGED_FLAGS:
                 conflicts.add(flag)
     if conflicts:
