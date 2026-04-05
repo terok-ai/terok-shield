@@ -1,10 +1,16 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""DNS domain resolution with timestamp-based caching.
+"""DNS resolution with timestamp-based caching.
 
-Provides ``DnsResolver`` -- stateless resolver that takes an explicit
-cache path per call.  All ``dig`` calls go through a ``CommandRunner``.
+Resolves domain names from allowlist profiles via ``dig`` and caches
+the results so containers do not block on DNS at every start.  Profiles
+prefer domain names over raw IPs because CDN addresses rotate.
+
+Falls back to ``getent hosts`` when ``dig`` is not installed — fewer
+IPs are captured (no parallel A + AAAA query), but resolution still
+works.  When the dnsmasq tier is active, domain resolution happens at
+runtime via ``--nftset``; this module then only handles raw IPs.
 """
 
 import logging
@@ -17,57 +23,54 @@ from .run import CommandRunner, DigNotFoundError
 logger = logging.getLogger(__name__)
 
 
-# ── Pure helpers ─────────────────────────────────────────
-
-
-def _split_entries(entries: list[str]) -> tuple[list[str], list[str]]:
-    """Split entries into (domains, raw_ips)."""
-    domains, ips = [], []
-    for entry in entries:
-        (_ips := ips if _is_ip(entry) else domains).append(entry)
-    return domains, ips
-
-
-def _cache_fresh(path: Path, max_age: int) -> bool:
-    """Return True if the cache file exists and is younger than max_age seconds."""
-    try:
-        mtime = path.stat().st_mtime
-    except OSError:
-        return False
-    return (time.time() - mtime) < max_age
-
-
-# ── DnsResolver ──────────────────────────────────────────
-
-
 class DnsResolver:
-    """Stateless DNS resolver with file-based caching.
+    """Stateless DNS resolver — all persistence lives in the cache file.
 
-    Resolves domain names to IP addresses (A + AAAA) via ``dig``.
-    Cache path is provided per call -- no internal state beyond
-    the ``CommandRunner``.
+    The only dependency is a :class:`CommandRunner` for ``dig`` / ``getent``
+    subprocess calls.
     """
 
     def __init__(self, *, runner: CommandRunner) -> None:
-        """Create a resolver.
-
-        Args:
-            runner: Command runner for ``dig`` subprocess calls.
-        """
+        """Inject the command runner used for all DNS subprocess calls."""
         self._runner = runner
 
+    # ── Public API ──────────────────────────────────────────
+
+    def resolve_and_cache(
+        self,
+        entries: list[str],
+        cache_path: Path,
+        *,
+        max_age: int = 3600,
+    ) -> list[str]:
+        """Resolve profile entries and cache the result.
+
+        Profiles mix domain names with literal IPs/CIDRs — domains go
+        through DNS resolution, literals pass through unchanged.
+
+        Args:
+            entries: Domain names and/or raw IPs from composed profiles.
+            cache_path: File to store resolved IPs in, per-container scoped.
+            max_age: Cache freshness threshold in seconds (default: 1 hour).
+
+        Returns:
+            Resolved IPv4/IPv6 addresses combined with raw IPs/CIDRs.
+        """
+        if self._cache_fresh(cache_path, max_age):
+            return self._read_cache(cache_path)
+
+        domains, raw_ips = self._split_entries(entries)
+        resolved = self.resolve_domains(domains)
+        all_ips = raw_ips + resolved
+
+        self._write_cache(cache_path, all_ips)
+        return all_ips
+
     def resolve_domains(self, domains: list[str]) -> list[str]:
-        """Resolve a list of domains to IPv4 and IPv6 addresses.
+        """Resolve domain names to IP addresses (A + AAAA), best-effort.
 
-        Used by the dig and getent tiers for static pre-start resolution.
-        When dnsmasq tier is active, this method is only called for raw
-        IPs — dnsmasq handles domain resolution at runtime via --nftset.
-
-        Queries both A and AAAA records for each domain via ``dig``.
-        Falls back to ``getent hosts`` when ``dig`` is not installed
-        (fewer IPs captured, no AAAA parallel query).
-        Skips domains that fail to resolve (best-effort).
-        Returns deduplicated IPs.
+        Unresolvable domains are skipped with a warning.  Results are
+        deduplicated in first-seen order.
         """
         seen: set[str] = set()
         result: list[str] = []
@@ -76,6 +79,7 @@ class DnsResolver:
             try:
                 ips = self._resolve_one(domain, use_getent=use_getent)
             except DigNotFoundError:
+                # dig missing — degrade gracefully for the rest of this batch
                 logger.warning("dig not found — falling back to getent for DNS resolution")
                 use_getent = True
                 ips = self._resolve_one(domain, use_getent=True)
@@ -87,41 +91,32 @@ class DnsResolver:
                     result.append(ip)
         return result
 
+    # ── Resolution detail ───────────────────────────────────
+
     def _resolve_one(self, domain: str, *, use_getent: bool = False) -> list[str]:
         """Resolve a single domain using dig or getent."""
         if use_getent:
             return self._runner.getent_hosts(domain)
         return self._runner.dig_all(domain)
 
-    def resolve_and_cache(
-        self,
-        entries: list[str],
-        cache_path: Path,
-        *,
-        max_age: int = 3600,
-    ) -> list[str]:
-        """Resolve domains and cache results.  Return cached IPs if fresh.
+    # ── Cache mechanics ─────────────────────────────────────
 
-        Entries can be a mix of domain names and raw IP/CIDR addresses.
-        Raw IPs are passed through without resolution.
+    @staticmethod
+    def _split_entries(entries: list[str]) -> tuple[list[str], list[str]]:
+        """Separate entries into (domains, raw_ips)."""
+        domains, ips = [], []
+        for entry in entries:
+            (_ips := ips if _is_ip(entry) else domains).append(entry)
+        return domains, ips
 
-        Args:
-            entries: Domain names and/or raw IPs from composed profiles.
-            cache_path: Path to the cache file for this container.
-            max_age: Cache freshness threshold in seconds (default: 1 hour).
-
-        Returns:
-            List of resolved IPv4/IPv6 addresses + raw IPs/CIDRs.
-        """
-        if _cache_fresh(cache_path, max_age):
-            return self._read_cache(cache_path)
-
-        domains, raw_ips = _split_entries(entries)
-        resolved = self.resolve_domains(domains)
-        all_ips = raw_ips + resolved
-
-        self._write_cache(cache_path, all_ips)
-        return all_ips
+    @staticmethod
+    def _cache_fresh(path: Path, max_age: int) -> bool:
+        """Check whether the cache file exists and is younger than *max_age* seconds."""
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            return False
+        return (time.time() - mtime) < max_age
 
     @staticmethod
     def _read_cache(path: Path) -> list[str]:
