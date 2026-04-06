@@ -90,10 +90,7 @@ def _dispatch(args: argparse.Namespace) -> None:
 
     # All other commands need a per-container config + Shield
     container = getattr(args, "container", None)
-    interactive_override = getattr(args, "interactive", None) or None  # False → None
-    config = _build_config(
-        container, state_dir_override=state_dir_override, interactive=interactive_override
-    )
+    config = _build_config(container, state_dir_override=state_dir_override)
     shield = Shield(config)
 
     # CLI-only standalone commands with custom logic
@@ -412,14 +409,12 @@ def _build_config(
     container: str | None = None,
     *,
     state_dir_override: Path | None = None,
-    interactive: bool | None = None,
 ) -> ShieldConfig:
     """Build a ShieldConfig from config.yml + env vars.
 
     Args:
         container: Container name (used for per-container state_dir).
         state_dir_override: Explicit state_dir from --state-dir flag.
-        interactive: Override config.yml interactive flag (CLI ``--interactive``).
     """
     file_cfg = _load_config_file()
 
@@ -448,7 +443,6 @@ def _build_config(
         loopback_ports=tuple(file_cfg.loopback_ports),
         audit_enabled=file_cfg.audit.enabled,
         profiles_dir=profiles_dir,
-        interactive=interactive if interactive is not None else file_cfg.interactive,
     )
 
 

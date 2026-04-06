@@ -53,8 +53,8 @@ NFT_SET_TIMEOUT_DNSMASQ = "30m"  # set element timeout when dnsmasq manages IPs
 NFLOG_GROUP = 100  # nflog group number for terok-shield rules
 
 # ── Log prefixes ───────────────────────────────────────
-DENIED_LOG_PREFIX = "TEROK_SHIELD_DENIED"
+BLOCKED_LOG_PREFIX = "TEROK_SHIELD_BLOCKED"  # terminal default-deny (unclassified)
+DENIED_LOG_PREFIX = "TEROK_SHIELD_DENIED"  # explicit deny set (operator refused)
 PRIVATE_LOG_PREFIX = "TEROK_SHIELD_PRIVATE"
 ALLOWED_LOG_PREFIX = "TEROK_SHIELD_ALLOWED"
 BYPASS_LOG_PREFIX = "TEROK_SHIELD_BYPASS"
-QUEUED_LOG_PREFIX = "TEROK_SHIELD_QUEUED"

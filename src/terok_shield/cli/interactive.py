@@ -39,7 +39,6 @@ from typing import Protocol, runtime_checkable
 from ..core import state
 from ..core.nft import add_deny_elements_dual, add_elements_dual
 from ..core.run import CommandRunner, SubprocessRunner
-from ..core.state import read_interactive_tier
 from ..lib.watchers import DomainCache, NflogWatcher, WatchEvent
 
 logger = logging.getLogger(__name__)
@@ -64,24 +63,17 @@ def run_interactive(state_dir: Path, container: str, *, raw: bool = False) -> No
     container's netns.  The re-exec sets ``_TEROK_SHIELD_NFLOG_NSENTER``
     so the second invocation runs the handler directly.
 
+    The terminal deny rule always logs with the BLOCKED prefix to
+    NFLOG group 100, so the interactive handler works for any shielded
+    container without special configuration.
+
     Args:
         state_dir: Per-container state directory (may be relative).
         container: Container name.
         raw: If ``True``, use JSON-lines protocol; otherwise use the
             human-friendly CLI (default).
-
-    Raises:
-        SystemExit: If the interactive tier is not configured or NFLOG
-            watcher creation fails.
     """
     state_dir = state_dir.resolve()
-    tier = read_interactive_tier(state_dir)
-    if tier != "nflog":
-        print(
-            f"Error: interactive tier not configured (got {tier!r}, expected 'nflog').",
-            file=sys.stderr,
-        )
-        raise SystemExit(1)
 
     if os.environ.get(_NSENTER_ENV) != "1":
         _nsenter_reexec(state_dir, container, raw=raw)

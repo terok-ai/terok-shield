@@ -147,7 +147,9 @@ class NflogWatcher:
         prefix_raw = attrs.get(_NFULA_PREFIX, b"")
         prefix = prefix_raw.rstrip(b"\x00").decode("ascii", errors="replace").strip()
 
-        if "DENIED" in prefix:
+        if "BLOCKED" in prefix:
+            action = "queued_connection"
+        elif "DENIED" in prefix:
             action = "blocked_connection"
         elif "PRIVATE" in prefix:
             action = "private_range"
@@ -155,8 +157,6 @@ class NflogWatcher:
             action = "allowed_connection"
         elif "BYPASS" in prefix:
             action = "bypass_connection"
-        elif "QUEUED" in prefix:
-            action = "queued_connection"
         else:
             action = "nflog"
 

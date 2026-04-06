@@ -18,6 +18,7 @@ import textwrap
 
 from .nft_constants import (
     ALLOWED_LOG_PREFIX,
+    BLOCKED_LOG_PREFIX,
     BYPASS_LOG_PREFIX,
     DENIED_LOG_PREFIX,
     NFLOG_GROUP,
@@ -26,7 +27,6 @@ from .nft_constants import (
     PASTA_HOST_LOOPBACK_MAP,
     PRIVATE_LOG_PREFIX,
     PRIVATE_RANGES,
-    QUEUED_LOG_PREFIX,
 )
 
 _SAFE_TIMEOUT_RE = re.compile(r"^\d+[smhd]$")
@@ -73,13 +73,12 @@ class RulesetBuilder:
         self._loopback_ports = loopback_ports
         self._set_timeout = set_timeout
 
-    def build_hook(self, *, interactive: bool = False) -> str:
+    def build_hook(self) -> str:
         """Generate the hook-mode (deny-all) nftables ruleset."""
         return hook_ruleset(
             dns=self._dns,
             loopback_ports=self._loopback_ports,
             set_timeout=self._set_timeout,
-            interactive=interactive,
         )
 
     def build_bypass(self, *, allow_all: bool = False) -> str:
@@ -91,9 +90,9 @@ class RulesetBuilder:
             set_timeout=self._set_timeout,
         )
 
-    def verify_hook(self, nft_output: str, *, interactive: bool = False) -> list[str]:
+    def verify_hook(self, nft_output: str) -> list[str]:
         """Check applied hook ruleset invariants.  Returns errors (empty = OK)."""
-        return verify_ruleset(nft_output, interactive=interactive)
+        return verify_ruleset(nft_output)
 
     def verify_bypass(self, nft_output: str, *, allow_all: bool = False) -> list[str]:
         """Check applied bypass ruleset invariants.  Returns errors (empty = OK)."""
@@ -116,8 +115,6 @@ def hook_ruleset(
     dns: str = PASTA_DNS,
     loopback_ports: tuple[int, ...] = (),
     set_timeout: str = "",
-    *,
-    interactive: bool = False,
 ) -> str:
     """Generate a per-container nftables ruleset for hook mode.
 
@@ -131,14 +128,17 @@ def hook_ruleset(
 
     Chain order (output):
         loopback -> established -> DNS -> gateway ports -> loopback ports
-        -> allow sets -> deny sets -> private-range reject -> deny/interactive-reject
+        -> allow sets -> deny sets -> private-range reject -> terminal deny
+
+    The terminal rule always logs with ``BLOCKED`` prefix to NFLOG.
+    NFLOG is fire-and-forget: if a clearance handler is listening it can
+    prompt the operator; if nobody subscribes the events are silently
+    dropped by the kernel at near-zero cost.
 
     Args:
         dns: DNS server address (pasta default forwarder).
         loopback_ports: TCP ports to allow on the loopback interface.
         set_timeout: nft set element timeout (e.g. ``30m``).
-        interactive: When True, replaces the terminal deny-all rule with an
-            NFLOG+reject rule using the QUEUED prefix for interactive handling.
     """
     dns = safe_ip(dns)
     if set_timeout:
@@ -161,7 +161,7 @@ def hook_ruleset(
     allow_rules = _audit_allow_rules()
     deny_rules = _deny_set_rules()
     private_rules = _private_range_rules()
-    terminal_rule = _interactive_reject_rule() if interactive else _audit_deny_rule()
+    terminal_rule = _terminal_deny_rule()
     return textwrap.dedent(f"""\
         table {NFT_TABLE} {{
             {set_v4}
@@ -403,7 +403,7 @@ def delete_elements(set_name: str, ips: list[str], table: str = NFT_TABLE) -> st
 # ── Verification ────────────────────────────────────────
 
 
-def verify_ruleset(nft_output: str, *, interactive: bool = False) -> list[str]:
+def verify_ruleset(nft_output: str) -> list[str]:
     """Check applied ruleset invariants.  Returns errors (empty = OK).
 
     Verifies:
@@ -413,8 +413,7 @@ def verify_ruleset(nft_output: str, *, interactive: bool = False) -> list[str]:
     - Dual-stack allow sets are declared
     - Dual-stack deny sets are declared
     - All private ranges are present (RFC 1918 + RFC 4193/4291)
-    - Interactive mode: queued nflog prefix present
-    - Non-interactive mode: deny nflog prefix present
+    - Terminal deny-all rule with BLOCKED prefix present
     """
     errors: list[str] = []
     if "policy drop" not in nft_output:
@@ -432,21 +431,14 @@ def verify_ruleset(nft_output: str, *, interactive: bool = False) -> list[str]:
         errors.append("deny_v4 set missing")
     if "deny_v6" not in nft_output:
         errors.append("deny_v6 set missing")
-    if interactive:
-        if QUEUED_LOG_PREFIX not in nft_output:
-            errors.append("queued nflog prefix missing")
-    else:
-        # Verify the terminal deny-all rule specifically — not just the prefix
-        # string, which also appears in deny-set rules (ip daddr @deny_v4 ...).
-        # The terminal rule is a standalone log+reject without a daddr selector.
-        # nft output ordering varies by version (group before/after prefix),
-        # so match any log line containing the denied prefix.
-        _terminal_deny_re = re.compile(
-            rf'^\s*log\s+.*prefix\s+"{re.escape(DENIED_LOG_PREFIX)}',
-            re.MULTILINE,
-        )
-        if not _terminal_deny_re.search(nft_output):
-            errors.append("terminal deny-all rule missing")
+    # Verify the terminal deny-all rule — a standalone log+reject with the
+    # BLOCKED prefix (no daddr selector, unlike deny-set rules).
+    _terminal_deny_re = re.compile(
+        rf'^\s*log\s+.*prefix\s+"{re.escape(BLOCKED_LOG_PREFIX)}',
+        re.MULTILINE,
+    )
+    if not _terminal_deny_re.search(nft_output):
+        errors.append("terminal deny-all rule missing")
     errors.extend(_verify_private_blocks(nft_output))
     return errors
 
@@ -511,15 +503,20 @@ def _audit_allow_rules() -> str:
     )
 
 
-def _audit_deny_rule() -> str:
-    """Generate the deny-all rule with audit logging.
+def _terminal_deny_rule() -> str:
+    """Generate the terminal default-deny rule with NFLOG audit.
 
-    Uses ``icmpx`` for cross-family reject in ``inet`` tables --
+    Unclassified packets (not in any allow or deny set) are rejected and
+    logged with the ``BLOCKED`` prefix.  NFLOG is fire-and-forget: if a
+    clearance handler subscribes it can prompt the operator; otherwise
+    events are silently dropped by the kernel.
+
+    Uses ``icmpx`` for cross-family reject in ``inet`` tables —
     auto-selects ICMP (IPv4) or ICMPv6 (IPv6).
     """
     return (
-        f'        log group {NFLOG_GROUP} prefix "{DENIED_LOG_PREFIX}: " counter\n'
-        "        reject with icmpx admin-prohibited"
+        f'        log group {NFLOG_GROUP} prefix "{BLOCKED_LOG_PREFIX}: " '
+        f"counter reject with icmpx admin-prohibited"
     )
 
 
@@ -532,18 +529,6 @@ def _deny_set_rules() -> str:
     return (
         f'        ip daddr @deny_v4 log group {NFLOG_GROUP} prefix "{DENIED_LOG_PREFIX}: " counter reject with icmpx admin-prohibited\n'
         f'        ip6 daddr @deny_v6 log group {NFLOG_GROUP} prefix "{DENIED_LOG_PREFIX}: " counter reject with icmpx admin-prohibited'
-    )
-
-
-def _interactive_reject_rule() -> str:
-    """Generate the NFLOG+reject terminal rule for interactive mode.
-
-    Rejects unmatched packets immediately but logs them with the QUEUED prefix
-    so the interactive handler can detect them via NFLOG.
-    """
-    return (
-        f'        log group {NFLOG_GROUP} prefix "{QUEUED_LOG_PREFIX}: " '
-        f"counter reject with icmpx admin-prohibited"
     )
 
 

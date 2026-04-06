@@ -303,7 +303,7 @@ def test_allow_ip_no_timeout_zero_without_dnsmasq_tier(
     ("profile_lines", "live_lines", "expect_deny_file", "nft_side_effect"),
     [
         pytest.param([TEST_IP1], [], True, None, id="profile-ip-persists-to-deny-list"),
-        pytest.param([], [TEST_IP1], False, None, id="live-only-no-deny-list"),
+        pytest.param([], [TEST_IP1], True, None, id="live-only-always-persists"),
         pytest.param(
             [TEST_IP1],
             [TEST_IP1],
@@ -1197,30 +1197,6 @@ def test_shield_up_repopulates_gateway_v6_from_file(
     assert gateway_calls, "Expected nft call to add gateway_v6 element"
 
 
-# ── Interactive mode coverage ────────────────────────────
-
-
-@mock.patch("terok_shield.core.mode_hook.has_global_hooks", return_value=True)
-def test_pre_start_interactive_writes_nflog_tier(
-    _has_hooks: mock.Mock,
-    monkeypatch: pytest.MonkeyPatch,
-    make_hook_mode: HookModeHarnessFactory,
-    make_config: ConfigFactory,
-) -> None:
-    """pre_start(interactive=True) writes 'nflog' to the interactive marker file."""
-    _set_euid(monkeypatch, 0)
-    config = make_config(interactive=True)
-    harness = make_hook_mode(config=config)
-    harness.runner.run.return_value = _MODERN_PODMAN_INFO
-    harness.profiles.compose_profiles.return_value = []
-
-    harness.mode.pre_start("test", ["dev-standard"])
-
-    marker = state.interactive_path(config.state_dir)
-    assert marker.is_file()
-    assert marker.read_text().strip() == "nflog"
-
-
 @mock.patch("terok_shield.core.mode_hook.has_global_hooks", return_value=True)
 def test_pre_start_with_denied_ips_includes_deny_elements(
     _has_hooks: mock.Mock,
@@ -1268,29 +1244,6 @@ def test_pre_start_does_not_inspect_container(
     assert not state.container_id_path(config.state_dir).exists()
 
 
-def test_shield_up_interactive_uses_interactive_ruleset(
-    make_hook_mode: HookModeHarnessFactory,
-    make_config: ConfigFactory,
-) -> None:
-    """shield_up() uses interactive=True when the interactive marker is set."""
-    config = make_config()
-    harness = make_hook_mode(config=config)
-    # Bypass DNS reading
-    harness.mode._container_ruleset = lambda _c: harness.ruleset
-    harness.runner.nft_via_nsenter.return_value = ""
-    harness.ruleset.build_hook.return_value = "hook ruleset"
-    harness.ruleset.verify_hook.return_value = []
-    harness.ruleset.add_elements_dual.return_value = ""
-    harness.ruleset.verify_bypass.return_value = ["not bypass"]
-
-    # Write the interactive marker
-    state.interactive_path(config.state_dir).write_text("nflog\n")
-
-    harness.mode.shield_up("test-ctr")
-
-    harness.ruleset.build_hook.assert_called_with(interactive=True)
-
-
 def test_shield_up_repopulates_deny_sets(
     make_hook_mode: HookModeHarnessFactory,
     make_config: ConfigFactory,
@@ -1313,32 +1266,3 @@ def test_shield_up_repopulates_deny_sets(
     # Verify deny elements were sent via nsenter
     deny_calls = [c for c in harness.runner.nft_via_nsenter.call_args_list if c.kwargs.get("stdin")]
     assert any(TEST_IP1 in (c.kwargs.get("stdin", "") or "") for c in deny_calls)
-
-
-def test_shield_state_detects_interactive_up(
-    make_hook_mode: HookModeHarnessFactory,
-) -> None:
-    """shield_state() returns UP for an interactive hook ruleset."""
-    harness = make_hook_mode()
-    harness.runner.nft_via_nsenter.return_value = "some ruleset"
-    # First verify_bypass fails, first verify_hook (strict) fails,
-    # second verify_hook (interactive=True) succeeds.
-    harness.ruleset.verify_bypass.return_value = ["not bypass"]
-    harness.ruleset.verify_hook.side_effect = [["not strict"], []]
-
-    assert harness.mode.shield_state("test") == ShieldState.UP
-
-
-def test_preview_interactive_delegates(
-    make_hook_mode: HookModeHarnessFactory,
-    make_config: ConfigFactory,
-) -> None:
-    """preview() passes interactive=True when config has interactive enabled."""
-    config = make_config(interactive=True)
-    harness = make_hook_mode(config=config)
-    harness.ruleset.build_hook.return_value = "interactive ruleset"
-
-    result = harness.mode.preview()
-
-    harness.ruleset.build_hook.assert_called_with(interactive=True)
-    assert result == "interactive ruleset"

@@ -117,7 +117,6 @@ class TestShieldFileConfigDefaults:
         assert cfg.mode == "auto"
         assert cfg.default_profiles == ["dev-standard"]
         assert cfg.loopback_ports == []
-        assert cfg.interactive is False
         assert cfg.audit.enabled is True
 
     def test_audit_defaults(self) -> None:
@@ -134,13 +133,11 @@ class TestShieldFileConfigValid:
             mode="hook",
             default_profiles=["base", "dev-python"],
             loopback_ports=[8080, 9090],
-            interactive=True,
             audit=AuditFileConfig(enabled=False),
         )
         assert cfg.mode == "hook"
         assert cfg.default_profiles == ["base", "dev-python"]
         assert cfg.loopback_ports == [8080, 9090]
-        assert cfg.interactive is True
         assert cfg.audit.enabled is False
 
     def test_single_port_int_coerced_to_list(self) -> None:

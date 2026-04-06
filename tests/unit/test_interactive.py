@@ -530,29 +530,14 @@ class TestReadStdin:
 class TestRunInteractive:
     """Tests for the run_interactive entry point."""
 
-    def test_exits_if_not_interactive(self, tmp_path: Path) -> None:
-        """run_interactive exits with code 1 if interactive tier is not configured."""
-        with pytest.raises(SystemExit) as ctx:
-            run_interactive(tmp_path, _CONTAINER)
-        assert ctx.value.code == 1
-
-    def test_exits_if_unsupported_tier(self, tmp_path: Path) -> None:
-        """run_interactive exits with code 1 for an unsupported tier marker."""
-        state.interactive_path(tmp_path).write_text("unsupported\n")
-        with pytest.raises(SystemExit) as ctx:
-            run_interactive(tmp_path, _CONTAINER)
-        assert ctx.value.code == 1
-
     def test_nsenter_reexec_when_not_in_netns(self, tmp_path: Path) -> None:
         """run_interactive calls nsenter reexec when not inside the container netns."""
-        state.interactive_path(tmp_path).write_text("nflog\n")
         with mock.patch("terok_shield.cli.interactive._nsenter_reexec") as mock_reexec:
             run_interactive(tmp_path, _CONTAINER)
         mock_reexec.assert_called_once_with(tmp_path, _CONTAINER, raw=False)
 
     def test_dispatches_to_session_inside_netns(self, tmp_path: Path) -> None:
         """run_interactive creates a session when already inside the container netns."""
-        state.interactive_path(tmp_path).write_text("nflog\n")
         with (
             mock.patch.dict("os.environ", {_NSENTER_ENV: "1"}),
             mock.patch("terok_shield.cli.interactive.SubprocessRunner") as mock_runner_cls,
@@ -1074,7 +1059,7 @@ class TestRawFlagPropagation:
 
     def test_run_interactive_raw_false_uses_cli_io(self, tmp_path: Path) -> None:
         """run_interactive defaults to CliSessionIO."""
-        state.interactive_path(tmp_path).write_text("nflog\n")
+
         with (
             mock.patch.dict("os.environ", {_NSENTER_ENV: "1"}),
             mock.patch("terok_shield.cli.interactive.SubprocessRunner"),
@@ -1086,7 +1071,7 @@ class TestRawFlagPropagation:
 
     def test_run_interactive_raw_true_uses_json_io(self, tmp_path: Path) -> None:
         """run_interactive with raw=True uses JsonSessionIO."""
-        state.interactive_path(tmp_path).write_text("nflog\n")
+
         with (
             mock.patch.dict("os.environ", {_NSENTER_ENV: "1"}),
             mock.patch("terok_shield.cli.interactive.SubprocessRunner"),
@@ -1328,7 +1313,7 @@ class TestEagerDomainRefresh:
 
     def test_run_interactive_passes_raw_to_nsenter(self, tmp_path: Path) -> None:
         """run_interactive forwards raw=True to _nsenter_reexec."""
-        state.interactive_path(tmp_path).write_text("nflog\n")
+
         with mock.patch("terok_shield.cli.interactive._nsenter_reexec") as mock_reexec:
             run_interactive(tmp_path, _CONTAINER, raw=True)
         mock_reexec.assert_called_once_with(tmp_path, _CONTAINER, raw=True)

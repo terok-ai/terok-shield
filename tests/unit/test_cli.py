@@ -200,23 +200,6 @@ def test_logs_parser_supports_optional_container_and_count(parser: argparse.Argu
     assert filtered_args.n == 10
 
 
-@pytest.mark.parametrize(
-    ("command", "flag_attr"),
-    [
-        pytest.param("prepare", "interactive", id="prepare-interactive"),
-        pytest.param("run", "interactive", id="run-interactive"),
-    ],
-)
-def test_parser_prepare_and_run_accept_interactive(
-    parser: argparse.ArgumentParser,
-    command: str,
-    flag_attr: str,
-) -> None:
-    """prepare and run subcommands accept the --interactive flag."""
-    parsed = parser.parse_args([command, _CONTAINER, "--interactive"])
-    assert getattr(parsed, flag_attr) is True
-
-
 def test_down_parser_supports_allow_all(parser: argparse.ArgumentParser) -> None:
     """down defaults to allow_all=False and flips with --all."""
     assert not parser.parse_args(["down", "ctr"]).allow_all
@@ -1112,25 +1095,6 @@ class TestSetupInteractive:
         mock_setup.assert_called_once()
         _, kwargs = mock_setup.call_args
         assert kwargs.get("use_sudo") is True
-
-
-# ── --interactive flag dispatch tests ─────────────────────
-
-
-def test_prepare_without_interactive_passes_none(cli_dispatch: CliDispatchHarness) -> None:
-    """prepare without --interactive passes interactive=None to _build_config."""
-    cli_dispatch.shield.pre_start.return_value = ["--annotation", "a=b"]
-    main(["prepare", _CONTAINER])
-    call_kwargs = cli_dispatch.build_config.call_args
-    assert call_kwargs[1].get("interactive") is None
-
-
-def test_prepare_with_interactive_passes_true(cli_dispatch: CliDispatchHarness) -> None:
-    """prepare --interactive passes interactive=True to _build_config."""
-    cli_dispatch.shield.pre_start.return_value = ["--annotation", "a=b"]
-    main(["prepare", _CONTAINER, "--interactive"])
-    call_kwargs = cli_dispatch.build_config.call_args
-    assert call_kwargs[1].get("interactive") is True
 
 
 def test_interactive_command_routes_to_handler(cli_dispatch: CliDispatchHarness) -> None:

@@ -30,7 +30,6 @@ Bundle layout::
     ├── dnsmasq.pid                    # dnsmasq PID (in container netns)
     ├── dnsmasq.log                    # dnsmasq query log (for shield watch)
     ├── resolv.conf                    # bind-mounted over /etc/resolv.conf (dnsmasq tier)
-    ├── interactive                    # interactive tier marker (e.g. "nflog")
     ├── container.id                   # podman container ID (short, 12-char hex)
     └── audit.jsonl                    # per-container audit log
 """
@@ -159,11 +158,6 @@ def resolv_conf_path(state_dir: Path) -> Path:
 # ── Container identity and observability ────────────────
 
 
-def interactive_path(state_dir: Path) -> Path:
-    """Return the path to the interactive tier marker file."""
-    return state_dir / "interactive"
-
-
 def container_id_path(state_dir: Path) -> Path:
     """Return the path to the persisted podman container ID file."""
     return state_dir / "container.id"
@@ -179,19 +173,6 @@ def audit_path(state_dir: Path) -> Path:
 # The path functions above are pure derivations.  The functions below
 # read file contents and compute derived state (merging, deduplication,
 # set subtraction).
-
-
-def read_interactive_tier(state_dir: Path) -> str | None:
-    """Read the interactive tier from the state bundle.
-
-    Returns ``"nflog"`` (or whatever tier string is stored) if the file
-    exists and contains a non-empty value, otherwise ``None``.
-    """
-    path = interactive_path(state_dir)
-    if not path.is_file():
-        return None
-    value = path.read_text().strip()
-    return value or None
 
 
 def read_allowed_ips(state_dir: Path) -> list[str]:

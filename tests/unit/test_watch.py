@@ -24,11 +24,11 @@ from terok_shield.cli.watch import (
 from terok_shield.common.config import DnsTier
 from terok_shield.core.nft_constants import (
     ALLOWED_LOG_PREFIX,
+    BLOCKED_LOG_PREFIX,
     BYPASS_LOG_PREFIX,
     DENIED_LOG_PREFIX,
     NFLOG_GROUP,
     PRIVATE_LOG_PREFIX,
-    QUEUED_LOG_PREFIX,
 )
 from terok_shield.lib.watchers import (
     AuditLogWatcher,
@@ -698,10 +698,10 @@ class TestNflogWatcherParsing:
         assert events[0].port == 53
         assert events[0].proto == 17
 
-    def test_queued_packet_produces_queued_connection(self) -> None:
-        """NFLOG message with QUEUED prefix yields queued_connection event."""
+    def test_blocked_packet_produces_queued_connection(self) -> None:
+        """NFLOG message with BLOCKED prefix yields queued_connection event."""
         watcher = self._make_watcher()
-        data = _make_nflog_packet(f"{QUEUED_LOG_PREFIX}: ", "192.0.2.1", 6, 443)
+        data = _make_nflog_packet(f"{BLOCKED_LOG_PREFIX}: ", "192.0.2.1", 6, 443)
         events = watcher._parse_messages(data)
         assert len(events) == 1
         assert events[0].action == "queued_connection"

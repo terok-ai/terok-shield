@@ -27,7 +27,6 @@ ANNOTATION_VERSION_KEY = "terok.shield.version"
 ANNOTATION_AUDIT_ENABLED_KEY = "terok.shield.audit_enabled"
 ANNOTATION_UPSTREAM_DNS_KEY = "terok.shield.upstream_dns"
 ANNOTATION_DNS_TIER_KEY = "terok.shield.dns_tier"
-ANNOTATION_INTERACTIVE_KEY = "terok.shield.interactive"
 
 
 # ── DNS tier ────────────────────────────────────────────
@@ -119,7 +118,6 @@ class ShieldConfig:
     loopback_ports: tuple[int, ...] = ()
     audit_enabled: bool = True
     profiles_dir: Path | None = None
-    interactive: bool = False
 
 
 # ── Config-file schema (Pydantic) ───────────────────────
@@ -151,7 +149,6 @@ class ShieldFileConfig(BaseModel):
         default_factory=list,
         description="TCP ports forwarded to host loopback (via pasta ``-T``)",
     )
-    interactive: bool = Field(default=False, description="Enable interactive NFLOG approval mode")
     audit: AuditFileConfig = Field(
         default_factory=AuditFileConfig, description="Audit logging settings"
     )

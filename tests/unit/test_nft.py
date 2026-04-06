@@ -56,7 +56,7 @@ _DENY_V4_SET = "set deny_v4 { type ipv4_addr; flags interval; }"
 _DENY_V6_SET = "set deny_v6 { type ipv6_addr; flags interval; }"
 _ALLOW_LOG_PREFIX = "TEROK_SHIELD_ALLOWED"
 _DENY_LOG_PREFIX = "TEROK_SHIELD_DENIED"
-_QUEUED_LOG_PREFIX = "TEROK_SHIELD_QUEUED"
+_BLOCKED_LOG_PREFIX = "TEROK_SHIELD_BLOCKED"
 _ADMIN_PROHIBITED = "admin-prohibited"
 _INPUT_CHAIN = "chain input"
 _OUTPUT_CHAIN = "chain output"
@@ -225,71 +225,45 @@ def test_hook_ruleset_places_deny_sets_between_allow_and_private() -> None:
     assert allow_pos < deny_pos < private_pos
 
 
-# ── Interactive mode ────────────────────────────────────
+# ── Terminal deny rule (BLOCKED prefix) ───────────────
 
 
-def test_hook_ruleset_interactive_uses_queued_prefix() -> None:
-    """Interactive mode replaces the deny-all rule with a QUEUED prefix rule."""
-    ruleset = hook_ruleset(interactive=True)
-    assert _QUEUED_LOG_PREFIX in ruleset
+def test_hook_ruleset_uses_blocked_prefix() -> None:
+    """Terminal deny rule uses the BLOCKED prefix for unclassified connections."""
+    ruleset = hook_ruleset()
+    assert _BLOCKED_LOG_PREFIX in ruleset
 
 
-def test_hook_ruleset_interactive_does_not_have_deny_terminal_rule() -> None:
-    """Interactive mode must not include the terminal DENIED log line."""
-    ruleset = hook_ruleset(interactive=True)
-    # The deny sets still reference DENIED prefix -- but the terminal rule should use QUEUED.
-    # Split by lines: the terminal deny-all rule in non-interactive has a standalone
-    # DENIED line; interactive replaces it with QUEUED.
-    lines = ruleset.splitlines()
-    terminal_deny_lines = [
-        line.strip()
-        for line in lines
-        if line.strip().startswith("log group") and _DENY_LOG_PREFIX in line and "reject" in line
+def test_hook_ruleset_terminal_rule_is_standalone_log_reject() -> None:
+    """Terminal deny rule is a standalone log+reject (no daddr selector)."""
+    lines = hook_ruleset().splitlines()
+    terminal = [
+        ln.strip()
+        for ln in lines
+        if ln.strip().startswith("log group") and _BLOCKED_LOG_PREFIX in ln and "reject" in ln
     ]
-    assert terminal_deny_lines == [], "Terminal deny-all rule should not appear in interactive mode"
+    assert len(terminal) == 1, "Exactly one terminal BLOCKED rule expected"
 
 
-def test_hook_ruleset_interactive_still_contains_deny_sets() -> None:
-    """Interactive mode still declares deny_v4 and deny_v6 sets."""
-    ruleset = hook_ruleset(interactive=True)
-    assert _DENY_V4_SET in ruleset
-    assert _DENY_V6_SET in ruleset
+def test_hook_ruleset_deny_sets_use_denied_prefix() -> None:
+    """Deny set rules use the DENIED prefix (not BLOCKED)."""
+    ruleset = hook_ruleset()
+    # Deny set rules have a daddr selector + DENIED prefix
+    lines = [ln for ln in ruleset.splitlines() if "@deny_v4" in ln or "@deny_v6" in ln]
+    assert all(_DENY_LOG_PREFIX in ln for ln in lines)
+    assert not any(_BLOCKED_LOG_PREFIX in ln for ln in lines)
 
 
-def test_hook_ruleset_non_interactive_has_no_queued_prefix() -> None:
-    """Non-interactive (default) hook mode must not contain the QUEUED log prefix."""
-    ruleset = hook_ruleset(interactive=False)
-    assert _QUEUED_LOG_PREFIX not in ruleset
-
-
-def test_verify_ruleset_accepts_interactive_hook_ruleset() -> None:
-    """verify_ruleset() with interactive=True accepts the interactive hook ruleset."""
-    assert verify_ruleset(hook_ruleset(interactive=True), interactive=True) == []
-
-
-def test_verify_ruleset_interactive_rejects_non_interactive_ruleset() -> None:
-    """verify_ruleset() with interactive=True rejects a non-interactive ruleset."""
-    errors = verify_ruleset(hook_ruleset(interactive=False), interactive=True)
-    assert any("queued nflog prefix" in error for error in errors)
-
-
-def test_verify_ruleset_interactive_mode_cross_validates() -> None:
-    """Interactive ruleset passes interactive verify but not non-interactive, and vice versa."""
-    interactive_rs = hook_ruleset(interactive=True)
-    non_interactive_rs = hook_ruleset(interactive=False)
-    # Interactive ruleset passes interactive verify
-    assert verify_ruleset(interactive_rs, interactive=True) == []
-    # Non-interactive ruleset passes non-interactive verify
-    assert verify_ruleset(non_interactive_rs, interactive=False) == []
-    # Interactive verify rejects non-interactive (missing QUEUED prefix)
-    errors = verify_ruleset(non_interactive_rs, interactive=True)
-    assert any("queued nflog prefix" in e for e in errors)
+def test_hook_ruleset_has_no_queued_prefix() -> None:
+    """Hook ruleset must not contain the legacy QUEUED log prefix."""
+    assert "QUEUED" not in hook_ruleset()
 
 
 def test_verify_ruleset_checks_deny_sets() -> None:
-    """verify_ruleset() requires deny_v4 and deny_v6 sets in both modes."""
+    """verify_ruleset() requires deny_v4 and deny_v6 sets."""
     minimal = (
-        f"policy drop {_ADMIN_PROHIBITED} {_DENY_LOG_PREFIX} "
+        f"policy drop {_ADMIN_PROHIBITED} "
+        f'log group 100 prefix "{_BLOCKED_LOG_PREFIX}" '
         f"allow_v4 allow_v6 {_OUTPUT_CHAIN} {_INPUT_CHAIN}\n"
         f"{_private_reject_rules()}"
     )

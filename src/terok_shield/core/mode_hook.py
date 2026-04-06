@@ -27,7 +27,6 @@ from typing import TYPE_CHECKING
 from ..common.config import (
     ANNOTATION_AUDIT_ENABLED_KEY,
     ANNOTATION_DNS_TIER_KEY,
-    ANNOTATION_INTERACTIVE_KEY,
     ANNOTATION_KEY,
     ANNOTATION_LOOPBACK_PORTS_KEY,
     ANNOTATION_NAME_KEY,
@@ -125,7 +124,6 @@ class HookMode:
         """
         sd = self._config.state_dir.resolve()
         info = self._get_podman_info()
-        interactive = self._config.interactive
 
         # Ensure state dirs and install hooks (idempotent)
         state.ensure_state_dirs(sd)
@@ -174,8 +172,6 @@ class HookMode:
             f"{ANNOTATION_UPSTREAM_DNS_KEY}={upstream_dns}",
             "--annotation",
             f"{ANNOTATION_DNS_TIER_KEY}={tier.value}",
-            "--annotation",
-            f"{ANNOTATION_INTERACTIVE_KEY}={str(interactive).lower()}",
         ]
 
         # WORKAROUND(hooks-dir-persist): currently always takes the global path
@@ -219,7 +215,6 @@ class HookMode:
     def _write_ruleset(self, sd: Path, tier: DnsTier, upstream_dns: str) -> None:
         """Pre-generate the complete nft ruleset into the state bundle."""
         set_timeout = NFT_SET_TIMEOUT_DNSMASQ if tier == DnsTier.DNSMASQ else ""
-        interactive = self._config.interactive
         ruleset_builder = RulesetBuilder(
             dns=upstream_dns,
             loopback_ports=self._config.loopback_ports,
@@ -227,17 +222,11 @@ class HookMode:
         )
         ips = state.read_effective_ips(sd)
         denied_ips = list(state.read_denied_ips(sd))
-        ruleset = ruleset_builder.build_hook(interactive=interactive)
+        ruleset = ruleset_builder.build_hook()
         ruleset += ruleset_builder.add_elements_dual(ips)
         if denied_ips:
             ruleset += add_deny_elements_dual(denied_ips)
         state.ruleset_path(sd).write_text(ruleset)
-
-        # Persist interactive mode flag for shield_up() and the verdict handler
-        if interactive:
-            state.interactive_path(sd).write_text("nflog\n")
-        else:
-            state.interactive_path(sd).unlink(missing_ok=True)
 
     def _write_dnsmasq_config_or_scrub(self, sd: Path, tier: DnsTier, upstream_dns: str) -> None:
         """Pre-generate dnsmasq config for dnsmasq tier, or scrub stale artifacts."""
@@ -392,8 +381,8 @@ class HookMode:
         """Live-deny an IP for a running container via nsenter.
 
         Removes from the nft allow set (best-effort) and from live.allowed.
-        Adds to the nft deny set.  Persists to deny.list when the IP would
-        otherwise be re-allowed (profile IP or interactive mode).
+        Adds to the nft deny set.  Always persists to deny.list so operator
+        deny decisions stick across restarts.
         """
         ip = safe_ip(ip)
         sd = self._config.state_dir.resolve()
@@ -429,19 +418,11 @@ class HookMode:
             self._nft_apply_best_effort(container, nft_cmd)
 
         # Persist to deny.list so deny sets survive shield_up / restart.
-        # In interactive mode: always persist (operator rejects must stick).
-        # In strict mode: only persist when the IP came from a profile.
-        should_persist = state.interactive_path(sd).is_file()
-        if not should_persist:
-            profile_path = state.profile_allowed_path(sd)
-            should_persist = profile_path.is_file() and ip in {
-                ln.strip() for ln in profile_path.read_text().splitlines() if ln.strip()
-            }
-        if should_persist:
-            dp = state.deny_path(sd)
-            if ip not in state.read_denied_ips(sd):
-                with dp.open("a") as f:
-                    f.write(f"{ip}\n")
+        # Operator deny decisions always stick.
+        dp = state.deny_path(sd)
+        if ip not in state.read_denied_ips(sd):
+            with dp.open("a") as f:
+                f.write(f"{ip}\n")
 
     def _set_for_ip(self, ip: str) -> str:
         """Return the nft set name for an IP address."""
@@ -481,10 +462,9 @@ class HookMode:
     def shield_up(self, container: str) -> None:
         """Restore normal deny-all mode for a running container."""
         sd = self._config.state_dir.resolve()
-        interactive = state.interactive_path(sd).is_file()
 
         ruleset = self._container_ruleset(container)
-        rs = ruleset.build_hook(interactive=interactive)
+        rs = ruleset.build_hook()
         current = self.shield_state(container)
         if current == ShieldState.INACTIVE:
             stdin = rs
@@ -525,7 +505,7 @@ class HookMode:
                     )
 
         output = self._runner.nft_via_nsenter(container, "list", "ruleset")
-        errors = ruleset.verify_hook(output, interactive=interactive)
+        errors = ruleset.verify_hook(output)
         if errors:
             raise RuntimeError(f"Ruleset verification failed: {'; '.join(errors)}")
 
@@ -599,10 +579,7 @@ class HookMode:
         if not self._ruleset.verify_bypass(output, allow_all=True):
             return ShieldState.DOWN_ALL
 
-        # Check both strict and interactive hook rulesets
         if not self._ruleset.verify_hook(output):
-            return ShieldState.UP
-        if not self._ruleset.verify_hook(output, interactive=True):
             return ShieldState.UP
 
         return ShieldState.ERROR
@@ -625,7 +602,7 @@ class HookMode:
         """Generate the ruleset that would be applied to a container."""
         if down:
             return self._ruleset.build_bypass(allow_all=allow_all)
-        return self._ruleset.build_hook(interactive=self._config.interactive)
+        return self._ruleset.build_hook()
 
 
 # ── Module-level helpers ────────────────────────────────
