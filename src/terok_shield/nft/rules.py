@@ -7,7 +7,7 @@ Generates per-container nftables rulesets (deny-all and bypass modes),
 provides set operations for runtime allowlist/denylist management, and
 verifies applied rulesets against security invariants.
 
-Security boundary: only stdlib + nft_constants.py imports allowed.
+Security boundary: only stdlib + nft.constants imports allowed.
 All inputs are validated before interpolation into nft commands.
 """
 # WAYPOINT: Shield (__init__), HookMode (mode_hook)

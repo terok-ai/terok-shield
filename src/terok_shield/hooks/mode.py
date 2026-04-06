@@ -8,14 +8,14 @@ container's network namespace.  No root required — only podman and nft.
 
 Orchestrates collaborators per lifecycle phase:
 
-- **RulesetBuilder** (``core.nft``) — generates and verifies nft rulesets
-- **DnsResolver** (``core.dns``) — pre-start domain resolution
-- **ProfileLoader** (``lib.profiles``) — allowlist profile composition
-- **AuditLogger** (``lib.audit``) — event logging
-- **CommandRunner** (``core.run``) — subprocess execution (nft, nsenter)
-- **dnsmasq** (``core.dnsmasq``) — runtime DNS with nftset auto-population
-- **hook_install** (``core.hook_install``) — OCI hook file generation
-- **state** (``core.state``) — per-container state bundle I/O
+- **RulesetBuilder** (``nft.rules``) — generates and verifies nft rulesets
+- **DnsResolver** (``dns.resolver``) — pre-start domain resolution
+- **ProfileLoader** (``profiles``) — allowlist profile composition
+- **AuditLogger** (``audit``) — event logging
+- **CommandRunner** (``run``) — subprocess execution (nft, nsenter)
+- **dnsmasq** (``dns.dnsmasq``) — runtime DNS with nftset auto-population
+- **install** (``hooks.install``) — OCI hook file generation
+- **state** (``state``) — per-container state bundle I/O
 """
 # WAYPOINT: Shield (__init__)
 
