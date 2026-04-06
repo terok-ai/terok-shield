@@ -87,13 +87,15 @@ class ShieldMode(enum.Enum):
 class ShieldState(enum.Enum):
     """Per-container shield state, derived from the live nft ruleset.
 
-    UP: Normal enforcing mode (deny-all).
+    BLOCK: Total network blackout — all traffic dropped, forensic logging only.
+    UP: Normal enforcing mode (deny-all with allowlists).
     DOWN: Bypass mode with private-range protection (RFC 1918 + RFC 4193).
     DOWN_ALL: Bypass mode without private-range protection.
     INACTIVE: No ruleset found (container stopped or unshielded).
     ERROR: Ruleset present but unrecognised.
     """
 
+    BLOCK = "block"
     UP = "up"
     DOWN = "down"
     DOWN_ALL = "down_all"

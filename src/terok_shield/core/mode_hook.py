@@ -478,6 +478,18 @@ class HookMode:
         if errors:
             raise RuntimeError(f"Bypass ruleset verification failed: {'; '.join(errors)}")
 
+    def shield_block(self, container: str) -> None:
+        """Total network blackout — drop all traffic, log for forensics."""
+        ruleset = self._container_ruleset(container)
+        rs = ruleset.build_block()
+        current = self.shield_state(container)
+        stdin = rs if current == ShieldState.INACTIVE else f"delete table {NFT_TABLE}\n{rs}"
+        self._runner.nft_via_nsenter(container, stdin=stdin)
+        output = self._runner.nft_via_nsenter(container, "list", "ruleset")
+        errors = ruleset.verify_block(output)
+        if errors:
+            raise RuntimeError(f"Block ruleset verification failed: {'; '.join(errors)}")
+
     def shield_up(self, container: str) -> None:
         """Restore normal deny-all mode for a running container."""
         sd = self._config.state_dir.resolve()
@@ -593,7 +605,12 @@ class HookMode:
         if not output.strip():
             return ShieldState.INACTIVE
 
-        # verify_* returns a list of errors; empty list = ruleset is valid
+        # verify_* returns a list of errors; empty list = ruleset is valid.
+        # Block is checked first: its minimal ruleset (no sets, no DNS)
+        # would fail all other verifiers.
+        if not self._ruleset.verify_block(output):
+            return ShieldState.BLOCK
+
         if not self._ruleset.verify_bypass(output, allow_all=False):
             return ShieldState.DOWN
         if not self._ruleset.verify_bypass(output, allow_all=True):
