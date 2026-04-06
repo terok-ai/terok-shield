@@ -13,7 +13,16 @@ from collections.abc import Callable
 
 import pytest
 
-from terok_shield.core.nft import (
+from terok_shield.nft.constants import (
+    BLOCKED_LOG_PREFIX,
+    BYPASS_LOG_PREFIX,
+    IPV6_PRIVATE,
+    NFT_TABLE,
+    PASTA_HOST_LOOPBACK_MAP,
+    PRIVATE_RANGES,
+    RFC1918,
+)
+from terok_shield.nft.rules import (
     _is_v4,
     _safe_timeout,
     add_deny_elements_dual,
@@ -27,15 +36,6 @@ from terok_shield.core.nft import (
     verify_block_ruleset,
     verify_bypass_ruleset,
     verify_ruleset,
-)
-from terok_shield.core.nft_constants import (
-    BLOCKED_LOG_PREFIX,
-    BYPASS_LOG_PREFIX,
-    IPV6_PRIVATE,
-    NFT_TABLE,
-    PASTA_HOST_LOOPBACK_MAP,
-    PRIVATE_RANGES,
-    RFC1918,
 )
 
 from ..testnet import (

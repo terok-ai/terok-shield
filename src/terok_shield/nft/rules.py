@@ -16,7 +16,7 @@ import ipaddress
 import re
 import textwrap
 
-from .nft_constants import (
+from .constants import (
     ALLOWED_LOG_PREFIX,
     BLOCKED_LOG_PREFIX,
     BYPASS_LOG_PREFIX,

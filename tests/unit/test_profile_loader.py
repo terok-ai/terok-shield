@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from terok_shield.lib.profiles import ProfileLoader
+from terok_shield.profiles import ProfileLoader
 
 from ..testfs import FAKE_PROFILES_DIR, FORBIDDEN_TRAVERSAL, NONEXISTENT_DIR
 from ..testnet import CUSTOM_DOMAIN, TEST_DOMAIN, TEST_IP1

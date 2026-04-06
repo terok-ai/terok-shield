@@ -13,7 +13,7 @@ Traffic tests are split by protocol/port so that future rule changes
 
 import pytest
 
-from terok_shield.core.nft_constants import BYPASS_LOG_PREFIX, IPV6_PRIVATE, RFC1918
+from terok_shield.nft.constants import BYPASS_LOG_PREFIX, IPV6_PRIVATE, RFC1918
 from tests.testnet import (
     ALLOWED_TARGET_HTTP,
     BLOCKED_TARGET_DNS_PORT,

@@ -20,8 +20,7 @@ from unittest import mock
 
 import pytest
 
-from terok_shield import Shield, ShieldConfig
-from terok_shield.core import state
+from terok_shield import Shield, ShieldConfig, state
 from tests.testnet import BLOCKED_TARGET_HTTP
 
 from ..conftest import CTR_PREFIX, hooks_unavailable, nft_missing, podman_missing
@@ -38,7 +37,7 @@ from ..helpers import assert_blocked
 class TestHookEntrypointStory:
     """Story: stdlib-only hook applies pre-generated ruleset and discovers gateway."""
 
-    @mock.patch("terok_shield.core.mode_hook.has_global_hooks", return_value=True)
+    @mock.patch("terok_shield.hooks.mode.has_global_hooks", return_value=True)
     def test_pre_start_writes_ruleset_nft(
         self, _hgh: mock.Mock, shield_env: Path, _pull_image: None
     ) -> None:
@@ -94,7 +93,7 @@ class TestHookEntrypointStory:
         # Default-deny must hold after shield_up as well
         assert_blocked(name, BLOCKED_TARGET_HTTP)
 
-    @mock.patch("terok_shield.core.mode_hook.has_global_hooks", return_value=True)
+    @mock.patch("terok_shield.hooks.mode.has_global_hooks", return_value=True)
     def test_hook_entrypoint_is_stdlib_only(
         self, _hgh: mock.Mock, shield_env: Path, _pull_image: None
     ) -> None:

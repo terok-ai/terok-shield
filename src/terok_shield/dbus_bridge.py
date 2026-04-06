@@ -38,7 +38,7 @@ except ImportError as _exc:
         "D-Bus bridge requires terok-dbus. Install via: poetry install --with dbus"
     ) from _exc
 
-from ..core.state import container_id_path
+from .state import container_id_path
 
 logger = logging.getLogger(__name__)
 

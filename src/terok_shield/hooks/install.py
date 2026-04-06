@@ -15,7 +15,7 @@ Pure file I/O — no runtime container interaction.
 import json
 from pathlib import Path
 
-from ..common.config import ANNOTATION_KEY
+from ..config import ANNOTATION_KEY
 
 _ENTRYPOINT_NAME = "terok-shield-hook"
 _HOOK_STAGES = ("createRuntime", "poststop")

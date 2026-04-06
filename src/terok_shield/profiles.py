@@ -12,7 +12,7 @@ same name, so site-specific customisation works without forking.
 from importlib import resources as importlib_resources
 from pathlib import Path
 
-from ..common.validation import parse_entries as _parse_entries, validate_safe_name
+from .validation import parse_entries as _parse_entries, validate_safe_name
 
 _BUNDLED_PACKAGE = "terok_shield.resources.dns"
 

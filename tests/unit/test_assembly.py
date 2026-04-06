@@ -16,13 +16,12 @@ from unittest import mock
 
 import pytest
 
-from terok_shield import Shield, ShieldConfig
-from terok_shield.core import state
-from terok_shield.core.dns import DnsResolver
-from terok_shield.core.mode_hook import HookMode
-from terok_shield.core.nft import RulesetBuilder
-from terok_shield.lib.audit import AuditLogger
-from terok_shield.lib.profiles import ProfileLoader
+from terok_shield import Shield, ShieldConfig, state
+from terok_shield.audit import AuditLogger
+from terok_shield.dns.resolver import DnsResolver
+from terok_shield.hooks.mode import HookMode
+from terok_shield.nft.rules import RulesetBuilder
+from terok_shield.profiles import ProfileLoader
 
 from ..testfs import FAKE_RESOLVED_DIR, NFT_BINARY
 from ..testnet import TEST_DOMAIN, TEST_IP1, TEST_IP2
@@ -196,7 +195,7 @@ def test_shield_up_reads_live_allowed(
     harness.ruleset.add_elements_dual.assert_called_once_with([TEST_IP1, TEST_IP2])
 
 
-@mock.patch("terok_shield.core.run.find_nft", return_value=NFT_BINARY)
+@mock.patch("terok_shield.run.find_nft", return_value=NFT_BINARY)
 def test_shield_constructs_real_collaborators(_find: mock.Mock, tmp_path: Path) -> None:
     """Shield(ShieldConfig(...)) wires the default real collaborators."""
     shield = Shield(ShieldConfig(state_dir=tmp_path))
@@ -206,14 +205,14 @@ def test_shield_constructs_real_collaborators(_find: mock.Mock, tmp_path: Path) 
     assert isinstance(shield.ruleset, RulesetBuilder)
 
 
-@mock.patch("terok_shield.core.run.find_nft", return_value=NFT_BINARY)
+@mock.patch("terok_shield.run.find_nft", return_value=NFT_BINARY)
 def test_shield_audit_path_derived_from_state_dir(_find: mock.Mock, tmp_path: Path) -> None:
     """Shield's AuditLogger writes to state_dir/audit.jsonl."""
     shield = Shield(ShieldConfig(state_dir=tmp_path))
     assert shield.audit._audit_path == state.audit_path(tmp_path)
 
 
-@mock.patch("terok_shield.core.run.find_nft", return_value=NFT_BINARY)
+@mock.patch("terok_shield.run.find_nft", return_value=NFT_BINARY)
 def test_shield_resolve_uses_profile_allowed_path(_find: mock.Mock, tmp_path: Path) -> None:
     """Shield.resolve() caches resolved entries in state_dir/profile.allowed."""
     dns = mock.MagicMock()

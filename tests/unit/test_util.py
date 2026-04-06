@@ -5,7 +5,7 @@
 
 import pytest
 
-from terok_shield.common.util import is_ip, is_ipv4, is_ipv6
+from terok_shield.util import is_ip, is_ipv4, is_ipv6
 
 from ..testnet import (
     IPV6_CLOUDFLARE,

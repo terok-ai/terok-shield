@@ -14,7 +14,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ...core import dnsmasq
+from ..dns import dnsmasq
 from ._event import WatchEvent
 
 # Matches dnsmasq log-queries lines like:

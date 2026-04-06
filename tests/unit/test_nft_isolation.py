@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""AST-based tests for nft.py import isolation.
+"""AST-based tests for nft/rules.py import isolation.
 
 This file stays intentionally small and explicit because it guards the import
 boundary of the auditable security module. We avoid abstraction here so the
@@ -13,19 +13,19 @@ from pathlib import Path
 
 
 class TestNftImportIsolation:
-    """nft.py is the auditable security boundary -- no third-party imports."""
+    """nft/rules.py is the auditable security boundary -- no third-party imports."""
 
     def test_nft_has_only_allowed_imports(self) -> None:
-        """Verify nft.py imports only stdlib and nft_constants."""
+        """Verify nft/rules.py imports only stdlib and nft.constants."""
         # Keep the source path inline here so auditors can review the exact
         # security-boundary file target without indirection.
         source = (
-            Path(__file__).parents[2] / "src" / "terok_shield" / "core" / "nft.py"
+            Path(__file__).parents[2] / "src" / "terok_shield" / "nft" / "rules.py"
         ).read_text()
         tree = ast.parse(source)
         stdlib = {"ipaddress", "re", "textwrap"}
-        # nft_constants.py is the only non-stdlib import allowed (literals-only module)
-        allowed_relative = {"nft_constants"}
+        # constants.py is the only non-stdlib import allowed (literals-only module)
+        allowed_relative = {"constants"}
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:

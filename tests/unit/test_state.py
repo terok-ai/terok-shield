@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from terok_shield.core.state import (
+from terok_shield.state import (
     BUNDLE_VERSION,
     audit_path,
     container_id_path,
@@ -176,13 +176,13 @@ def test_hook_entrypoint_path_strings_match_state_functions() -> None:
     """
     import ast
 
-    from terok_shield.core.state import (
+    from terok_shield.resources import hook_entrypoint as _ep
+    from terok_shield.state import (
         dnsmasq_conf_path,
         dnsmasq_pid_path,
         gateway_path,
         ruleset_path,
     )
-    from terok_shield.resources import hook_entrypoint as _ep
 
     source = Path(_ep.__file__).read_text()
     tree = ast.parse(source)

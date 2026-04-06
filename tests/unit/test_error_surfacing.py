@@ -15,12 +15,12 @@ from unittest import mock
 
 import pytest
 
+from terok_shield.audit import AuditLogger
 from terok_shield.cli.main import _load_config_file
-from terok_shield.common.config import ShieldFileConfig
-from terok_shield.core.dnsmasq import generate_config, read_domains
-from terok_shield.core.nft_constants import PASTA_DNS
-from terok_shield.core.run import ExecError
-from terok_shield.lib.audit import AuditLogger
+from terok_shield.config import ShieldFileConfig
+from terok_shield.dns.dnsmasq import generate_config, read_domains
+from terok_shield.nft.constants import PASTA_DNS
+from terok_shield.run import ExecError
 
 from ..testnet import TEST_DOMAIN, TEST_DOMAIN2
 
@@ -248,7 +248,7 @@ class TestAuditLogEventWarnings:
 
         audit = AuditLogger(audit_path=audit_path, enabled=True)
 
-        with caplog.at_level(logging.WARNING, logger="terok_shield.lib.audit"):
+        with caplog.at_level(logging.WARNING, logger="terok_shield.audit"):
             audit.log_event("test-ctr", "setup", detail="test")
 
         assert len(caplog.records) == 1
@@ -273,7 +273,7 @@ class TestAuditLogEventWarnings:
 
         audit = AuditLogger(audit_path=audit_path, enabled=False)
 
-        with caplog.at_level(logging.WARNING, logger="terok_shield.lib.audit"):
+        with caplog.at_level(logging.WARNING, logger="terok_shield.audit"):
             audit.log_event("test-ctr", "setup", detail="test")
 
         assert len(caplog.records) == 0
@@ -288,10 +288,10 @@ class TestDenyIpWarnings:
     @pytest.fixture
     def hook_mode(self, tmp_path: Path) -> tuple[mock.MagicMock, object]:
         """Create a minimal HookMode with a mock runner for deny_ip tests."""
-        from terok_shield.common.config import ShieldConfig, ShieldMode
-        from terok_shield.core import state
-        from terok_shield.core.mode_hook import HookMode
-        from terok_shield.core.nft import RulesetBuilder
+        from terok_shield import state
+        from terok_shield.config import ShieldConfig, ShieldMode
+        from terok_shield.hooks.mode import HookMode
+        from terok_shield.nft.rules import RulesetBuilder
 
         state.ensure_state_dirs(tmp_path)
         config = ShieldConfig(state_dir=tmp_path, mode=ShieldMode.HOOK)

@@ -11,18 +11,18 @@ from unittest import mock
 
 import pytest
 
-from terok_shield.common.config import (
+from terok_shield import state
+from terok_shield.config import (
     ANNOTATION_AUDIT_ENABLED_KEY,
     ANNOTATION_STATE_DIR_KEY,
     ShieldConfig,
     ShieldState,
 )
-from terok_shield.core import state
-from terok_shield.core.hook_install import install_hooks
-from terok_shield.core.mode_hook import HookMode
-from terok_shield.core.nft import bypass_ruleset, hook_ruleset
-from terok_shield.core.nft_constants import PASTA_HOST_LOOPBACK_MAP
-from terok_shield.core.run import ExecError
+from terok_shield.hooks.install import install_hooks
+from terok_shield.hooks.mode import HookMode
+from terok_shield.nft.constants import PASTA_HOST_LOOPBACK_MAP
+from terok_shield.nft.rules import bypass_ruleset, hook_ruleset
+from terok_shield.run import ExecError
 
 from ..testfs import BIN_DIR_NAME, HOOK_ENTRYPOINT_NAME, HOOKS_DIR_NAME
 from ..testnet import (
@@ -150,7 +150,7 @@ def test_hook_mode_stores_collaborators(
     assert harness.mode._ruleset is ruleset
 
 
-@mock.patch("terok_shield.core.mode_hook.has_global_hooks", return_value=True)
+@mock.patch("terok_shield.hooks.mode.has_global_hooks", return_value=True)
 def test_pre_start_uses_pasta_for_rootless_mode(
     _has_hooks: mock.Mock,
     monkeypatch: pytest.MonkeyPatch,
@@ -175,7 +175,7 @@ def test_pre_start_uses_pasta_for_rootless_mode(
     assert add_host_arg == f"{CONTAINER_HOSTNAME}:{PASTA_HOST_LOOPBACK_MAP}"
 
 
-@mock.patch("terok_shield.core.mode_hook.has_global_hooks", return_value=True)
+@mock.patch("terok_shield.hooks.mode.has_global_hooks", return_value=True)
 def test_pre_start_installs_hooks_and_creates_state_dirs(
     _has_hooks: mock.Mock,
     monkeypatch: pytest.MonkeyPatch,
@@ -209,7 +209,7 @@ def test_pre_start_installs_hooks_and_creates_state_dirs(
         ),
     ],
 )
-@mock.patch("terok_shield.core.mode_hook.has_global_hooks", return_value=True)
+@mock.patch("terok_shield.hooks.mode.has_global_hooks", return_value=True)
 def test_pre_start_includes_expected_annotations(
     _has_hooks: mock.Mock,
     monkeypatch: pytest.MonkeyPatch,
@@ -639,7 +639,7 @@ def test_install_hooks_creates_entrypoint_and_hook_jsons(tmp_path: Path) -> None
 
 def test_generate_entrypoint_is_stdlib_only(tmp_path: Path) -> None:
     """The entrypoint script uses /usr/bin/env python3 and has no terok_shield imports."""
-    from terok_shield.core.hook_install import _generate_entrypoint
+    from terok_shield.hooks.install import _generate_entrypoint
 
     content = _generate_entrypoint()
     assert content.splitlines()[0] == "#!/usr/bin/env python3"
@@ -647,7 +647,7 @@ def test_generate_entrypoint_is_stdlib_only(tmp_path: Path) -> None:
     assert "ruleset.nft" in content
 
 
-@mock.patch("terok_shield.core.mode_hook.has_global_hooks", return_value=True)
+@mock.patch("terok_shield.hooks.mode.has_global_hooks", return_value=True)
 def test_pre_start_writes_ruleset_nft(
     _has_hooks: mock.Mock,
     monkeypatch: pytest.MonkeyPatch,
@@ -673,7 +673,7 @@ def test_pre_start_writes_ruleset_nft(
 
 def test_setup_global_hooks_non_sudo(tmp_path: Path) -> None:
     """setup_global_hooks() installs hooks without sudo."""
-    from terok_shield.core.hook_install import setup_global_hooks
+    from terok_shield.hooks.install import setup_global_hooks
 
     target = tmp_path / "hooks.d"
     setup_global_hooks(target)
@@ -690,7 +690,7 @@ def test_setup_global_hooks_sudo_uses_subprocess(tmp_path: Path) -> None:
     """setup_global_hooks(use_sudo=True) calls sudo subprocess."""
     from unittest import mock
 
-    from terok_shield.core.hook_install import setup_global_hooks
+    from terok_shield.hooks.install import setup_global_hooks
 
     target = tmp_path / "system-hooks"
     with mock.patch("subprocess.run") as mock_run:
@@ -701,7 +701,7 @@ def test_setup_global_hooks_sudo_uses_subprocess(tmp_path: Path) -> None:
         assert all(cmd[0] == "sudo" for cmd in cmds)
 
 
-@mock.patch("terok_shield.core.mode_hook.has_global_hooks", return_value=True)
+@mock.patch("terok_shield.hooks.mode.has_global_hooks", return_value=True)
 def test_pre_start_slirp4netns_network_args(
     _has_hooks: mock.Mock,
     monkeypatch: pytest.MonkeyPatch,
@@ -746,7 +746,7 @@ def test_pre_start_with_global_hooks_skips_hooks_dir(
     )
     harness.profiles.compose_profiles.return_value = []
 
-    with mock.patch("terok_shield.core.mode_hook.has_global_hooks", return_value=True):
+    with mock.patch("terok_shield.hooks.mode.has_global_hooks", return_value=True):
         args = harness.mode.pre_start("test", ["dev-standard"])
 
     assert "--hooks-dir" not in args
@@ -763,7 +763,7 @@ def test_pre_start_no_global_hooks_raises(
     make_config: ConfigFactory,
 ) -> None:
     """pre_start() without global hooks raises ShieldNeedsSetup."""
-    from terok_shield.core.run import ShieldNeedsSetup
+    from terok_shield.run import ShieldNeedsSetup
 
     _set_euid(monkeypatch, 0)
     harness = make_hook_mode(config=make_config())
@@ -775,7 +775,7 @@ def test_pre_start_no_global_hooks_raises(
     )
     harness.profiles.compose_profiles.return_value = []
 
-    with mock.patch("terok_shield.core.mode_hook.has_global_hooks", return_value=False):
+    with mock.patch("terok_shield.hooks.mode.has_global_hooks", return_value=False):
         with pytest.raises(ShieldNeedsSetup, match="terok-shield setup"):
             harness.mode.pre_start("test", ["dev-standard"])
 
@@ -818,7 +818,7 @@ def test_container_ruleset_returns_builder_with_dns(
     make_hook_mode: HookModeHarnessFactory,
 ) -> None:
     """_container_ruleset() creates RulesetBuilder with resolved DNS."""
-    from terok_shield.core.nft import RulesetBuilder
+    from terok_shield.nft.rules import RulesetBuilder
 
     harness = make_hook_mode()
     harness.runner.podman_inspect.return_value = "12345"
@@ -893,8 +893,8 @@ class TestDomainOperations:
         state.dnsmasq_pid_path(sd).write_text("12345\n")
 
         with (
-            mock.patch("terok_shield.core.dnsmasq._is_our_dnsmasq", return_value=True),
-            mock.patch("terok_shield.core.dnsmasq.os.kill"),
+            mock.patch("terok_shield.dns.dnsmasq._is_our_dnsmasq", return_value=True),
+            mock.patch("terok_shield.dns.dnsmasq.os.kill"),
         ):
             harness.mode.allow_domain(TEST_DOMAIN)
 
@@ -908,7 +908,7 @@ class TestDomainOperations:
         state.ensure_state_dirs(sd)
         state.profile_domains_path(sd).write_text(f"{TEST_DOMAIN}\n")
 
-        with mock.patch("terok_shield.core.dnsmasq.reload") as mock_reload:
+        with mock.patch("terok_shield.dns.dnsmasq.reload") as mock_reload:
             harness.mode.allow_domain(TEST_DOMAIN)
         mock_reload.assert_not_called()
 
@@ -922,13 +922,13 @@ class TestDomainOperations:
         state.dnsmasq_pid_path(sd).write_text("12345\n")
 
         with (
-            mock.patch("terok_shield.core.dnsmasq._is_our_dnsmasq", return_value=True),
-            mock.patch("terok_shield.core.dnsmasq.os.kill"),
+            mock.patch("terok_shield.dns.dnsmasq._is_our_dnsmasq", return_value=True),
+            mock.patch("terok_shield.dns.dnsmasq.os.kill"),
         ):
             harness.mode.deny_domain(TEST_DOMAIN)
 
         # Domain is in denied.domains, excluded from merged set
-        from terok_shield.core.dnsmasq import read_merged_domains
+        from terok_shield.dns.dnsmasq import read_merged_domains
 
         denied = state.denied_domains_path(sd).read_text()
         assert TEST_DOMAIN in denied
@@ -984,8 +984,8 @@ class TestDomainOperations:
         # dns_tier_path NOT written — pre_start has not run
 
         with (
-            mock.patch("terok_shield.core.dnsmasq._is_our_dnsmasq", return_value=True),
-            mock.patch("terok_shield.core.dnsmasq.os.kill"),
+            mock.patch("terok_shield.dns.dnsmasq._is_our_dnsmasq", return_value=True),
+            mock.patch("terok_shield.dns.dnsmasq.os.kill"),
         ):
             harness.mode.allow_domain(TEST_DOMAIN)
 
@@ -996,7 +996,7 @@ class TestDomainOperations:
 class TestPreStartDnsTierBranches:
     """pre_start() DNS tier branching — dnsmasq vs dig/getent code paths."""
 
-    @mock.patch("terok_shield.core.mode_hook.has_global_hooks", return_value=True)
+    @mock.patch("terok_shield.hooks.mode.has_global_hooks", return_value=True)
     def test_pre_start_dig_tier_resolves_all_entries(
         self,
         _has_hooks: mock.Mock,
@@ -1021,7 +1021,7 @@ class TestPreStartDnsTierBranches:
         # No --dns flag for dig tier
         assert "--dns" not in args
 
-    @mock.patch("terok_shield.core.mode_hook.has_global_hooks", return_value=True)
+    @mock.patch("terok_shield.hooks.mode.has_global_hooks", return_value=True)
     def test_pre_start_dnsmasq_tier_splits_domains_and_ips(
         self,
         _has_hooks: mock.Mock,
@@ -1060,7 +1060,7 @@ class TestPreStartDnsTierBranches:
         assert resolv.is_file()
         assert "127.0.0.1" in resolv.read_text()
 
-    @mock.patch("terok_shield.core.mode_hook.has_global_hooks", return_value=True)
+    @mock.patch("terok_shield.hooks.mode.has_global_hooks", return_value=True)
     def test_pre_start_getent_tier_resolves_all_entries(
         self,
         _has_hooks: mock.Mock,
@@ -1093,8 +1093,8 @@ class TestDenyDomainWithReload:
         state.dnsmasq_pid_path(sd).write_text("12345\n")
 
         with (
-            mock.patch("terok_shield.core.dnsmasq._is_our_dnsmasq", return_value=True),
-            mock.patch("terok_shield.core.dnsmasq.os.kill"),
+            mock.patch("terok_shield.dns.dnsmasq._is_our_dnsmasq", return_value=True),
+            mock.patch("terok_shield.dns.dnsmasq.os.kill"),
         ):
             harness.mode.deny_domain(TEST_DOMAIN)
 
@@ -1109,7 +1109,7 @@ class TestDenyDomainWithReload:
         sd = harness.config.state_dir.resolve()
         state.ensure_state_dirs(sd)
 
-        with mock.patch("terok_shield.core.dnsmasq.reload") as mock_reload:
+        with mock.patch("terok_shield.dns.dnsmasq.reload") as mock_reload:
             harness.mode.deny_domain(TEST_DOMAIN)
         mock_reload.assert_not_called()
 
@@ -1172,13 +1172,13 @@ class TestContainerRulesetDnsTier:
 
 def test_upstream_dns_for_mode_raises_on_unknown_mode() -> None:
     """_upstream_dns_for_mode() raises ValueError for unrecognised network modes."""
-    from terok_shield.core.mode_hook import _upstream_dns_for_mode
+    from terok_shield.hooks.mode import _upstream_dns_for_mode
 
     with pytest.raises(ValueError, match="Cannot determine upstream DNS"):
         _upstream_dns_for_mode("bridge")
 
 
-@mock.patch("terok_shield.core.mode_hook.has_global_hooks", return_value=True)
+@mock.patch("terok_shield.hooks.mode.has_global_hooks", return_value=True)
 def test_pre_start_includes_hooks_dir_when_persists(
     _has_hooks: mock.Mock,
     monkeypatch: pytest.MonkeyPatch,
@@ -1269,7 +1269,7 @@ def test_shield_up_repopulates_gateway_v6_from_file(
     assert gateway_calls, "Expected nft call to add gateway_v6 element"
 
 
-@mock.patch("terok_shield.core.mode_hook.has_global_hooks", return_value=True)
+@mock.patch("terok_shield.hooks.mode.has_global_hooks", return_value=True)
 def test_pre_start_with_denied_ips_includes_deny_elements(
     _has_hooks: mock.Mock,
     monkeypatch: pytest.MonkeyPatch,
@@ -1296,7 +1296,7 @@ def test_pre_start_with_denied_ips_includes_deny_elements(
 # ── Container ID persistence ─────────────────────────────
 
 
-@mock.patch("terok_shield.core.mode_hook.has_global_hooks", return_value=True)
+@mock.patch("terok_shield.hooks.mode.has_global_hooks", return_value=True)
 def test_pre_start_does_not_inspect_container(
     _has_hooks: mock.Mock,
     monkeypatch: pytest.MonkeyPatch,

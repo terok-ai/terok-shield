@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from terok_shield.core import state
-from terok_shield.lib.audit import AuditLogger
+from terok_shield import state
+from terok_shield.audit import AuditLogger
 from tests.testnet import TEST_IP1, TEST_IP2
 
 # -- Filesystem audit (no container needed) -------------------

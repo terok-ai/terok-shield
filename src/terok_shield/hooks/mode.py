@@ -24,7 +24,8 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..common.config import (
+from .. import state
+from ..config import (
     ANNOTATION_AUDIT_ENABLED_KEY,
     ANNOTATION_DNS_TIER_KEY,
     ANNOTATION_KEY,
@@ -38,38 +39,38 @@ from ..common.config import (
     ShieldState,
     detect_dns_tier,
 )
-from ..common.podman_info import (
-    PodmanInfo,
-    global_hooks_hint,
-    has_global_hooks,
-    parse_podman_info,
-    parse_resolv_conf,
+from ..dns import dnsmasq
+from ..nft.constants import (
+    NFT_SET_TIMEOUT_DNSMASQ,
+    PASTA_DNS,
+    PASTA_HOST_LOOPBACK_MAP,
+    SLIRP4NETNS_DNS,
 )
-from ..common.util import is_ip as _is_ip, is_ipv4
-from . import dnsmasq, state
-from .hook_install import install_hooks
-from .nft import (
+from ..nft.rules import (
     NFT_TABLE,
     RulesetBuilder,
     add_deny_elements_dual,
     delete_deny_elements_dual,
     safe_ip,
 )
-from .nft_constants import (
-    NFT_SET_TIMEOUT_DNSMASQ,
-    PASTA_DNS,
-    PASTA_HOST_LOOPBACK_MAP,
-    SLIRP4NETNS_DNS,
+from ..podman_info import (
+    PodmanInfo,
+    global_hooks_hint,
+    has_global_hooks,
+    parse_podman_info,
+    parse_resolv_conf,
 )
-from .run import ExecError, ShieldNeedsSetup
+from ..run import ExecError, ShieldNeedsSetup
+from ..util import is_ip as _is_ip, is_ipv4
+from .install import install_hooks
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from ..lib.audit import AuditLogger
-    from ..lib.profiles import ProfileLoader
-    from .dns import DnsResolver
-    from .run import CommandRunner
+    from ..audit import AuditLogger
+    from ..dns.resolver import DnsResolver
+    from ..profiles import ProfileLoader
+    from ..run import CommandRunner
 
 
 class HookMode:

@@ -10,7 +10,7 @@ import unittest
 
 import pytest
 
-from terok_shield.core.nft import hook_ruleset
+from terok_shield.nft.rules import hook_ruleset
 from terok_shield.resources.shield_probe import probe
 from tests.testnet import ALLOWED_TARGET_IPS, BLOCKED_TARGET_IP
 

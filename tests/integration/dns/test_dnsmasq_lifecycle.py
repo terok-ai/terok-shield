@@ -19,11 +19,10 @@ from unittest import mock
 
 import pytest
 
-from terok_shield import Shield, ShieldConfig
-from terok_shield.common.config import DnsTier, detect_dns_tier
-from terok_shield.core import state
-from terok_shield.core.dnsmasq import generate_config, nftset_entry, read_domains
-from terok_shield.core.nft_constants import DNSMASQ_BIND, PASTA_DNS
+from terok_shield import Shield, ShieldConfig, state
+from terok_shield.config import DnsTier, detect_dns_tier
+from terok_shield.dns.dnsmasq import generate_config, nftset_entry, read_domains
+from terok_shield.nft.constants import DNSMASQ_BIND, PASTA_DNS
 from tests.testnet import (
     ALLOWED_TARGET_HTTP,
     BLOCKED_TARGET_HTTP,

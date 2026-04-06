@@ -11,9 +11,9 @@ from unittest import mock
 
 import pytest
 
-from terok_shield.core import state
-from terok_shield.core.dns import DnsResolver
-from terok_shield.core.run import DigNotFoundError
+from terok_shield import state
+from terok_shield.dns.resolver import DnsResolver
+from terok_shield.run import DigNotFoundError
 
 from ..testfs import NONEXISTENT_DIR, TEST_CACHE_FILENAME, TEST_SUBDIR_NAME
 from ..testnet import (
@@ -119,7 +119,7 @@ def test_logs_warning_for_unresolvable(
     harness = make_resolver()
     harness.runner.dig_all.side_effect = [[TEST_IP1], []]
 
-    with caplog.at_level("WARNING", logger="terok_shield.core.dns"):
+    with caplog.at_level("WARNING", logger="terok_shield.dns.resolver"):
         harness.resolver.resolve_domains([CLOUDFLARE_DOMAIN, NONEXISTENT_DOMAIN])
 
     assert len(caplog.messages) == 1

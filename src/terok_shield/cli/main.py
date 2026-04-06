@@ -22,8 +22,8 @@ from pathlib import Path
 from typing import Any
 
 from .. import ExecError, Shield, ShieldConfig, ShieldMode
-from ..common.config import ShieldFileConfig
-from ..common.validation import validate_container_name
+from ..config import ShieldFileConfig
+from ..validation import validate_container_name
 from .registry import COMMANDS, ArgDef, CommandDef
 
 # ── Entry point ──────────────────────────────────────────
@@ -325,7 +325,7 @@ def _cmd_logs_cli(
     Otherwise, collects entries from all containers, sorts by timestamp,
     and prints the most recent ``n`` globally.
     """
-    from ..lib.audit import AuditLogger
+    from ..audit import AuditLogger
 
     state_root = (state_dir_override or _resolve_state_root()).resolve()
     if container:
@@ -344,7 +344,7 @@ def _cmd_logs_cli(
 
 def _collect_all_audit_entries(state_root: Path, n: int) -> list[dict]:
     """Collect audit entries from all containers, sorted by timestamp, trimmed to n."""
-    from ..lib.audit import AuditLogger
+    from ..audit import AuditLogger
 
     containers_dir = state_root / "containers"
     if not containers_dir.is_dir():
@@ -360,13 +360,13 @@ def _collect_all_audit_entries(state_root: Path, n: int) -> list[dict]:
 
 def _cmd_setup(*, root: bool, user: bool) -> None:
     """Install global OCI hooks for podman < 5.6.0 restart persistence."""
-    from ..common.podman_info import (
+    from ..hooks.install import setup_global_hooks
+    from ..podman_info import (
         USER_HOOKS_DIR,
         _user_containers_conf,
         ensure_containers_conf_hooks_dir,
         system_hooks_dir,
     )
-    from ..core.hook_install import setup_global_hooks
 
     sys_dir = system_hooks_dir()
     usr_dir = USER_HOOKS_DIR.expanduser()
@@ -510,7 +510,7 @@ def _auto_detect_mode() -> ShieldMode:
     Raises:
         NftNotFoundError: If nft is not installed.
     """
-    from ..core.run import NftNotFoundError, find_nft
+    from ..run import NftNotFoundError, find_nft
 
     if find_nft():
         return ShieldMode.HOOK
@@ -523,7 +523,7 @@ def _auto_detect_mode() -> ShieldMode:
 
 def _version_string() -> str:
     """Return version string with terok-shield and podman versions."""
-    from ..core.run import find_nft
+    from ..run import find_nft
 
     version = _get_version()
     lines = [f"terok-shield {version}"]

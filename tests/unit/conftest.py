@@ -9,7 +9,7 @@ from typing import TypedDict, Unpack
 
 import pytest
 
-from terok_shield.common.config import ShieldConfig, ShieldMode
+from terok_shield.config import ShieldConfig, ShieldMode
 
 from ..testfs import CONFIG_FILENAME, CONFIG_ROOT_NAME, STATE_ROOT_NAME
 

@@ -11,7 +11,7 @@ from unittest import mock
 
 import pytest
 
-from terok_shield.core.run import (
+from terok_shield.run import (
     CommandRunner,
     DigNotFoundError,
     ExecError,
@@ -39,7 +39,7 @@ def _completed(*, rc: int = 0, stdout: str = "", stderr: str = "") -> mock.Mock:
 @pytest.fixture
 def runner() -> SubprocessRunner:
     """Return a fresh subprocess runner with a mocked nft path."""
-    with mock.patch("terok_shield.core.run.find_nft", return_value=NFT_BINARY):
+    with mock.patch("terok_shield.run.find_nft", return_value=NFT_BINARY):
         r = SubprocessRunner()
     # Assume dig is available for most tests; individual tests override.
     r._has_cache["dig"] = True
@@ -364,20 +364,20 @@ def test_find_nft_falls_back_to_sbin(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_find_nft_returns_empty_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     """find_nft() returns empty string when nft is not found anywhere."""
     monkeypatch.setattr(shutil, "which", lambda _name: None)
-    with mock.patch("terok_shield.core.run.Path.is_file", return_value=False):
+    with mock.patch("terok_shield.run.Path.is_file", return_value=False):
         assert find_nft() == ""
 
 
 def test_subprocess_runner_raises_when_nft_missing() -> None:
     """SubprocessRunner raises NftNotFoundError with install instructions when nft is missing."""
-    with mock.patch("terok_shield.core.run.find_nft", return_value=""):
+    with mock.patch("terok_shield.run.find_nft", return_value=""):
         with pytest.raises(NftNotFoundError, match="nft binary not found"):
             SubprocessRunner()
 
 
 def test_subprocess_runner_stores_nft_path() -> None:
     """SubprocessRunner stores the resolved nft path."""
-    with mock.patch("terok_shield.core.run.find_nft", return_value=NFT_SBIN):
+    with mock.patch("terok_shield.run.find_nft", return_value=NFT_SBIN):
         runner = SubprocessRunner()
     assert runner._nft == NFT_SBIN
 

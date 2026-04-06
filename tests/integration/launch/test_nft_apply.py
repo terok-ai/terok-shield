@@ -7,7 +7,7 @@ import subprocess
 
 import pytest
 
-from terok_shield.core.nft import hook_ruleset, verify_ruleset
+from terok_shield.nft.rules import hook_ruleset, verify_ruleset
 
 from ..conftest import nsenter_nft
 
@@ -51,7 +51,7 @@ class TestHookApply:
 
     def test_rfc1918_blocked(self, container_pid: str) -> None:
         """All RFC1918 ranges must appear in the applied ruleset."""
-        from terok_shield.core.nft_constants import RFC1918
+        from terok_shield.nft.constants import RFC1918
 
         _apply(container_pid)
         listed = _list(container_pid)
