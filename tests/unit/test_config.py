@@ -85,6 +85,7 @@ class TestShieldState:
         """ShieldState has all expected members."""
         members = {m.name: m.value for m in ShieldState}
         assert members == {
+            "BLOCK": "block",
             "UP": "up",
             "DOWN": "down",
             "DOWN_ALL": "down_all",

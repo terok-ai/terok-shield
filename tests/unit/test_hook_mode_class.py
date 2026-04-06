@@ -478,6 +478,78 @@ def test_shield_state_classifies_rulesets(
     assert harness.mode.shield_state("test") == expected
 
 
+def test_shield_state_detects_block(make_hook_mode: HookModeHarnessFactory) -> None:
+    """shield_state() returns BLOCK when verify_block passes."""
+    harness = make_hook_mode()
+    harness.runner.nft_via_nsenter.return_value = "table inet terok_shield { policy drop }"
+    harness.ruleset.verify_block.return_value = []  # passes
+    harness.ruleset.verify_bypass.return_value = ["not bypass"]
+    assert harness.mode.shield_state("test") == ShieldState.BLOCK
+
+
+def test_shield_block_applies_block_ruleset(make_hook_mode: HookModeHarnessFactory) -> None:
+    """shield_block() applies the block ruleset and verifies it."""
+    harness = make_hook_mode()
+    harness.mode._container_ruleset = lambda _c: harness.ruleset
+    harness.runner.nft_via_nsenter.side_effect = [
+        "table inet terok_shield {}",  # shield_state() → list_rules
+        "",  # apply block ruleset
+        "valid output",  # verify
+    ]
+    harness.ruleset.build_block.return_value = "block ruleset"
+    harness.ruleset.verify_block.return_value = []
+    harness.ruleset.verify_bypass.return_value = ["not bypass"]
+    harness.ruleset.verify_hook.return_value = ["not hook"]
+
+    harness.mode.shield_block("test-ctr")
+    assert harness.runner.nft_via_nsenter.call_count == 3
+    harness.ruleset.build_block.assert_called_once()
+
+
+def test_shield_block_raises_on_verification_failure(
+    make_hook_mode: HookModeHarnessFactory,
+) -> None:
+    """shield_block() raises RuntimeError when verification fails."""
+    harness = make_hook_mode()
+    harness.mode._container_ruleset = lambda _c: harness.ruleset
+    harness.runner.nft_via_nsenter.side_effect = [
+        "table inet terok_shield {}",  # shield_state()
+        "",  # apply
+        "bad output",  # verify
+    ]
+    harness.ruleset.build_block.return_value = "block ruleset"
+    harness.ruleset.verify_block.return_value = ["policy is not drop"]
+    harness.ruleset.verify_bypass.return_value = ["not bypass"]
+    harness.ruleset.verify_hook.return_value = ["not hook"]
+
+    with pytest.raises(RuntimeError, match="Block ruleset verification failed"):
+        harness.mode.shield_block("test-ctr")
+
+
+def test_shield_block_on_inactive_applies_without_delete(
+    make_hook_mode: HookModeHarnessFactory,
+) -> None:
+    """shield_block() on an inactive container applies ruleset without delete prefix."""
+    harness = make_hook_mode()
+    harness.mode._container_ruleset = lambda _c: harness.ruleset
+    harness.runner.nft_via_nsenter.side_effect = [
+        "",  # shield_state() → INACTIVE
+        "",  # apply
+        "valid output",  # verify
+    ]
+    harness.ruleset.build_block.return_value = "block ruleset"
+    harness.ruleset.verify_block.return_value = []
+
+    harness.mode.shield_block("test-ctr")
+
+    # Second call (apply) should NOT have "delete table" prefix
+    apply_call = harness.runner.nft_via_nsenter.call_args_list[1]
+    stdin_arg = apply_call.kwargs.get(
+        "stdin", apply_call.args[1] if len(apply_call.args) > 1 else ""
+    )
+    assert "delete table" not in stdin_arg
+
+
 @pytest.mark.parametrize(
     ("kwargs", "expected", "method_name"),
     [

@@ -13,6 +13,7 @@ from terok_shield.cli.registry import (
     COMMANDS,
     ArgDef,
     _handle_allow,
+    _handle_block,
     _handle_deny,
     _handle_logs,
     _handle_preview,
@@ -125,6 +126,15 @@ class TestHandlers:
         with mock.patch("terok_shield.cli.watch.run_watch") as mock_run:
             _handle_watch(shield, "ctr")
         mock_run.assert_called_once_with(shield.config.state_dir, "ctr")
+
+    def test_handle_block_delegates_and_prints(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """_handle_block calls shield.block() and prints confirmation."""
+        shield = mock.MagicMock()
+        _handle_block(shield, "test-ctr")
+        shield.block.assert_called_once_with("test-ctr")
+        output = capsys.readouterr().out
+        assert "BLOCKED" in output
+        assert "test-ctr" in output
 
     def test_handle_preview_all_without_down_raises(self) -> None:
         """_handle_preview raises ValueError when allow_all without down."""

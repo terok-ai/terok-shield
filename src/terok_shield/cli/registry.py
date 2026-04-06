@@ -110,6 +110,12 @@ def _handle_up(shield: Shield, container: str) -> None:
     print(f"Shield up for {container}")
 
 
+def _handle_block(shield: Shield, container: str) -> None:
+    """Total network blackout."""
+    shield.block(container)
+    print(f"Shield BLOCKED for {container} — all traffic dropped")
+
+
 def _handle_rules(shield: Shield, container: str) -> None:
     """Show nft rules for a container."""
     st = shield.state(container)
@@ -262,6 +268,12 @@ COMMANDS: tuple[CommandDef, ...] = (
         name="up",
         help="Restore deny-all mode for a container",
         handler=_handle_up,
+        needs_container=True,
+    ),
+    CommandDef(
+        name="block",
+        help="Total network blackout (drop all, log for forensics)",
+        handler=_handle_block,
         needs_container=True,
     ),
     CommandDef(

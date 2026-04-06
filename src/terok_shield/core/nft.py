@@ -94,6 +94,14 @@ class RulesetBuilder:
         """Check applied hook ruleset invariants.  Returns errors (empty = OK)."""
         return verify_ruleset(nft_output)
 
+    def build_block(self) -> str:
+        """Generate the block-mode (total blackout) ruleset."""
+        return block_ruleset()
+
+    def verify_block(self, nft_output: str) -> list[str]:
+        """Check applied block ruleset invariants.  Returns errors (empty = OK)."""
+        return verify_block_ruleset(nft_output)
+
     def verify_bypass(self, nft_output: str, *, allow_all: bool = False) -> list[str]:
         """Check applied bypass ruleset invariants.  Returns errors (empty = OK)."""
         return verify_bypass_ruleset(nft_output, allow_all=allow_all)
@@ -262,6 +270,55 @@ def bypass_ruleset(
             }}
         }}
     """)
+
+
+def block_ruleset() -> str:
+    """Generate a total-blackout nftables ruleset for panic scenarios.
+
+    Drops all traffic except loopback and established connections.
+    No DNS, no allowlists, no gateway ports.  Forensic logging only.
+    """
+    blocked_log = f'        log group {NFLOG_GROUP} prefix "{BLOCKED_LOG_PREFIX}: " drop'
+    return textwrap.dedent(f"""\
+        table {NFT_TABLE} {{
+            chain output {{
+                type filter hook output priority filter; policy drop;
+                oifname "lo" accept
+                ct state established,related accept
+        {blocked_log}
+            }}
+
+            chain input {{
+                type filter hook input priority filter; policy drop;
+                iifname "lo" accept
+                ct state established,related accept
+                drop
+            }}
+        }}
+    """)
+
+
+def verify_block_ruleset(nft_output: str) -> list[str]:
+    """Check applied block ruleset invariants.  Returns errors (empty = OK).
+
+    Verifies:
+    - Both chains present with policy drop
+    - Blocked log prefix present
+    - No allow sets (total blackout means no allowlists)
+    """
+    errors: list[str] = []
+    if "policy drop" not in nft_output:
+        errors.append("policy is not drop")
+    for chain in ("output", "input"):
+        if f"chain {chain}" not in nft_output:
+            errors.append(f"{chain} chain missing")
+    if BLOCKED_LOG_PREFIX not in nft_output:
+        errors.append("blocked nflog prefix missing")
+    if "allow_v4" in nft_output:
+        errors.append("allow_v4 set present in block mode")
+    if "allow_v6" in nft_output:
+        errors.append("allow_v6 set present in block mode")
+    return errors
 
 
 def _set_declaration(name: str, family: str, set_timeout: str = "") -> str:

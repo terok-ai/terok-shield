@@ -257,6 +257,14 @@ def test_up_delegates_and_logs(make_shield: ShieldHarnessFactory) -> None:
     harness.audit.log_event.assert_called_once_with("test-ctr", "shield_up")
 
 
+def test_block_delegates_and_logs(make_shield: ShieldHarnessFactory) -> None:
+    """block() delegates to the backend and logs the transition."""
+    harness = make_shield()
+    harness.shield.block("test-ctr")
+    harness.mode.shield_block.assert_called_once_with("test-ctr")
+    harness.audit.log_event.assert_called_once_with("test-ctr", "shield_block")
+
+
 def test_state_delegates_to_mode(make_shield: ShieldHarnessFactory) -> None:
     """state() returns the backend shield state."""
     harness = make_shield()

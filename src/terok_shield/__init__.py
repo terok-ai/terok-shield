@@ -356,6 +356,11 @@ class Shield:
             detail="allow_all=True" if allow_all else None,
         )
 
+    def block(self, container: str) -> None:
+        """Total network blackout — drop all traffic, log for forensics."""
+        self._mode.shield_block(container)
+        self.audit.log_event(container, "shield_block")
+
     def up(self, container: str) -> None:
         """Restore normal deny-all mode for a running container."""
         self._mode.shield_up(container)

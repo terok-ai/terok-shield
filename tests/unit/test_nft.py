@@ -19,14 +19,17 @@ from terok_shield.core.nft import (
     add_deny_elements_dual,
     add_elements,
     add_elements_dual,
+    block_ruleset,
     bypass_ruleset,
     delete_deny_elements_dual,
     hook_ruleset,
     safe_ip,
+    verify_block_ruleset,
     verify_bypass_ruleset,
     verify_ruleset,
 )
 from terok_shield.core.nft_constants import (
+    BLOCKED_LOG_PREFIX,
     BYPASS_LOG_PREFIX,
     IPV6_PRIVATE,
     NFT_TABLE,
@@ -742,6 +745,101 @@ def test_verify_bypass_ruleset_rejects_an_enforcing_hook_ruleset() -> None:
 def test_verify_bypass_ruleset_reports_errors_for_empty_input() -> None:
     """Empty nft output should fail bypass-mode verification."""
     assert verify_bypass_ruleset("")
+
+
+# ── block_ruleset() ──────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "fragment",
+    [
+        pytest.param("policy drop", id="output-policy-drop"),
+        pytest.param(_INPUT_CHAIN, id="input-chain"),
+        pytest.param(_OUTPUT_CHAIN, id="output-chain"),
+        pytest.param(_LOOPBACK_ACCEPT, id="loopback-accept"),
+        pytest.param("ct state established,related accept", id="established"),
+        pytest.param(BLOCKED_LOG_PREFIX, id="blocked-log-prefix"),
+    ],
+)
+def test_block_ruleset_contains_required_fragments(fragment: str) -> None:
+    """The block ruleset preserves the expected security invariants."""
+    assert fragment in block_ruleset()
+
+
+def test_block_ruleset_has_no_allow_sets() -> None:
+    """Block mode must have no allowlists — total blackout."""
+    rs = block_ruleset()
+    assert "allow_v4" not in rs
+    assert "allow_v6" not in rs
+
+
+def test_block_ruleset_has_no_deny_sets() -> None:
+    """Block mode needs no deny sets — everything is dropped anyway."""
+    rs = block_ruleset()
+    assert "deny_v4" not in rs
+    assert "deny_v6" not in rs
+
+
+def test_block_ruleset_has_no_dns_rules() -> None:
+    """Block mode drops DNS — no external resolution allowed."""
+    rs = block_ruleset()
+    assert "dport 53" not in rs
+
+
+def test_block_ruleset_has_no_gateway_sets() -> None:
+    """Block mode has no gateway sets — no host-loopback proxy access."""
+    rs = block_ruleset()
+    assert "gateway_v4" not in rs
+    assert "gateway_v6" not in rs
+
+
+def test_block_ruleset_does_not_include_bypass_or_deny_prefixes() -> None:
+    """Block mode uses only the BLOCKED prefix, not BYPASS or DENIED."""
+    rs = block_ruleset()
+    assert _DENY_LOG_PREFIX not in rs
+    assert BYPASS_LOG_PREFIX not in rs
+
+
+# ── verify_block_ruleset() ────────────────────────────────
+
+
+def test_verify_block_ruleset_accepts_generated_block_ruleset() -> None:
+    """verify_block_ruleset() returns no errors for a valid block ruleset."""
+    assert verify_block_ruleset(block_ruleset()) == []
+
+
+def test_verify_block_ruleset_rejects_hook_ruleset() -> None:
+    """Hook (deny-all with allowlists) must not satisfy block verification."""
+    errors = verify_block_ruleset(hook_ruleset())
+    assert errors
+    assert any("allow_v4" in e for e in errors)
+
+
+def test_verify_block_ruleset_rejects_bypass_ruleset() -> None:
+    """Bypass (accept-all) must not satisfy block verification."""
+    errors = verify_block_ruleset(bypass_ruleset())
+    assert errors
+
+
+def test_verify_block_ruleset_reports_missing_chain() -> None:
+    """Missing chains are reported."""
+    minimal = f"table {NFT_TABLE} {{ chain output {{ policy drop; {BLOCKED_LOG_PREFIX} }} }}"
+    errors = verify_block_ruleset(minimal)
+    assert "input chain missing" in errors
+
+
+def test_verify_block_ruleset_reports_missing_prefix() -> None:
+    """Missing blocked log prefix is reported."""
+    minimal = (
+        f"table {NFT_TABLE} {{ chain output {{ policy drop; }} chain input {{ policy drop; }} }}"
+    )
+    errors = verify_block_ruleset(minimal)
+    assert "blocked nflog prefix missing" in errors
+
+
+def test_verify_block_ruleset_reports_errors_for_empty_input() -> None:
+    """Empty nft output should fail block-mode verification."""
+    assert verify_block_ruleset("")
 
 
 # ── Gateway sets and port rules ──────────────────────────
