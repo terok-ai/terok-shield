@@ -159,8 +159,8 @@ class InteractiveSession:
             print(
                 "Error: could not create NFLOG watcher.\n"
                 "  NFLOG requires CAP_NET_ADMIN in the user namespace that owns\n"
-                "  the container's network namespace.  Re-run with\n"
-                "  TEROK_LOG_LEVEL=DEBUG for detailed diagnostics.",
+                "  the container's network namespace.  Ensure this process runs\n"
+                "  inside 'podman unshare' (not the container's inner userns).",
                 file=sys.stderr,
             )
             raise SystemExit(1)
@@ -603,13 +603,16 @@ def _nsenter_reexec(state_dir: Path, container: str, *, raw: bool) -> None:
 
     NFLOG messages are delivered per-netns — the watcher must be inside the
     container's netns to receive packets logged by its nft rules.  Uses
-    ``podman unshare nsenter`` to enter the netns, then runs this module as
-    ``__main__``.
+    ``podman unshare nsenter -t PID -n`` to enter the netns, then runs this
+    module as ``__main__``.
 
-    The nsenter invocation enters both the user namespace (``-U``) and network
-    namespace (``-n``) of the container process.  ``-U`` must precede ``-n``
-    so the kernel checks ``CAP_NET_ADMIN`` after joining the owning user
-    namespace — see :data:`WORKAROUND(nsenter-userns)` below.
+    ``podman unshare`` enters the persistent rootless user namespace that
+    Podman created for the container — the same userns that *owns* the
+    container's network namespace.  This gives us ``CAP_NET_ADMIN`` over
+    the netns, which NFLOG subscription requires.  Do **not** add ``-U``
+    to nsenter: that would enter the container's *inner* userns (a child
+    of the owning userns), where the kernel denies ``CAP_NET_ADMIN`` over
+    parent-owned resources.
 
     Args:
         state_dir: Per-container state directory.
@@ -621,27 +624,12 @@ def _nsenter_reexec(state_dir: Path, container: str, *, raw: bool) -> None:
     runner = SubprocessRunner()
     pid = runner.podman_inspect(container, "{{.State.Pid}}")
 
-    # WORKAROUND(nsenter-userns): ``podman unshare`` creates a *new* user
-    # namespace that is a sibling of the container's owning userns.  NFLOG
-    # bind requires CAP_NET_ADMIN relative to the userns that *owns* the
-    # network namespace.  A sibling userns cannot satisfy this — only the
-    # owning userns or an ancestor can.  Adding ``-U --preserve-credentials``
-    # enters the container's owning userns (which grants CAP_NET_ADMIN over
-    # its netns) while keeping UID 0 and mapped capabilities from
-    # ``podman unshare``.  ``-U`` must precede ``-n`` because the kernel
-    # validates capabilities at netns-entry time.
-    # Short-lived ``nft`` commands (nft_via_nsenter) are unaffected because
-    # they do not subscribe to NFLOG.
-    # Removal: if a future Podman version provides a direct ``--userns=container``
-    # flag or an alternative NFLOG subscription path, this workaround can be dropped.
     cmd = [
         "podman",
         "unshare",
         "nsenter",
         "-t",
         pid,
-        "-U",
-        "--preserve-credentials",
         "-n",
         sys.executable,
         "-m",

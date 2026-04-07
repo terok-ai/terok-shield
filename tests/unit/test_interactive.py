@@ -593,9 +593,9 @@ class TestNsenterReexec:
     def test_builds_nsenter_command(self, tmp_path: Path) -> None:
         """_nsenter_reexec invokes podman unshare nsenter with correct args.
 
-        Verifies WORKAROUND(nsenter-userns): ``-U --preserve-credentials``
-        must appear before ``-n`` so the kernel checks CAP_NET_ADMIN after
-        entering the container's owning user namespace.
+        Must NOT use ``-U`` — ``podman unshare`` already enters the owning
+        userns of the container's netns; adding ``-U`` would descend into
+        the container's inner userns where CAP_NET_ADMIN is denied.
         """
         from terok_shield.cli.interactive import _nsenter_reexec
 
@@ -609,11 +609,8 @@ class TestNsenterReexec:
         cmd = mock_run.call_args[0][0]
         assert cmd[:3] == ["podman", "unshare", "nsenter"]
         assert "-t" in cmd and "12345" in cmd
-        # WORKAROUND(nsenter-userns): -U must precede -n
-        assert "-U" in cmd and "--preserve-credentials" in cmd
-        u_idx = cmd.index("-U")
-        n_idx = cmd.index("-n")
-        assert u_idx < n_idx, "-U must precede -n for CAP_NET_ADMIN in owning userns"
+        assert "-n" in cmd
+        assert "-U" not in cmd, "-U enters inner userns, breaks NFLOG CAP_NET_ADMIN"
         assert str(tmp_path) in cmd
         assert _CONTAINER in cmd
         env = mock_run.call_args[1]["env"]
