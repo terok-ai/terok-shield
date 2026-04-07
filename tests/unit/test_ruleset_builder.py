@@ -5,8 +5,8 @@
 
 import pytest
 
-from terok_shield.core.nft import RulesetBuilder
-from terok_shield.core.nft_constants import BLOCKED_LOG_PREFIX, BYPASS_LOG_PREFIX
+from terok_shield.nft.constants import BLOCKED_LOG_PREFIX, BYPASS_LOG_PREFIX
+from terok_shield.nft.rules import RulesetBuilder
 
 from ..testnet import EXPECTED_PRIVATE_RANGES, IPV6_CLOUDFLARE, LINK_LOCAL_DNS, TEST_IP1, TEST_IP2
 

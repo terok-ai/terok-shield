@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from terok_shield import state
 from terok_shield.cli.main import _resolve_config_root, _resolve_state_root
-from terok_shield.core import state
 
 
 @pytest.mark.needs_host_features

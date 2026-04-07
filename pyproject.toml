@@ -100,7 +100,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["E402"]
 # dbus_fast uses D-Bus type signature strings ("s", "q", "b") as annotations
-"src/terok_shield/lib/dbus_bridge.py" = ["F821"]
+"src/terok_shield/dbus_bridge.py" = ["F821"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["terok_shield"]

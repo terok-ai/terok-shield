@@ -7,7 +7,7 @@ import os
 
 import pytest
 
-from terok_shield.core.run import find_nft
+from terok_shield.run import find_nft
 
 from ..conftest import nft_missing
 

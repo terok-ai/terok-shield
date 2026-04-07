@@ -7,7 +7,7 @@ import re
 
 import pytest
 
-from terok_shield.common.validation import (
+from terok_shield.validation import (
     SAFE_CONTAINER,
     SAFE_NAME,
     parse_entries,

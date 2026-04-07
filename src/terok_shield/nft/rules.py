@@ -10,13 +10,13 @@ verifies applied rulesets against security invariants.
 Security boundary: only stdlib + nft_constants.py imports allowed.
 All inputs are validated before interpolation into nft commands.
 """
-# WAYPOINT: Shield (__init__), HookMode (mode_hook)
+# WAYPOINT: Shield (__init__), HookMode (hooks.mode)
 
 import ipaddress
 import re
 import textwrap
 
-from .nft_constants import (
+from .constants import (
     ALLOWED_LOG_PREFIX,
     BLOCKED_LOG_PREFIX,
     BYPASS_LOG_PREFIX,

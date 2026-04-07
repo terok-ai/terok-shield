@@ -16,7 +16,7 @@ import socket
 import struct
 from datetime import UTC, datetime
 
-from ...core.nft_constants import NFLOG_GROUP
+from ..nft.constants import NFLOG_GROUP
 from ._event import WatchEvent
 
 logger = logging.getLogger(__name__)

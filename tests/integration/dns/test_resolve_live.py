@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from terok_shield.core.dns import DnsResolver
-from terok_shield.core.run import SubprocessRunner
+from terok_shield.dns.resolver import DnsResolver
+from terok_shield.run import SubprocessRunner
 from tests.testnet import CLOUDFLARE_DOMAIN, GOOGLE_DNS_DOMAIN, NONEXISTENT_DOMAIN, TEST_IP1
 
 from ..conftest import dig_missing

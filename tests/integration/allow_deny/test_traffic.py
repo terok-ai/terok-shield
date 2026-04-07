@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from terok_shield import Shield, ShieldConfig
-from terok_shield.core.nft import add_elements, hook_ruleset
+from terok_shield.nft.rules import add_elements, hook_ruleset
 from tests.testnet import (
     ALLOWED_TARGET_HTTP,
     ALLOWED_TARGET_HTTPS,
@@ -88,7 +88,7 @@ class TestRFC1918Allow:
 
     def test_rfc1918_allowed_when_whitelisted(self, container: str, container_pid: str) -> None:
         """RFC1918 addresses in the allow set bypass the RFC1918 reject rules."""
-        from terok_shield.core.nft_constants import RFC1918
+        from terok_shield.nft.constants import RFC1918
 
         nsenter_nft(container_pid, stdin=hook_ruleset())
         nsenter_nft(container_pid, stdin=add_elements("allow_v4", [RFC1918_HOST]))

@@ -8,8 +8,7 @@ from unittest import mock
 
 import pytest
 
-from terok_shield import Shield, ShieldConfig
-from terok_shield.core import state
+from terok_shield import Shield, ShieldConfig, state
 
 from ..conftest import hooks_unavailable, nft_missing, podman_missing
 from ..helpers import assert_ruleset_applied
@@ -23,7 +22,7 @@ from ..helpers import assert_ruleset_applied
 class TestShieldPreStart:
     """Verify ``Shield.pre_start()`` returns correct podman args."""
 
-    @mock.patch("terok_shield.core.mode_hook.has_global_hooks", return_value=True)
+    @mock.patch("terok_shield.hooks.mode.has_global_hooks", return_value=True)
     def test_pre_start_returns_podman_args(self, _hgh: mock.Mock, shield_env: Path) -> None:
         """Returned args contain ``--annotation`` and ``--cap-drop``."""
         sd = shield_env / "containers" / "test-container"
@@ -36,7 +35,7 @@ class TestShieldPreStart:
         # on older podman, global hooks are used instead
 
     @pytest.mark.needs_internet
-    @mock.patch("terok_shield.core.mode_hook.has_global_hooks", return_value=True)
+    @mock.patch("terok_shield.hooks.mode.has_global_hooks", return_value=True)
     def test_pre_start_resolves_dns(self, _hgh: mock.Mock, shield_env: Path) -> None:
         """DNS preparation files are written after ``Shield.pre_start()``.
 

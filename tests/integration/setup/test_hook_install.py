@@ -8,8 +8,7 @@ from unittest import mock
 
 import pytest
 
-from terok_shield import Shield, ShieldConfig
-from terok_shield.core import state
+from terok_shield import Shield, ShieldConfig, state
 
 from ..conftest import nft_missing, podman_missing
 
@@ -22,7 +21,7 @@ from ..conftest import nft_missing, podman_missing
 class TestHookInstall:
     """Verify ``Shield.pre_start()`` installs OCI hook files."""
 
-    @mock.patch("terok_shield.core.mode_hook.has_global_hooks", return_value=True)
+    @mock.patch("terok_shield.hooks.mode.has_global_hooks", return_value=True)
     def test_pre_start_creates_hook_files(self, _hgh: mock.Mock, shield_env: Path) -> None:
         """Hook JSON and entrypoint script exist after ``Shield.pre_start()``."""
         sd = shield_env / "containers" / "test-ctr"
@@ -36,7 +35,7 @@ class TestHookInstall:
         assert entrypoint.is_file()
         assert entrypoint.stat().st_mode & 0o100, "Entrypoint must be executable"
 
-    @mock.patch("terok_shield.core.mode_hook.has_global_hooks", return_value=True)
+    @mock.patch("terok_shield.hooks.mode.has_global_hooks", return_value=True)
     def test_pre_start_idempotent(self, _hgh: mock.Mock, shield_env: Path) -> None:
         """Calling ``Shield.pre_start()`` twice does not break anything."""
         sd = shield_env / "containers" / "test-ctr"

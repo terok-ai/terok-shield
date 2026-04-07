@@ -11,7 +11,7 @@ interactive session for NFLOG event enrichment.
 import re
 from pathlib import Path
 
-from ...core import state
+from .. import state
 
 # Matches dnsmasq reply/cached lines like:
 #   reply github.com is 140.82.121.4

@@ -33,7 +33,7 @@ Bundle layout::
     ├── container.id                   # podman container ID (short, 12-char hex)
     └── audit.jsonl                    # per-container audit log
 """
-# WAYPOINT: HookMode (mode_hook)
+# WAYPOINT: HookMode (hooks.mode)
 
 from pathlib import Path
 

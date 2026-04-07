@@ -36,10 +36,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from ..core import state
-from ..core.nft import add_deny_elements_dual, add_elements_dual
-from ..core.run import CommandRunner, SubprocessRunner
-from ..lib.watchers import DomainCache, NflogWatcher, WatchEvent
+from .. import state
+from ..nft.rules import add_deny_elements_dual, add_elements_dual
+from ..run import CommandRunner, SubprocessRunner
+from ..watchers import DomainCache, NflogWatcher, WatchEvent
 
 logger = logging.getLogger(__name__)
 
@@ -348,7 +348,7 @@ class InteractiveSession:
         makes the change take effect immediately — future DNS resolutions
         for *domain* auto-populate the nft allow sets.
         """
-        from ..core import dnsmasq
+        from ..dns import dnsmasq
 
         if not dnsmasq.add_domain(self._state_dir, domain):
             return
@@ -360,7 +360,7 @@ class InteractiveSession:
         Counterpart of :meth:`_allow_domain`.  Stops dnsmasq from
         auto-populating nft sets for *domain* on future DNS queries.
         """
-        from ..core import dnsmasq
+        from ..dns import dnsmasq
 
         if not dnsmasq.remove_domain(self._state_dir, domain):
             return
@@ -368,7 +368,7 @@ class InteractiveSession:
 
     def _reload_dnsmasq(self) -> None:
         """Regenerate dnsmasq config and send SIGHUP."""
-        from ..core import dnsmasq
+        from ..dns import dnsmasq
 
         try:
             upstream = state.upstream_dns_path(self._state_dir).read_text().strip()

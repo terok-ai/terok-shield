@@ -17,8 +17,8 @@ import time
 
 import pytest
 
-from terok_shield.core.nft import hook_ruleset
-from terok_shield.core.nft_constants import IPV6_PRIVATE, RFC1918
+from terok_shield.nft.constants import IPV6_PRIVATE, RFC1918
+from terok_shield.nft.rules import hook_ruleset
 from tests.testnet import (
     ALLOWED_TARGET_HTTP,
     ALLOWED_TARGET_HTTPS,

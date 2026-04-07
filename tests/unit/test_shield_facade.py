@@ -69,7 +69,7 @@ def make_shield(make_config: ConfigFactory) -> ShieldHarnessFactory:
     return _make_shield
 
 
-@mock.patch("terok_shield.core.run.find_nft", return_value=NFT_BINARY)
+@mock.patch("terok_shield.run.find_nft", return_value=NFT_BINARY)
 def test_shield_default_collaborators(_find: mock.Mock, tmp_path: Path) -> None:
     """Shield creates default collaborators when none are injected."""
     shield = Shield(ShieldConfig(state_dir=tmp_path))

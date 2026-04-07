@@ -14,7 +14,7 @@ import tempfile
 from pathlib import Path
 
 from terok_shield import Shield, ShieldConfig
-from terok_shield.common.podman_info import HOOK_JSON_FILENAME, find_hooks_dirs
+from terok_shield.podman_info import HOOK_JSON_FILENAME, find_hooks_dirs
 from tests.testfs import HOOK_ERROR_LOG_FILENAME
 
 _DISPOSABLE_DIRS: list[tempfile.TemporaryDirectory] = []

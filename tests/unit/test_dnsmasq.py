@@ -8,8 +8,8 @@ from unittest import mock
 
 import pytest
 
-from terok_shield.core import state
-from terok_shield.core.dnsmasq import (
+from terok_shield import state
+from terok_shield.dns.dnsmasq import (
     _validate_domain,
     add_domain,
     generate_config,
@@ -22,7 +22,7 @@ from terok_shield.core.dnsmasq import (
     remove_domain,
     write_resolv_conf,
 )
-from terok_shield.core.nft_constants import DNSMASQ_BIND, NFT_TABLE_NAME, PASTA_DNS
+from terok_shield.nft.constants import DNSMASQ_BIND, NFT_TABLE_NAME, PASTA_DNS
 
 from ..testnet import TEST_DOMAIN, TEST_DOMAIN2
 
@@ -189,7 +189,7 @@ def test_launch_raises_when_pid_file_missing(tmp_path: Path) -> None:
 
 def test_launch_maps_exec_error_to_runtime_error(tmp_path: Path) -> None:
     """launch() converts ExecError from runner into RuntimeError."""
-    from terok_shield.core.run import ExecError
+    from terok_shield.run import ExecError
 
     state.ensure_state_dirs(tmp_path)
     runner = mock.MagicMock()
@@ -204,79 +204,79 @@ def test_launch_maps_exec_error_to_runtime_error(tmp_path: Path) -> None:
 
 def test_is_our_dnsmasq_true(tmp_path: Path) -> None:
     """_is_our_dnsmasq returns True when argv[0]=='dnsmasq' and --conf-file= matches exactly."""
-    from terok_shield.core.dnsmasq import _is_our_dnsmasq
+    from terok_shield.dns.dnsmasq import _is_our_dnsmasq
 
     conf_path = str(state.dnsmasq_conf_path(tmp_path))
     fake_proc = tmp_path / "cmdline"
     fake_proc.write_bytes(f"dnsmasq\x00--conf-file={conf_path}\x00".encode())
-    with mock.patch("terok_shield.core.dnsmasq.Path", return_value=fake_proc):
+    with mock.patch("terok_shield.dns.dnsmasq.Path", return_value=fake_proc):
         assert _is_our_dnsmasq(12345, tmp_path) is True
 
 
 def test_is_our_dnsmasq_true_absolute_path_binary(tmp_path: Path) -> None:
     """_is_our_dnsmasq returns True when argv[0] is an absolute path ending with /dnsmasq."""
-    from terok_shield.core.dnsmasq import _is_our_dnsmasq
+    from terok_shield.dns.dnsmasq import _is_our_dnsmasq
 
     conf_path = str(state.dnsmasq_conf_path(tmp_path))
     fake_proc = tmp_path / "cmdline"
     fake_proc.write_bytes(f"/usr/sbin/dnsmasq\x00--conf-file={conf_path}\x00".encode())
-    with mock.patch("terok_shield.core.dnsmasq.Path", return_value=fake_proc):
+    with mock.patch("terok_shield.dns.dnsmasq.Path", return_value=fake_proc):
         assert _is_our_dnsmasq(12345, tmp_path) is True
 
 
 def test_is_our_dnsmasq_false_different_container(tmp_path: Path) -> None:
     """_is_our_dnsmasq returns False for another container's dnsmasq."""
-    from terok_shield.core.dnsmasq import _is_our_dnsmasq
+    from terok_shield.dns.dnsmasq import _is_our_dnsmasq
 
     fake_proc = tmp_path / "cmdline"
     fake_proc.write_bytes(b"dnsmasq\x00--conf-file=/other/state/dnsmasq.conf\x00")
-    with mock.patch("terok_shield.core.dnsmasq.Path", return_value=fake_proc):
+    with mock.patch("terok_shield.dns.dnsmasq.Path", return_value=fake_proc):
         assert _is_our_dnsmasq(12345, tmp_path) is False
 
 
 def test_is_our_dnsmasq_false_conf_path_as_substring(tmp_path: Path) -> None:
     """_is_our_dnsmasq returns False when our conf path is embedded inside a longer arg."""
-    from terok_shield.core.dnsmasq import _is_our_dnsmasq
+    from terok_shield.dns.dnsmasq import _is_our_dnsmasq
 
     conf_path = str(state.dnsmasq_conf_path(tmp_path))
     longer_path = f"/other{conf_path}"
     fake_proc = tmp_path / "cmdline"
     fake_proc.write_bytes(f"dnsmasq\x00--conf-file={longer_path}\x00".encode())
-    with mock.patch("terok_shield.core.dnsmasq.Path", return_value=fake_proc):
+    with mock.patch("terok_shield.dns.dnsmasq.Path", return_value=fake_proc):
         assert _is_our_dnsmasq(12345, tmp_path) is False
 
 
 def test_is_our_dnsmasq_false_different_process(tmp_path: Path) -> None:
     """_is_our_dnsmasq returns False when argv[0] is not dnsmasq."""
-    from terok_shield.core.dnsmasq import _is_our_dnsmasq
+    from terok_shield.dns.dnsmasq import _is_our_dnsmasq
 
     fake_proc = tmp_path / "cmdline"
     fake_proc.write_bytes(b"nginx\x00-g\x00daemon off;\x00")
-    with mock.patch("terok_shield.core.dnsmasq.Path", return_value=fake_proc):
+    with mock.patch("terok_shield.dns.dnsmasq.Path", return_value=fake_proc):
         assert _is_our_dnsmasq(12345, tmp_path) is False
 
 
 def test_is_our_dnsmasq_false_missing_proc(tmp_path: Path) -> None:
     """_is_our_dnsmasq returns False when /proc/{pid} doesn't exist."""
-    from terok_shield.core.dnsmasq import _is_our_dnsmasq
+    from terok_shield.dns.dnsmasq import _is_our_dnsmasq
 
     assert _is_our_dnsmasq(999999999, tmp_path) is False
 
 
 def test_is_our_dnsmasq_false_empty_args(tmp_path: Path) -> None:
     """_is_our_dnsmasq returns False when cmdline parsing yields an empty arg list."""
-    from terok_shield.core.dnsmasq import _is_our_dnsmasq
+    from terok_shield.dns.dnsmasq import _is_our_dnsmasq
 
     mock_path_instance = mock.MagicMock()
     mock_path_instance.read_bytes.return_value.rstrip.return_value.split.return_value = []
 
-    with mock.patch("terok_shield.core.dnsmasq.Path", return_value=mock_path_instance):
+    with mock.patch("terok_shield.dns.dnsmasq.Path", return_value=mock_path_instance):
         assert _is_our_dnsmasq(12345, tmp_path) is False
 
 
 def test_clear_pid_file_removes_file(tmp_path: Path) -> None:
     """_clear_pid_file removes the PID file."""
-    from terok_shield.core.dnsmasq import _clear_pid_file
+    from terok_shield.dns.dnsmasq import _clear_pid_file
 
     state.dnsmasq_pid_path(tmp_path).write_text("12345\n")
     _clear_pid_file(tmp_path)
@@ -285,7 +285,7 @@ def test_clear_pid_file_removes_file(tmp_path: Path) -> None:
 
 def test_clear_pid_file_ignores_missing(tmp_path: Path) -> None:
     """_clear_pid_file silently ignores missing PID file."""
-    from terok_shield.core.dnsmasq import _clear_pid_file
+    from terok_shield.dns.dnsmasq import _clear_pid_file
 
     _clear_pid_file(tmp_path)  # should not raise
 
@@ -298,8 +298,8 @@ def test_kill_sends_sigterm(tmp_path: Path) -> None:
     state.dnsmasq_pid_path(tmp_path).write_text("12345\n")
 
     with (
-        mock.patch("terok_shield.core.dnsmasq._is_our_dnsmasq", return_value=True),
-        mock.patch("terok_shield.core.dnsmasq.os.kill") as mock_kill,
+        mock.patch("terok_shield.dns.dnsmasq._is_our_dnsmasq", return_value=True),
+        mock.patch("terok_shield.dns.dnsmasq.os.kill") as mock_kill,
     ):
         kill(tmp_path)
 
@@ -318,8 +318,8 @@ def test_kill_silently_ignores_stale_pid(tmp_path: Path) -> None:
     state.dnsmasq_pid_path(tmp_path).write_text("99999\n")
 
     with (
-        mock.patch("terok_shield.core.dnsmasq._is_our_dnsmasq", return_value=True),
-        mock.patch("terok_shield.core.dnsmasq.os.kill", side_effect=ProcessLookupError),
+        mock.patch("terok_shield.dns.dnsmasq._is_our_dnsmasq", return_value=True),
+        mock.patch("terok_shield.dns.dnsmasq.os.kill", side_effect=ProcessLookupError),
     ):
         kill(tmp_path)  # should not raise
 
@@ -328,7 +328,7 @@ def test_kill_clears_stale_pid_file(tmp_path: Path) -> None:
     """kill() clears PID file when PID is not a dnsmasq process."""
     state.dnsmasq_pid_path(tmp_path).write_text("12345\n")
 
-    with mock.patch("terok_shield.core.dnsmasq._is_our_dnsmasq", return_value=False):
+    with mock.patch("terok_shield.dns.dnsmasq._is_our_dnsmasq", return_value=False):
         kill(tmp_path)
 
     assert not state.dnsmasq_pid_path(tmp_path).is_file()
@@ -447,8 +447,8 @@ def test_reload_regenerates_config_and_sends_sighup(tmp_path: Path) -> None:
     state.dnsmasq_pid_path(tmp_path).write_text("12345\n")
 
     with (
-        mock.patch("terok_shield.core.dnsmasq._is_our_dnsmasq", return_value=True),
-        mock.patch("terok_shield.core.dnsmasq.os.kill") as mock_kill,
+        mock.patch("terok_shield.dns.dnsmasq._is_our_dnsmasq", return_value=True),
+        mock.patch("terok_shield.dns.dnsmasq.os.kill") as mock_kill,
     ):
         reload(tmp_path, PASTA_DNS, [TEST_DOMAIN])
 
@@ -463,7 +463,7 @@ def test_reload_regenerates_config_and_sends_sighup(tmp_path: Path) -> None:
 def test_reload_noop_when_not_running(tmp_path: Path) -> None:
     """reload() is a no-op when dnsmasq PID file is absent."""
     state.ensure_state_dirs(tmp_path)
-    with mock.patch("terok_shield.core.dnsmasq.os.kill") as mock_kill:
+    with mock.patch("terok_shield.dns.dnsmasq.os.kill") as mock_kill:
         reload(tmp_path, PASTA_DNS, [TEST_DOMAIN])
     mock_kill.assert_not_called()
 
@@ -473,7 +473,7 @@ def test_reload_raises_on_stale_pid(tmp_path: Path) -> None:
     state.ensure_state_dirs(tmp_path)
     state.dnsmasq_pid_path(tmp_path).write_text("12345\n")
 
-    with mock.patch("terok_shield.core.dnsmasq._is_our_dnsmasq", return_value=False):
+    with mock.patch("terok_shield.dns.dnsmasq._is_our_dnsmasq", return_value=False):
         with pytest.raises(RuntimeError, match="not dnsmasq"):
             reload(tmp_path, PASTA_DNS, [TEST_DOMAIN])
 
@@ -484,8 +484,8 @@ def test_reload_raises_on_dead_process(tmp_path: Path) -> None:
     state.dnsmasq_pid_path(tmp_path).write_text("12345\n")
 
     with (
-        mock.patch("terok_shield.core.dnsmasq._is_our_dnsmasq", return_value=True),
-        mock.patch("terok_shield.core.dnsmasq.os.kill", side_effect=ProcessLookupError),
+        mock.patch("terok_shield.dns.dnsmasq._is_our_dnsmasq", return_value=True),
+        mock.patch("terok_shield.dns.dnsmasq.os.kill", side_effect=ProcessLookupError),
     ):
         with pytest.raises(RuntimeError, match="dead"):
             reload(tmp_path, PASTA_DNS, [TEST_DOMAIN])
@@ -496,7 +496,7 @@ def test_reload_raises_on_dead_process(tmp_path: Path) -> None:
 
 def test_read_domains_normalizes_case(tmp_path: Path) -> None:
     """read_domains() lowercases entries for consistent comparison."""
-    from terok_shield.core.dnsmasq import read_domains
+    from terok_shield.dns.dnsmasq import read_domains
 
     domains_path = tmp_path / "profile.domains"
     domains_path.write_text("GitHub.COM\nexample.org\n")
@@ -505,7 +505,7 @@ def test_read_domains_normalizes_case(tmp_path: Path) -> None:
 
 def test_read_domains_skips_invalid(tmp_path: Path) -> None:
     """read_domains() silently skips invalid domain entries."""
-    from terok_shield.core.dnsmasq import read_domains
+    from terok_shield.dns.dnsmasq import read_domains
 
     domains_path = tmp_path / "profile.domains"
     domains_path.write_text("github.com\n; injection\nexample.org\n")
@@ -514,7 +514,7 @@ def test_read_domains_skips_invalid(tmp_path: Path) -> None:
 
 def test_read_domains_deduplicates(tmp_path: Path) -> None:
     """read_domains() deduplicates after normalization."""
-    from terok_shield.core.dnsmasq import read_domains
+    from terok_shield.dns.dnsmasq import read_domains
 
     domains_path = tmp_path / "profile.domains"
     domains_path.write_text("github.com\nGITHUB.COM\n")
@@ -523,7 +523,7 @@ def test_read_domains_deduplicates(tmp_path: Path) -> None:
 
 def test_read_domains_skips_blank_lines(tmp_path: Path) -> None:
     """read_domains() skips blank lines without treating them as invalid."""
-    from terok_shield.core.dnsmasq import read_domains
+    from terok_shield.dns.dnsmasq import read_domains
 
     domains_path = tmp_path / "profile.domains"
     domains_path.write_text("\ngithub.com\n\nexample.org\n\n")
@@ -581,7 +581,7 @@ def test_write_resolv_conf(tmp_path: Path) -> None:
     resolv_path = tmp_path / "resolv.conf"
     resolv_path.write_text("nameserver 169.254.1.1\n")
 
-    with mock.patch("terok_shield.core.dnsmasq.Path", return_value=resolv_path):
+    with mock.patch("terok_shield.dns.dnsmasq.Path", return_value=resolv_path):
         write_resolv_conf("42")
 
     assert resolv_path.read_text() == f"nameserver {DNSMASQ_BIND}\n"

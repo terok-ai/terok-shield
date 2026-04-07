@@ -12,6 +12,7 @@ from unittest import mock
 
 import pytest
 
+from terok_shield import state
 from terok_shield.cli.interactive import (
     _INPUT_MAP,
     _NSENTER_ENV,
@@ -25,8 +26,7 @@ from terok_shield.cli.interactive import (
     _PendingPacket,
     run_interactive,
 )
-from terok_shield.core import state
-from terok_shield.lib.watchers import WatchEvent
+from terok_shield.watchers import WatchEvent
 
 from ..testnet import (
     DNSMASQ_DOMAIN,
@@ -374,7 +374,7 @@ class TestDrainWatcherAndReadableFds:
 
     def test_drain_watcher_ignores_non_queued(self, tmp_path: Path) -> None:
         """_drain_watcher ignores events that are not queued_connection."""
-        from terok_shield.lib.watchers import WatchEvent
+        from terok_shield.watchers import WatchEvent
 
         session = _make_session(tmp_path)
         mock_watcher = mock.MagicMock()
@@ -414,7 +414,7 @@ class TestDomainCacheIntegration:
         log_path.write_text(
             f"reply {DNSMASQ_DOMAIN} is {TEST_IP1}\nreply {DNSMASQ_DOMAIN2} is {TEST_IP2}\n"
         )
-        from terok_shield.lib.watchers import DomainCache
+        from terok_shield.watchers import DomainCache
 
         cache = DomainCache(tmp_path)
         cache.refresh()
@@ -427,7 +427,7 @@ class TestDomainCacheIntegration:
         log_path.write_text(
             f"cached {DNSMASQ_DOMAIN} is {TEST_IP1}\ncached {DNSMASQ_DOMAIN2} is {TEST_IP2}\n"
         )
-        from terok_shield.lib.watchers import DomainCache
+        from terok_shield.watchers import DomainCache
 
         cache = DomainCache(tmp_path)
         cache.refresh()
@@ -436,7 +436,7 @@ class TestDomainCacheIntegration:
 
     def test_oserror_preserves_cache(self, tmp_path: Path) -> None:
         """OSError when reading dnsmasq log preserves the previous cache."""
-        from terok_shield.lib.watchers import DomainCache
+        from terok_shield.watchers import DomainCache
 
         cache = DomainCache(tmp_path)
         cache._mapping[TEST_IP1] = KEPT_DOMAIN
@@ -446,7 +446,7 @@ class TestDomainCacheIntegration:
 
     def test_replaces_stale_entries(self, tmp_path: Path) -> None:
         """A new log replaces the entire cache (old entries disappear)."""
-        from terok_shield.lib.watchers import DomainCache
+        from terok_shield.watchers import DomainCache
 
         log_path = state.dnsmasq_log_path(tmp_path)
         log_path.write_text(f"reply {DNSMASQ_DOMAIN} is {TEST_IP1}\n")
@@ -460,7 +460,7 @@ class TestDomainCacheIntegration:
 
     def test_strips_trailing_dot(self, tmp_path: Path) -> None:
         """Trailing dots in domain names are stripped."""
-        from terok_shield.lib.watchers import DomainCache
+        from terok_shield.watchers import DomainCache
 
         log_path = state.dnsmasq_log_path(tmp_path)
         log_path.write_text(f"reply {DNSMASQ_DOMAIN}. is {TEST_IP1}\n")
@@ -470,7 +470,7 @@ class TestDomainCacheIntegration:
 
     def test_lookup_unknown_ip(self, tmp_path: Path) -> None:
         """lookup returns empty string for unknown IPs."""
-        from terok_shield.lib.watchers import DomainCache
+        from terok_shield.watchers import DomainCache
 
         cache = DomainCache(tmp_path)
         assert cache.lookup(TEST_IP1) == ""
@@ -1179,7 +1179,7 @@ class TestDnsmasqDomainHelpers:
         """_allow_domain calls dnsmasq.add_domain and _reload_dnsmasq."""
         session = _make_session(tmp_path)
         with (
-            mock.patch("terok_shield.core.dnsmasq.add_domain", return_value=True) as mock_add,
+            mock.patch("terok_shield.dns.dnsmasq.add_domain", return_value=True) as mock_add,
             mock.patch.object(session, "_reload_dnsmasq") as mock_reload,
         ):
             session._allow_domain(DNSMASQ_DOMAIN)
@@ -1190,7 +1190,7 @@ class TestDnsmasqDomainHelpers:
         """_allow_domain does not reload when add_domain returns False (already present)."""
         session = _make_session(tmp_path)
         with (
-            mock.patch("terok_shield.core.dnsmasq.add_domain", return_value=False),
+            mock.patch("terok_shield.dns.dnsmasq.add_domain", return_value=False),
             mock.patch.object(session, "_reload_dnsmasq") as mock_reload,
         ):
             session._allow_domain(DNSMASQ_DOMAIN)
@@ -1200,7 +1200,7 @@ class TestDnsmasqDomainHelpers:
         """_deny_domain calls dnsmasq.remove_domain and _reload_dnsmasq."""
         session = _make_session(tmp_path)
         with (
-            mock.patch("terok_shield.core.dnsmasq.remove_domain", return_value=True) as mock_rm,
+            mock.patch("terok_shield.dns.dnsmasq.remove_domain", return_value=True) as mock_rm,
             mock.patch.object(session, "_reload_dnsmasq") as mock_reload,
         ):
             session._deny_domain(DNSMASQ_DOMAIN)
@@ -1211,7 +1211,7 @@ class TestDnsmasqDomainHelpers:
         """_deny_domain does not reload when remove_domain returns False."""
         session = _make_session(tmp_path)
         with (
-            mock.patch("terok_shield.core.dnsmasq.remove_domain", return_value=False),
+            mock.patch("terok_shield.dns.dnsmasq.remove_domain", return_value=False),
             mock.patch.object(session, "_reload_dnsmasq") as mock_reload,
         ):
             session._deny_domain(DNSMASQ_DOMAIN)
@@ -1223,9 +1223,9 @@ class TestDnsmasqDomainHelpers:
         state.upstream_dns_path(tmp_path).write_text("169.254.0.1\n")
         with (
             mock.patch(
-                "terok_shield.core.dnsmasq.read_merged_domains", return_value={DNSMASQ_DOMAIN}
+                "terok_shield.dns.dnsmasq.read_merged_domains", return_value={DNSMASQ_DOMAIN}
             ) as mock_read,
-            mock.patch("terok_shield.core.dnsmasq.reload") as mock_reload,
+            mock.patch("terok_shield.dns.dnsmasq.reload") as mock_reload,
         ):
             session._reload_dnsmasq()
         mock_read.assert_called_once_with(tmp_path)
@@ -1246,9 +1246,9 @@ class TestDnsmasqDomainHelpers:
         session = _make_session(tmp_path)
         state.upstream_dns_path(tmp_path).write_text("169.254.0.1\n")
         with (
-            mock.patch("terok_shield.core.dnsmasq.read_merged_domains", return_value=set()),
+            mock.patch("terok_shield.dns.dnsmasq.read_merged_domains", return_value=set()),
             mock.patch(
-                "terok_shield.core.dnsmasq.reload", side_effect=RuntimeError("dnsmasq crashed")
+                "terok_shield.dns.dnsmasq.reload", side_effect=RuntimeError("dnsmasq crashed")
             ),
         ):
             session._reload_dnsmasq()

@@ -8,7 +8,7 @@ protocol.  Production code uses :class:`SubprocessRunner`; tests inject
 fakes.  This keeps external dependencies auditable and mockable in one
 place.
 """
-# WAYPOINT: Shield (__init__), HookMode (mode_hook)
+# WAYPOINT: Shield (__init__), HookMode (hooks.mode)
 
 import ipaddress as _ipaddress
 import shutil
