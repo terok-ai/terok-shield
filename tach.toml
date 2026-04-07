@@ -80,7 +80,6 @@ depends_on = []
 path = "terok_shield.nft.rules"
 layer = "core"
 depends_on = [
-    "terok_shield.nft.constants",
 ]
 
 # dns domain package
@@ -94,7 +93,6 @@ depends_on = []
 path = "terok_shield.dns.resolver"
 layer = "core"
 depends_on = [
-    "terok_shield.run",
 ]
 
 # dnsmasq lifecycle — config generation, launch, cleanup
@@ -102,9 +100,6 @@ depends_on = [
 path = "terok_shield.dns.dnsmasq"
 layer = "core"
 depends_on = [
-    "terok_shield.nft.constants",
-    "terok_shield.run",
-    "terok_shield.state",
 ]
 
 # hooks domain package
@@ -127,9 +122,6 @@ depends_on = [
     "terok_shield.dns.dnsmasq",
     "terok_shield.hooks.install",
     "terok_shield.nft.rules",
-    "terok_shield.nft.constants",
-    "terok_shield.run",
-    "terok_shield.state",
 ]
 
 # ── Resources ─────────────────────────────────────────────

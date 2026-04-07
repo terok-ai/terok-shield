@@ -24,6 +24,7 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .. import state
 from ..config import (
     ANNOTATION_AUDIT_ENABLED_KEY,
     ANNOTATION_DNS_TIER_KEY,
@@ -38,17 +39,13 @@ from ..config import (
     ShieldState,
     detect_dns_tier,
 )
-from ..podman_info import (
-    PodmanInfo,
-    global_hooks_hint,
-    has_global_hooks,
-    parse_podman_info,
-    parse_resolv_conf,
-)
-from ..util import is_ip as _is_ip, is_ipv4
 from ..dns import dnsmasq
-from .. import state
-from .install import install_hooks
+from ..nft.constants import (
+    NFT_SET_TIMEOUT_DNSMASQ,
+    PASTA_DNS,
+    PASTA_HOST_LOOPBACK_MAP,
+    SLIRP4NETNS_DNS,
+)
 from ..nft.rules import (
     NFT_TABLE,
     RulesetBuilder,
@@ -56,20 +53,23 @@ from ..nft.rules import (
     delete_deny_elements_dual,
     safe_ip,
 )
-from ..nft.constants import (
-    NFT_SET_TIMEOUT_DNSMASQ,
-    PASTA_DNS,
-    PASTA_HOST_LOOPBACK_MAP,
-    SLIRP4NETNS_DNS,
+from ..podman_info import (
+    PodmanInfo,
+    global_hooks_hint,
+    has_global_hooks,
+    parse_podman_info,
+    parse_resolv_conf,
 )
 from ..run import ExecError, ShieldNeedsSetup
+from ..util import is_ip as _is_ip, is_ipv4
+from .install import install_hooks
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from ..audit import AuditLogger
-    from ..profiles import ProfileLoader
     from ..dns.resolver import DnsResolver
+    from ..profiles import ProfileLoader
     from ..run import CommandRunner
 
 

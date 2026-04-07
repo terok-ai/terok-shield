@@ -20,8 +20,7 @@ from unittest import mock
 
 import pytest
 
-from terok_shield import Shield, ShieldConfig
-from terok_shield import state
+from terok_shield import Shield, ShieldConfig, state
 from tests.testnet import BLOCKED_TARGET_HTTP
 
 from ..conftest import CTR_PREFIX, hooks_unavailable, nft_missing, podman_missing

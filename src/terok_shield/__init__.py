@@ -47,11 +47,11 @@ from .podman_info import (
 from .util import is_ip as _is_ip
 
 if TYPE_CHECKING:
+    from .audit import AuditLogger
     from .dns.resolver import DnsResolver
     from .nft.rules import RulesetBuilder
-    from .run import CommandRunner
-    from .audit import AuditLogger
     from .profiles import ProfileLoader
+    from .run import CommandRunner
 
 # ── Lazy: core + support layer ──────────────────────────
 # Re-exported names from __all__ that are deferred until first access.
@@ -180,11 +180,11 @@ class Shield:
             ruleset: Ruleset builder (default: from config loopback_ports).
         """
         from . import state
+        from .audit import AuditLogger
         from .dns.resolver import DnsResolver
         from .nft.rules import RulesetBuilder
-        from .run import SubprocessRunner
-        from .audit import AuditLogger
         from .profiles import ProfileLoader
+        from .run import SubprocessRunner
 
         self.config = config
         self.runner = runner or SubprocessRunner()
@@ -221,8 +221,8 @@ class Shield:
         :class:`EnvironmentCheck` with detected issues and setup hints.
         Does not raise — the caller decides how to handle issues.
         """
-        from .dns import dnsmasq
         from . import state
+        from .dns import dnsmasq
 
         output = self.runner.run(["podman", "info", "-f", "json"], check=False)
         info = parse_podman_info(output)

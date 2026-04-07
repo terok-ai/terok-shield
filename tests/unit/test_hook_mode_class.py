@@ -11,17 +11,17 @@ from unittest import mock
 
 import pytest
 
+from terok_shield import state
 from terok_shield.config import (
     ANNOTATION_AUDIT_ENABLED_KEY,
     ANNOTATION_STATE_DIR_KEY,
     ShieldConfig,
     ShieldState,
 )
-from terok_shield import state
 from terok_shield.hooks.install import install_hooks
 from terok_shield.hooks.mode import HookMode
-from terok_shield.nft.rules import bypass_ruleset, hook_ruleset
 from terok_shield.nft.constants import PASTA_HOST_LOOPBACK_MAP
+from terok_shield.nft.rules import bypass_ruleset, hook_ruleset
 from terok_shield.run import ExecError
 
 from ..testfs import BIN_DIR_NAME, HOOK_ENTRYPOINT_NAME, HOOKS_DIR_NAME

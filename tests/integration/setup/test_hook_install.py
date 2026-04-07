@@ -8,8 +8,7 @@ from unittest import mock
 
 import pytest
 
-from terok_shield import Shield, ShieldConfig
-from terok_shield import state
+from terok_shield import Shield, ShieldConfig, state
 
 from ..conftest import nft_missing, podman_missing
 

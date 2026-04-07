@@ -360,13 +360,13 @@ def _collect_all_audit_entries(state_root: Path, n: int) -> list[dict]:
 
 def _cmd_setup(*, root: bool, user: bool) -> None:
     """Install global OCI hooks for podman < 5.6.0 restart persistence."""
+    from ..hooks.install import setup_global_hooks
     from ..podman_info import (
         USER_HOOKS_DIR,
         _user_containers_conf,
         ensure_containers_conf_hooks_dir,
         system_hooks_dir,
     )
-    from ..hooks.install import setup_global_hooks
 
     sys_dir = system_hooks_dir()
     usr_dir = USER_HOOKS_DIR.expanduser()

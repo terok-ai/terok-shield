@@ -16,7 +16,7 @@ class TestNftImportIsolation:
     """nft.py is the auditable security boundary -- no third-party imports."""
 
     def test_nft_has_only_allowed_imports(self) -> None:
-        """Verify nft.py imports only stdlib and nft_constants."""
+        """Verify nft/rules.py imports only stdlib and .constants."""
         # Keep the source path inline here so auditors can review the exact
         # security-boundary file target without indirection.
         source = (
@@ -24,7 +24,7 @@ class TestNftImportIsolation:
         ).read_text()
         tree = ast.parse(source)
         stdlib = {"ipaddress", "re", "textwrap"}
-        # nft_constants.py is the only non-stdlib import allowed (literals-only module)
+        # constants is the only non-stdlib import allowed (literals-only module)
         allowed_relative = {"constants"}
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):

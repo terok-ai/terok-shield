@@ -790,9 +790,7 @@ class TestNflogWatcherCreate:
 
     def test_returns_none_on_oserror(self) -> None:
         """create() returns None when AF_NETLINK socket fails."""
-        with patch(
-            "terok_shield.watchers.nflog.socket.socket", side_effect=OSError("no netlink")
-        ):
+        with patch("terok_shield.watchers.nflog.socket.socket", side_effect=OSError("no netlink")):
             result = NflogWatcher.create(_CONTAINER)
         assert result is None
 

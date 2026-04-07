@@ -12,6 +12,7 @@ from unittest import mock
 
 import pytest
 
+from terok_shield import state
 from terok_shield.cli.interactive import (
     _INPUT_MAP,
     _NSENTER_ENV,
@@ -25,7 +26,6 @@ from terok_shield.cli.interactive import (
     _PendingPacket,
     run_interactive,
 )
-from terok_shield import state
 from terok_shield.watchers import WatchEvent
 
 from ..testnet import (
