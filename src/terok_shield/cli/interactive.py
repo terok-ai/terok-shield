@@ -157,7 +157,10 @@ class InteractiveSession:
         watcher = NflogWatcher.create(self._container)
         if watcher is None:
             print(
-                "Error: could not create NFLOG watcher (netlink unavailable).",
+                "Error: could not create NFLOG watcher.\n"
+                "  NFLOG requires CAP_NET_ADMIN in the user namespace that owns\n"
+                "  the container's network namespace.  Re-run with\n"
+                "  TEROK_LOG_LEVEL=DEBUG for detailed diagnostics.",
                 file=sys.stderr,
             )
             raise SystemExit(1)
@@ -600,8 +603,13 @@ def _nsenter_reexec(state_dir: Path, container: str, *, raw: bool) -> None:
 
     NFLOG messages are delivered per-netns — the watcher must be inside the
     container's netns to receive packets logged by its nft rules.  Uses
-    ``podman unshare nsenter -t PID -n`` to enter the netns, then runs this
-    module as ``__main__``.
+    ``podman unshare nsenter`` to enter the netns, then runs this module as
+    ``__main__``.
+
+    The nsenter invocation enters both the user namespace (``-U``) and network
+    namespace (``-n``) of the container process.  ``-U`` must precede ``-n``
+    so the kernel checks ``CAP_NET_ADMIN`` after joining the owning user
+    namespace — see :data:`WORKAROUND(nsenter-userns)` below.
 
     Args:
         state_dir: Per-container state directory.
@@ -613,12 +621,27 @@ def _nsenter_reexec(state_dir: Path, container: str, *, raw: bool) -> None:
     runner = SubprocessRunner()
     pid = runner.podman_inspect(container, "{{.State.Pid}}")
 
+    # WORKAROUND(nsenter-userns): ``podman unshare`` creates a *new* user
+    # namespace that is a sibling of the container's owning userns.  NFLOG
+    # bind requires CAP_NET_ADMIN relative to the userns that *owns* the
+    # network namespace.  A sibling userns cannot satisfy this — only the
+    # owning userns or an ancestor can.  Adding ``-U --preserve-credentials``
+    # enters the container's owning userns (which grants CAP_NET_ADMIN over
+    # its netns) while keeping UID 0 and mapped capabilities from
+    # ``podman unshare``.  ``-U`` must precede ``-n`` because the kernel
+    # validates capabilities at netns-entry time.
+    # Short-lived ``nft`` commands (nft_via_nsenter) are unaffected because
+    # they do not subscribe to NFLOG.
+    # Removal: if a future Podman version provides a direct ``--userns=container``
+    # flag or an alternative NFLOG subscription path, this workaround can be dropped.
     cmd = [
         "podman",
         "unshare",
         "nsenter",
         "-t",
         pid,
+        "-U",
+        "--preserve-credentials",
         "-n",
         sys.executable,
         "-m",
@@ -626,15 +649,37 @@ def _nsenter_reexec(state_dir: Path, container: str, *, raw: bool) -> None:
         str(state_dir),
         container,
     ]
+
     env = {**os.environ, _NSENTER_ENV: "1"}
     if raw:
         env[_RAW_ENV] = "1"
     else:
         env.pop(_RAW_ENV, None)
+    _propagate_pythonpath(env)
+
     try:
         subprocess.run(cmd, env=env, check=True)  # noqa: S603
     except subprocess.CalledProcessError as e:
         raise SystemExit(e.returncode) from e
+
+
+# ── Subprocess environment ──────────────────────────────
+
+
+def _propagate_pythonpath(env: dict[str, str]) -> None:
+    """Ensure ``terok_shield`` is importable inside ``podman unshare``.
+
+    ``podman unshare`` resets the process environment, which can hide
+    venv site-packages (pipx, poetry).  Injects the parent of the
+    ``terok_shield`` package directory into ``PYTHONPATH`` so
+    ``python -m terok_shield.cli.interactive`` resolves regardless
+    of installation method.
+    """
+    # terok_shield/ is two levels up from cli/interactive.py; site-packages is three.
+    site = str(Path(__file__).resolve().parent.parent.parent)
+    existing = env.get("PYTHONPATH", "")
+    if site not in existing.split(os.pathsep):
+        env["PYTHONPATH"] = f"{site}{os.pathsep}{existing}" if existing else site
 
 
 # ── Helpers ──────────────────────────────────────────────

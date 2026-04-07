@@ -591,7 +591,12 @@ class TestNsenterReexec:
     """Tests for the _nsenter_reexec helper."""
 
     def test_builds_nsenter_command(self, tmp_path: Path) -> None:
-        """_nsenter_reexec invokes podman unshare nsenter with correct args."""
+        """_nsenter_reexec invokes podman unshare nsenter with correct args.
+
+        Verifies WORKAROUND(nsenter-userns): ``-U --preserve-credentials``
+        must appear before ``-n`` so the kernel checks CAP_NET_ADMIN after
+        entering the container's owning user namespace.
+        """
         from terok_shield.cli.interactive import _nsenter_reexec
 
         with (
@@ -604,12 +609,35 @@ class TestNsenterReexec:
         cmd = mock_run.call_args[0][0]
         assert cmd[:3] == ["podman", "unshare", "nsenter"]
         assert "-t" in cmd and "12345" in cmd
-        assert "-n" in cmd
+        # WORKAROUND(nsenter-userns): -U must precede -n
+        assert "-U" in cmd and "--preserve-credentials" in cmd
+        u_idx = cmd.index("-U")
+        n_idx = cmd.index("-n")
+        assert u_idx < n_idx, "-U must precede -n for CAP_NET_ADMIN in owning userns"
         assert str(tmp_path) in cmd
         assert _CONTAINER in cmd
         env = mock_run.call_args[1]["env"]
         assert env[_NSENTER_ENV] == "1"
         assert _RAW_ENV not in env
+
+    def test_propagates_pythonpath(self, tmp_path: Path) -> None:
+        """_nsenter_reexec injects PYTHONPATH so podman unshare finds the package."""
+        from terok_shield.cli.interactive import _nsenter_reexec
+
+        with (
+            mock.patch("terok_shield.cli.interactive.SubprocessRunner") as mock_runner_cls,
+            mock.patch("subprocess.run") as mock_run,
+        ):
+            mock_runner_cls.return_value.podman_inspect.return_value = "12345"
+            _nsenter_reexec(tmp_path, _CONTAINER, raw=False)
+
+        env = mock_run.call_args[1]["env"]
+        assert "PYTHONPATH" in env
+        # Derive expected site-packages dir from the source module's location
+        from terok_shield.cli import interactive as _mod
+
+        expected_site = str(Path(_mod.__file__).resolve().parent.parent.parent)
+        assert expected_site in env["PYTHONPATH"].split(":")
 
     def test_subprocess_failure_raises_systemexit(self, tmp_path: Path) -> None:
         """_nsenter_reexec raises SystemExit on subprocess failure."""
