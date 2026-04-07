@@ -12,6 +12,7 @@ unavailable (missing kernel module, insufficient permissions).
 """
 
 import logging
+import os
 import socket
 import struct
 from datetime import UTC, datetime
@@ -79,7 +80,12 @@ class NflogWatcher:
                 err = struct.unpack_from("=i", ack, _NLMSG_HDR.size)[0]
                 if err < 0:
                     sock.close()
-                    logger.debug("NFLOG bind rejected (errno %d) — skipping", -err)
+                    logger.warning(
+                        "NFLOG bind rejected: %s (errno %d) — "
+                        "likely missing CAP_NET_ADMIN in the owning user namespace",
+                        os.strerror(-err),
+                        -err,
+                    )
                     return None
 
             # Switch to non-blocking for the poll() loop

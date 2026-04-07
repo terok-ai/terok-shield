@@ -49,6 +49,19 @@ _NSENTER_ENV = "_TEROK_SHIELD_NFLOG_NSENTER"
 _RAW_ENV = "_TEROK_SHIELD_NFLOG_RAW"
 
 
+def _propagate_pythonpath(env: dict[str, str]) -> None:
+    """Ensure ``terok_shield`` is importable in the interactive subprocess.
+
+    Mirrors :func:`terok_shield.cli.interactive._propagate_pythonpath` —
+    duplicated because tach layer boundaries prevent support->cli imports.
+    """
+    # terok_shield/ is one level up from this file; site-packages is two.
+    site = str(Path(__file__).resolve().parent.parent)
+    existing = env.get("PYTHONPATH", "")
+    if site not in existing.split(os.pathsep):
+        env["PYTHONPATH"] = f"{site}{os.pathsep}{existing}" if existing else site
+
+
 def bus_name_for_container(short_id: str) -> str:
     """Derive the per-container well-known bus name.
 
@@ -160,6 +173,7 @@ class ShieldBridge:
         try:
             env = {**os.environ, _RAW_ENV: "1"}
             env.pop(_NSENTER_ENV, None)
+            _propagate_pythonpath(env)
             self._process = await asyncio.create_subprocess_exec(
                 sys.executable,
                 "-m",
