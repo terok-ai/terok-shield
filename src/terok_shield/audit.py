@@ -7,7 +7,7 @@ Writes structured events (setup, teardown, allow, deny) to a single
 file per container.  Can be toggled on/off at runtime without losing
 the file handle.
 """
-# WAYPOINT: Shield (__init__), HookMode (mode_hook)
+# WAYPOINT: Shield (__init__), HookMode (hooks.mode)
 
 import json
 import logging

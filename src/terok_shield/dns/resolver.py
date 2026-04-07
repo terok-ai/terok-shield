@@ -12,14 +12,14 @@ IPs are captured (no parallel A + AAAA query), but resolution still
 works.  When the dnsmasq tier is active, domain resolution happens at
 runtime via ``--nftset``; this module then only handles raw IPs.
 """
-# WAYPOINT: Shield (__init__), HookMode (mode_hook)
+# WAYPOINT: Shield (__init__), HookMode (hooks.mode)
 
 import logging
 import time
 from pathlib import Path
 
-from ..common.util import is_ip as _is_ip
-from .run import CommandRunner, DigNotFoundError
+from ..util import is_ip as _is_ip
+from ..run import CommandRunner, DigNotFoundError
 
 logger = logging.getLogger(__name__)
 

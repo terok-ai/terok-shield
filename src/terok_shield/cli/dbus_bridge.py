@@ -4,7 +4,7 @@
 """``shield dbus-bridge`` entry point — standalone D-Bus bridge launcher.
 
 Acquires the per-container well-known bus name on the session bus,
-creates a :class:`~terok_shield.lib.dbus_bridge.ShieldBridge`, and
+creates a :class:`~terok_shield.dbus_bridge.ShieldBridge`, and
 runs until SIGINT/SIGTERM.  For orchestrated use (e.g. terok TUI),
 import :class:`ShieldBridge` directly and manage the bus externally.
 """
@@ -41,7 +41,7 @@ async def _run_bridge(state_dir: Path, container: str) -> None:
     """Connect to the session bus, acquire the bus name, and run the bridge."""
     from dbus_fast.aio import MessageBus
 
-    from ..lib.dbus_bridge import ShieldBridge, bus_name_for_container
+    from ..dbus_bridge import ShieldBridge, bus_name_for_container
 
     bus = await MessageBus().connect()
     bridge = ShieldBridge(state_dir=state_dir, container=container, bus=bus)

@@ -27,7 +27,7 @@ from terok_shield.cli.main import (
     _resolve_state_root,
     main,
 )
-from terok_shield.common.config import ShieldFileConfig, ShieldMode
+from terok_shield.config import ShieldFileConfig, ShieldMode
 
 from ..testfs import (
     AUDIT_FILENAME,
@@ -817,14 +817,14 @@ def test_resolve_config_root(
 
 def test_auto_detect_mode_raises_without_nft(monkeypatch: pytest.MonkeyPatch) -> None:
     """_auto_detect_mode() fails when nft is unavailable."""
-    monkeypatch.setattr("terok_shield.core.run.find_nft", lambda: "")
+    monkeypatch.setattr("terok_shield.run.find_nft", lambda: "")
     with pytest.raises(NftNotFoundError):
         _auto_detect_mode()
 
 
 def test_auto_detect_mode_returns_hook(monkeypatch: pytest.MonkeyPatch) -> None:
     """_auto_detect_mode() selects hook mode when nft is installed."""
-    monkeypatch.setattr("terok_shield.core.run.find_nft", lambda: NFT_BINARY)
+    monkeypatch.setattr("terok_shield.run.find_nft", lambda: NFT_BINARY)
     assert _auto_detect_mode() == ShieldMode.HOOK
 
 
@@ -957,8 +957,8 @@ def test_build_config_uses_resolved_state_root_when_not_overridden(
 class TestSetupCommand:
     """Tests for the setup CLI command."""
 
-    @mock.patch("terok_shield.core.hook_install.setup_global_hooks")
-    @mock.patch("terok_shield.common.podman_info.ensure_containers_conf_hooks_dir")
+    @mock.patch("terok_shield.hooks.install.setup_global_hooks")
+    @mock.patch("terok_shield.podman_info.ensure_containers_conf_hooks_dir")
     def test_setup_user(
         self,
         mock_ensure: mock.Mock,
@@ -971,7 +971,7 @@ class TestSetupCommand:
         mock_ensure.assert_called_once()
         assert "Done" in capsys.readouterr().out
 
-    @mock.patch("terok_shield.core.hook_install.setup_global_hooks")
+    @mock.patch("terok_shield.hooks.install.setup_global_hooks")
     def test_setup_root(
         self,
         mock_setup: mock.Mock,
@@ -993,7 +993,7 @@ class TestSetupCommand:
 # ── check-environment command test ───────────────────────
 
 
-@mock.patch("terok_shield.core.run.find_nft", return_value=NFT_BINARY)
+@mock.patch("terok_shield.run.find_nft", return_value=NFT_BINARY)
 def test_check_environment_command(
     _find: mock.Mock,
     tmp_path: Path,
@@ -1019,7 +1019,7 @@ def test_check_environment_command(
 # ── version command test ─────────────────────────────────
 
 
-@mock.patch("terok_shield.core.run.find_nft", return_value=NFT_BINARY)
+@mock.patch("terok_shield.run.find_nft", return_value=NFT_BINARY)
 def test_version_flag_prints_versions(
     _find: mock.Mock,
     capsys: pytest.CaptureFixture[str],
@@ -1035,7 +1035,7 @@ def test_version_flag_prints_versions(
     assert "nft found" in out
 
 
-@mock.patch("terok_shield.core.run.find_nft", return_value="")
+@mock.patch("terok_shield.run.find_nft", return_value="")
 def test_version_flag_podman_missing(
     _find: mock.Mock,
     capsys: pytest.CaptureFixture[str],
@@ -1055,7 +1055,7 @@ def test_version_flag_podman_missing(
 class TestSetupInteractive:
     """Tests for interactive setup mode."""
 
-    @mock.patch("terok_shield.core.hook_install.setup_global_hooks")
+    @mock.patch("terok_shield.hooks.install.setup_global_hooks")
     @mock.patch("builtins.input", return_value="u")
     def test_interactive_user_choice(
         self,
@@ -1066,7 +1066,7 @@ class TestSetupInteractive:
     ) -> None:
         """Interactive setup with 'u' choice installs user hooks."""
         monkeypatch.setattr(
-            "terok_shield.common.podman_info.ensure_containers_conf_hooks_dir", lambda _d: None
+            "terok_shield.podman_info.ensure_containers_conf_hooks_dir", lambda _d: None
         )
         main(["setup"])
         mock_setup.assert_called_once()
@@ -1082,7 +1082,7 @@ class TestSetupInteractive:
         main(["setup"])
         assert "Cancelled" in capsys.readouterr().out
 
-    @mock.patch("terok_shield.core.hook_install.setup_global_hooks")
+    @mock.patch("terok_shield.hooks.install.setup_global_hooks")
     @mock.patch("builtins.input", return_value="r")
     def test_interactive_root_choice(
         self,

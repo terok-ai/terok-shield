@@ -20,12 +20,12 @@ class TestNftImportIsolation:
         # Keep the source path inline here so auditors can review the exact
         # security-boundary file target without indirection.
         source = (
-            Path(__file__).parents[2] / "src" / "terok_shield" / "core" / "nft.py"
+            Path(__file__).parents[2] / "src" / "terok_shield" / "nft" / "rules.py"
         ).read_text()
         tree = ast.parse(source)
         stdlib = {"ipaddress", "re", "textwrap"}
         # nft_constants.py is the only non-stdlib import allowed (literals-only module)
-        allowed_relative = {"nft_constants"}
+        allowed_relative = {"constants"}
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:

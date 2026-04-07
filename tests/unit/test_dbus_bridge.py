@@ -15,8 +15,8 @@ import pytest
 dbus_fast = pytest.importorskip("dbus_fast", reason="dbus-fast not installed")
 pytest.importorskip("terok_dbus", reason="terok-dbus not installed")
 
-from terok_shield.core.state import container_id_path
-from terok_shield.lib.dbus_bridge import (
+from terok_shield.state import container_id_path
+from terok_shield.dbus_bridge import (
     BUS_NAME_PREFIX,
     ShieldBridge,
     _ShieldInterface,

@@ -10,7 +10,7 @@ static pre-start resolution cannot.
 
 This module is the single owner of dnsmasq config format and CLI args.
 """
-# WAYPOINT: HookMode (mode_hook)
+# WAYPOINT: HookMode (hooks.mode)
 
 import ipaddress
 import logging
@@ -19,9 +19,9 @@ import re
 import signal
 from pathlib import Path
 
-from . import state
-from .nft_constants import DNSMASQ_BIND, NFT_TABLE_NAME
-from .run import CommandRunner, ExecError
+from .. import state
+from ..nft.constants import DNSMASQ_BIND, NFT_TABLE_NAME
+from ..run import CommandRunner, ExecError
 
 logger = logging.getLogger(__name__)
 

@@ -184,7 +184,7 @@ def _start_container_dnsmasq(pid: str, sd: Path) -> None:
     resolv.conf is pre-written by pre_start and bind-mounted :ro, so DNS
     already points to 127.0.0.1 before the hook runs.
 
-    Mirrors ``terok_shield.core.dnsmasq.launch()`` defensive measures:
+    Mirrors ``terok_shield.dns.dnsmasq.launch()`` defensive measures:
     clears stale PID file, then verifies the new PID file and process
     identity after start.
     """

@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from terok_shield.core import state
-from terok_shield.lib.audit import AuditLogger
+from terok_shield import state
+from terok_shield.audit import AuditLogger
 
 from ..testfs import NONEXISTENT_DIR, TEST_SUBDIR_NAME
 from ..testnet import TEST_IP1

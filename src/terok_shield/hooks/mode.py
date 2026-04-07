@@ -8,14 +8,14 @@ container's network namespace.  No root required — only podman and nft.
 
 Orchestrates collaborators per lifecycle phase:
 
-- **RulesetBuilder** (``core.nft``) — generates and verifies nft rulesets
-- **DnsResolver** (``core.dns``) — pre-start domain resolution
-- **ProfileLoader** (``lib.profiles``) — allowlist profile composition
-- **AuditLogger** (``lib.audit``) — event logging
-- **CommandRunner** (``core.run``) — subprocess execution (nft, nsenter)
-- **dnsmasq** (``core.dnsmasq``) — runtime DNS with nftset auto-population
-- **hook_install** (``core.hook_install``) — OCI hook file generation
-- **state** (``core.state``) — per-container state bundle I/O
+- **RulesetBuilder** (``nft.rules``) — generates and verifies nft rulesets
+- **DnsResolver** (``dns.resolver``) — pre-start domain resolution
+- **ProfileLoader** (``profiles``) — allowlist profile composition
+- **AuditLogger** (``audit``) — event logging
+- **CommandRunner** (``run``) — subprocess execution (nft, nsenter)
+- **dnsmasq** (``dns.dnsmasq``) — runtime DNS with nftset auto-population
+- **hook_install** (``hooks.install``) — OCI hook file generation
+- **state** (``state``) — per-container state bundle I/O
 """
 # WAYPOINT: Shield (__init__)
 
@@ -24,7 +24,7 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..common.config import (
+from ..config import (
     ANNOTATION_AUDIT_ENABLED_KEY,
     ANNOTATION_DNS_TIER_KEY,
     ANNOTATION_KEY,
@@ -38,38 +38,39 @@ from ..common.config import (
     ShieldState,
     detect_dns_tier,
 )
-from ..common.podman_info import (
+from ..podman_info import (
     PodmanInfo,
     global_hooks_hint,
     has_global_hooks,
     parse_podman_info,
     parse_resolv_conf,
 )
-from ..common.util import is_ip as _is_ip, is_ipv4
-from . import dnsmasq, state
-from .hook_install import install_hooks
-from .nft import (
+from ..util import is_ip as _is_ip, is_ipv4
+from ..dns import dnsmasq
+from .. import state
+from .install import install_hooks
+from ..nft.rules import (
     NFT_TABLE,
     RulesetBuilder,
     add_deny_elements_dual,
     delete_deny_elements_dual,
     safe_ip,
 )
-from .nft_constants import (
+from ..nft.constants import (
     NFT_SET_TIMEOUT_DNSMASQ,
     PASTA_DNS,
     PASTA_HOST_LOOPBACK_MAP,
     SLIRP4NETNS_DNS,
 )
-from .run import ExecError, ShieldNeedsSetup
+from ..run import ExecError, ShieldNeedsSetup
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from ..lib.audit import AuditLogger
-    from ..lib.profiles import ProfileLoader
-    from .dns import DnsResolver
-    from .run import CommandRunner
+    from ..audit import AuditLogger
+    from ..profiles import ProfileLoader
+    from ..dns.resolver import DnsResolver
+    from ..run import CommandRunner
 
 
 class HookMode:

@@ -28,8 +28,8 @@ from pathlib import Path
 
 import pytest
 
-from terok_shield.common.podman_info import has_global_hooks, parse_podman_info
-from terok_shield.core.run import find_nft
+from terok_shield.podman_info import has_global_hooks, parse_podman_info
+from terok_shield.run import find_nft
 from tests.testnet import ALLOWED_TARGET_IPS
 
 from .helpers import start_shielded_container
@@ -238,7 +238,7 @@ def container(_pull_image: None) -> Iterator[str]:
 @pytest.fixture
 def container_pid(container: str) -> str:
     """Return the host PID of a running container."""
-    from terok_shield.core.run import SubprocessRunner
+    from terok_shield.run import SubprocessRunner
 
     return SubprocessRunner().podman_inspect(container, "{{.State.Pid}}")
 

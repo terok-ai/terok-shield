@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from terok_shield import Shield, ShieldConfig, ShieldState
-from terok_shield.core import state
+from terok_shield import state
 from tests.testnet import (
     ALLOWED_TARGET_HTTP,
     ALLOWED_TARGET_IPS,

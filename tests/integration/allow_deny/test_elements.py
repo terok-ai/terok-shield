@@ -5,7 +5,7 @@
 
 import pytest
 
-from terok_shield.core.nft import add_elements, hook_ruleset
+from terok_shield.nft.rules import add_elements, hook_ruleset
 from tests.testnet import ALLOWED_TARGET_IPS, GOOGLE_DNS_IP, QUAD9_DNS_IP, TEST_IP1
 
 from ..conftest import nft_missing, nsenter_nft, podman_missing

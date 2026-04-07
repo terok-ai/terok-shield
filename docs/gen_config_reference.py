@@ -15,7 +15,7 @@ import io
 import mkdocs_gen_files
 from mkdocs_terok.config_reference import render_model_tables, render_yaml_example
 
-from terok_shield.common.config import ShieldFileConfig
+from terok_shield.config import ShieldFileConfig
 
 _FIELD_DOCS: dict[str, str] = {
     "mode": "Firewall mode. ``auto`` selects the best available; ``hook`` forces OCI hook mode.",
@@ -30,7 +30,7 @@ def _generate() -> str:
     buf.write("# Config Reference\n\n")
     buf.write(
         "Auto-generated from the "
-        "[`ShieldFileConfig`][terok_shield.common.config.ShieldFileConfig] model.  "
+        "[`ShieldFileConfig`][terok_shield.config.ShieldFileConfig] model.  "
         "Unknown keys are rejected at load time (`extra='forbid'`).\n\n"
     )
 

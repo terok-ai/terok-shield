@@ -9,7 +9,7 @@ import pytest
 
 from terok_shield import Shield, ShieldConfig
 from terok_shield.cli.main import main
-from terok_shield.core import state
+from terok_shield import state
 from tests.testnet import TEST_IP4
 
 # -- Public API resolve ---------------------------------------

@@ -4,7 +4,7 @@
 """Tail ``audit.jsonl`` and emit events for shield lifecycle changes.
 
 Watches for new JSON-lines entries written by
-:class:`~terok_shield.lib.audit.AuditLogger` and surfaces them as
+:class:`~terok_shield.audit.AuditLogger` and surfaces them as
 :class:`WatchEvent` instances with ``source="audit"``.
 """
 

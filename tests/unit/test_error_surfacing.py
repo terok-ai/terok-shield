@@ -16,11 +16,11 @@ from unittest import mock
 import pytest
 
 from terok_shield.cli.main import _load_config_file
-from terok_shield.common.config import ShieldFileConfig
-from terok_shield.core.dnsmasq import generate_config, read_domains
-from terok_shield.core.nft_constants import PASTA_DNS
-from terok_shield.core.run import ExecError
-from terok_shield.lib.audit import AuditLogger
+from terok_shield.config import ShieldFileConfig
+from terok_shield.dns.dnsmasq import generate_config, read_domains
+from terok_shield.nft.constants import PASTA_DNS
+from terok_shield.run import ExecError
+from terok_shield.audit import AuditLogger
 
 from ..testnet import TEST_DOMAIN, TEST_DOMAIN2
 
@@ -149,7 +149,7 @@ class TestReadDomainsWarnings:
         domains_path = tmp_path / "profile.domains"
         domains_path.write_text(f"{TEST_DOMAIN}\n; injection\n{TEST_DOMAIN2}\n")
 
-        with caplog.at_level(logging.WARNING, logger="terok_shield.dnsmasq"):
+        with caplog.at_level(logging.WARNING, logger="terok_shield.dns.dnsmasq"):
             result = read_domains(domains_path)
 
         assert result == [TEST_DOMAIN, TEST_DOMAIN2]
@@ -165,7 +165,7 @@ class TestReadDomainsWarnings:
         domains_path = tmp_path / "profile.domains"
         domains_path.write_text(f"{TEST_DOMAIN}\n; bad1\n; bad2\n{TEST_DOMAIN2}\n")
 
-        with caplog.at_level(logging.WARNING, logger="terok_shield.dnsmasq"):
+        with caplog.at_level(logging.WARNING, logger="terok_shield.dns.dnsmasq"):
             result = read_domains(domains_path)
 
         assert result == [TEST_DOMAIN, TEST_DOMAIN2]
@@ -176,7 +176,7 @@ class TestReadDomainsWarnings:
         domains_path = tmp_path / "profile.domains"
         domains_path.write_text(f"{TEST_DOMAIN}\n{TEST_DOMAIN2}\n")
 
-        with caplog.at_level(logging.WARNING, logger="terok_shield.dnsmasq"):
+        with caplog.at_level(logging.WARNING, logger="terok_shield.dns.dnsmasq"):
             result = read_domains(domains_path)
 
         assert result == [TEST_DOMAIN, TEST_DOMAIN2]
@@ -189,7 +189,7 @@ class TestReadDomainsWarnings:
         domains_path = tmp_path / "profile.domains"
         domains_path.write_text("not-a-valid-entry\n")
 
-        with caplog.at_level(logging.WARNING, logger="terok_shield.dnsmasq"):
+        with caplog.at_level(logging.WARNING, logger="terok_shield.dns.dnsmasq"):
             read_domains(domains_path)
 
         assert str(domains_path) in caplog.records[0].message
@@ -207,7 +207,7 @@ class TestGenerateConfigWarnings:
         """Invalid domains are skipped with a logger warning."""
         pid_path = tmp_path / "dnsmasq.pid"
 
-        with caplog.at_level(logging.WARNING, logger="terok_shield.dnsmasq"):
+        with caplog.at_level(logging.WARNING, logger="terok_shield.dns.dnsmasq"):
             config = generate_config(PASTA_DNS, [TEST_DOMAIN, "; rm -rf /", TEST_DOMAIN2], pid_path)
 
         # Valid domains are present, invalid one is not
@@ -225,7 +225,7 @@ class TestGenerateConfigWarnings:
         """All-valid domain list produces no warnings."""
         pid_path = tmp_path / "dnsmasq.pid"
 
-        with caplog.at_level(logging.WARNING, logger="terok_shield.dnsmasq"):
+        with caplog.at_level(logging.WARNING, logger="terok_shield.dns.dnsmasq"):
             config = generate_config(PASTA_DNS, [TEST_DOMAIN, TEST_DOMAIN2], pid_path)
 
         assert f"nftset=/{TEST_DOMAIN}/" in config
@@ -248,7 +248,7 @@ class TestAuditLogEventWarnings:
 
         audit = AuditLogger(audit_path=audit_path, enabled=True)
 
-        with caplog.at_level(logging.WARNING, logger="terok_shield.lib.audit"):
+        with caplog.at_level(logging.WARNING, logger="terok_shield.audit"):
             audit.log_event("test-ctr", "setup", detail="test")
 
         assert len(caplog.records) == 1
@@ -273,7 +273,7 @@ class TestAuditLogEventWarnings:
 
         audit = AuditLogger(audit_path=audit_path, enabled=False)
 
-        with caplog.at_level(logging.WARNING, logger="terok_shield.lib.audit"):
+        with caplog.at_level(logging.WARNING, logger="terok_shield.audit"):
             audit.log_event("test-ctr", "setup", detail="test")
 
         assert len(caplog.records) == 0
@@ -288,10 +288,10 @@ class TestDenyIpWarnings:
     @pytest.fixture
     def hook_mode(self, tmp_path: Path) -> tuple[mock.MagicMock, object]:
         """Create a minimal HookMode with a mock runner for deny_ip tests."""
-        from terok_shield.common.config import ShieldConfig, ShieldMode
-        from terok_shield.core import state
-        from terok_shield.core.mode_hook import HookMode
-        from terok_shield.core.nft import RulesetBuilder
+        from terok_shield.config import ShieldConfig, ShieldMode
+        from terok_shield import state
+        from terok_shield.hooks.mode import HookMode
+        from terok_shield.nft.rules import RulesetBuilder
 
         state.ensure_state_dirs(tmp_path)
         config = ShieldConfig(state_dir=tmp_path, mode=ShieldMode.HOOK)
@@ -319,7 +319,7 @@ class TestDenyIpWarnings:
         runner, mode = hook_mode
         runner.nft_via_nsenter.side_effect = ExecError(["nft"], 1, "Error: element is not in set")
 
-        with caplog.at_level(logging.WARNING, logger="terok_shield.mode_hook"):
+        with caplog.at_level(logging.WARNING, logger="terok_shield.hooks.mode"):
             mode.deny_ip("test-ctr", "192.0.2.1")  # type: ignore[union-attr]
 
         assert len(caplog.records) == 0
@@ -333,7 +333,7 @@ class TestDenyIpWarnings:
         runner, mode = hook_mode
         runner.nft_via_nsenter.side_effect = ExecError(["nft"], 1, "Error: element does not exist")
 
-        with caplog.at_level(logging.WARNING, logger="terok_shield.mode_hook"):
+        with caplog.at_level(logging.WARNING, logger="terok_shield.hooks.mode"):
             mode.deny_ip("test-ctr", "192.0.2.1")  # type: ignore[union-attr]
 
         assert len(caplog.records) == 0
@@ -349,7 +349,7 @@ class TestDenyIpWarnings:
             ["nft"], 1, "Error: no such file or directory"
         )
 
-        with caplog.at_level(logging.WARNING, logger="terok_shield.mode_hook"):
+        with caplog.at_level(logging.WARNING, logger="terok_shield.hooks.mode"):
             mode.deny_ip("test-ctr", "192.0.2.1")  # type: ignore[union-attr]
 
         assert len(caplog.records) == 0
@@ -363,7 +363,7 @@ class TestDenyIpWarnings:
         runner, mode = hook_mode
         runner.nft_via_nsenter.side_effect = ExecError(["nft"], 1, "Error: permission denied")
 
-        with caplog.at_level(logging.WARNING, logger="terok_shield.mode_hook"):
+        with caplog.at_level(logging.WARNING, logger="terok_shield.hooks.mode"):
             mode.deny_ip("test-ctr", "192.0.2.1")  # type: ignore[union-attr]
 
         assert len(caplog.records) == 1

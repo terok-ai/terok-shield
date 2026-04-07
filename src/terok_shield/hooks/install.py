@@ -10,12 +10,12 @@ and :func:`setup_global_hooks` for one-time system-wide installation.
 
 Pure file I/O — no runtime container interaction.
 """
-# WAYPOINT: HookMode (mode_hook)
+# WAYPOINT: HookMode (hooks.mode)
 
 import json
 from pathlib import Path
 
-from ..common.config import ANNOTATION_KEY
+from ..config import ANNOTATION_KEY
 
 _ENTRYPOINT_NAME = "terok-shield-hook"
 _HOOK_STAGES = ("createRuntime", "poststop")

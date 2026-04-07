@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from terok_shield.lib.profiles import ProfileLoader
+from terok_shield.profiles import ProfileLoader
 
 
 @pytest.mark.needs_host_features

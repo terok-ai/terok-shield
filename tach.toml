@@ -19,114 +19,122 @@ ignore_type_checking_imports = true
 #
 #   cli         CLI entry points, interactive loops, watch runner
 #   support     Public facade, audit, profiles, watchers
-#   core        Security-critical: nft, dns, dnsmasq, mode_hook, state, run
-#   common      Pure data / standalone helpers with zero internal deps
+#   core        Security-critical: nft, dns, hooks, state, run
+#   foundation  Pure data / standalone helpers with zero internal deps
 
-layers = ["cli", "support", "core", "common"]
+layers = ["cli", "support", "core", "foundation"]
 
-# ── Common ─────────────────────────────────────────────────
+# ── Foundation ─────────────────────────────────────────────
 # Zero-dependency primitives.  No internal imports.
 
 [[modules]]
-path = "terok_shield.common"
-layer = "common"
+path = "terok_shield.config"
+layer = "foundation"
 depends_on = []
 
 [[modules]]
-path = "terok_shield.common.config"
-layer = "common"
+path = "terok_shield.util"
+layer = "foundation"
 depends_on = []
 
 [[modules]]
-path = "terok_shield.common.util"
-layer = "common"
+path = "terok_shield.validation"
+layer = "foundation"
 depends_on = []
 
 [[modules]]
-path = "terok_shield.common.validation"
-layer = "common"
+path = "terok_shield.podman_info"
+layer = "foundation"
 depends_on = []
 
+# Per-container state bundle layout — zero internal deps
 [[modules]]
-path = "terok_shield.common.podman_info"
-layer = "common"
+path = "terok_shield.state"
+layer = "foundation"
+depends_on = []
+
+# Subprocess helpers — zero internal deps
+[[modules]]
+path = "terok_shield.run"
+layer = "foundation"
 depends_on = []
 
 # ── Core ───────────────────────────────────────────────────
 # Security-critical modules — the auditable boundary.
-# May import from common freely; must declare same-layer deps.
+# May import from foundation freely; must declare same-layer deps.
 
+# nft domain package
 [[modules]]
-path = "terok_shield.core"
+path = "terok_shield.nft"
 layer = "core"
 depends_on = []
 
 # Security boundary — literals only, no dependencies
 [[modules]]
-path = "terok_shield.core.nft_constants"
-layer = "core"
+path = "terok_shield.nft.constants"
+layer = "foundation"
 depends_on = []
 
-# Security boundary — only stdlib + nft_constants
+# Security boundary — only stdlib + nft.constants
 [[modules]]
-path = "terok_shield.core.nft"
+path = "terok_shield.nft.rules"
 layer = "core"
 depends_on = [
-    "terok_shield.core.nft_constants",
+    "terok_shield.nft.constants",
 ]
 
-# Per-container state bundle layout — zero internal deps
+# dns domain package
 [[modules]]
-path = "terok_shield.core.state"
-layer = "core"
-depends_on = []
-
-# Subprocess helpers — zero internal deps
-[[modules]]
-path = "terok_shield.core.run"
+path = "terok_shield.dns"
 layer = "core"
 depends_on = []
 
 # DNS resolution and caching
 [[modules]]
-path = "terok_shield.core.dns"
+path = "terok_shield.dns.resolver"
 layer = "core"
 depends_on = [
-    "terok_shield.core.run",
+    "terok_shield.run",
 ]
 
 # dnsmasq lifecycle — config generation, launch, cleanup
 [[modules]]
-path = "terok_shield.core.dnsmasq"
+path = "terok_shield.dns.dnsmasq"
 layer = "core"
 depends_on = [
-    "terok_shield.core.nft_constants",
-    "terok_shield.core.run",
-    "terok_shield.core.state",
+    "terok_shield.nft.constants",
+    "terok_shield.run",
+    "terok_shield.state",
 ]
+
+# hooks domain package
+[[modules]]
+path = "terok_shield.hooks"
+layer = "core"
+depends_on = []
 
 # Hook file generation and installation — no same-layer deps
 [[modules]]
-path = "terok_shield.core.hook_install"
+path = "terok_shield.hooks.install"
 layer = "core"
 depends_on = []
 
 # Hook mode — OCI hooks, per-container netns
 [[modules]]
-path = "terok_shield.core.mode_hook"
+path = "terok_shield.hooks.mode"
 layer = "core"
 depends_on = [
-    "terok_shield.core.dnsmasq",
-    "terok_shield.core.hook_install",
-    "terok_shield.core.nft",
-    "terok_shield.core.nft_constants",
-    "terok_shield.core.run",
-    "terok_shield.core.state",
+    "terok_shield.dns.dnsmasq",
+    "terok_shield.hooks.install",
+    "terok_shield.nft.rules",
+    "terok_shield.nft.constants",
+    "terok_shield.run",
+    "terok_shield.state",
 ]
 
 # ── Resources ─────────────────────────────────────────────
 # resources/hook_entrypoint.py is NOT a tach module.  It is read as a
-# plain file by hook_install._generate_entrypoint() and installed
+# plain file by hooks.install._generate_entrypoint() and installed
 # verbatim as an OCI hook script.  It has zero terok_shield imports
 # (stdlib-only, enforced by test_hook_entrypoint_isolation.py).
 # Tests import it as a Python module for white-box testing, but tests/
@@ -134,34 +142,29 @@ depends_on = [
 
 # ── Support ────────────────────────────────────────────────
 # Non-security-critical library modules.
-# May import from core and common freely; must declare same-layer deps.
-
-[[modules]]
-path = "terok_shield.lib"
-layer = "support"
-depends_on = []
+# May import from core and foundation freely; must declare same-layer deps.
 
 # Audit logging — no internal deps
 [[modules]]
-path = "terok_shield.lib.audit"
+path = "terok_shield.audit"
 layer = "support"
 depends_on = []
 
 # Profile loading
 [[modules]]
-path = "terok_shield.lib.profiles"
+path = "terok_shield.profiles"
 layer = "support"
 depends_on = []
 
-# Watchers — library-level event-stream classes
+# Watchers — event-stream classes
 [[modules]]
-path = "terok_shield.lib.watchers"
+path = "terok_shield.watchers"
 layer = "support"
 depends_on = []
 
 # D-Bus bridge — optional, requires dbus-fast + terok-dbus
 [[modules]]
-path = "terok_shield.lib.dbus_bridge"
+path = "terok_shield.dbus_bridge"
 layer = "support"
 depends_on = []
 
@@ -170,8 +173,8 @@ depends_on = []
 path = "terok_shield"
 layer = "support"
 depends_on = [
-    "terok_shield.lib.audit",
-    "terok_shield.lib.profiles",
+    "terok_shield.audit",
+    "terok_shield.profiles",
 ]
 
 # ── CLI ────────────────────────────────────────────────────

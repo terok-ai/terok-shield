@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from terok_shield.common.podman_info import (
+from terok_shield.podman_info import (
     HOOK_JSON_FILENAME,
     _parse_hooks_dir_from_conf,
     _parse_version,
@@ -282,9 +282,9 @@ class TestFindHooksDirs:
 
         # Patch system paths to avoid real filesystem interference
         monkeypatch.setattr(
-            "terok_shield.common.podman_info._SYSTEM_CONF_PATHS", (tmp_path / "nonexistent",)
+            "terok_shield.podman_info._SYSTEM_CONF_PATHS", (tmp_path / "nonexistent",)
         )
-        monkeypatch.setattr("terok_shield.common.podman_info._SYSTEM_HOOKS_DIRS", ())
+        monkeypatch.setattr("terok_shield.podman_info._SYSTEM_HOOKS_DIRS", ())
 
         dirs = find_hooks_dirs()
         assert dirs == [Path("/user/hooks")]
@@ -295,11 +295,11 @@ class TestFindHooksDirs:
         """Falls back to existing system dirs when no config."""
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "no-config"))
         monkeypatch.setattr(
-            "terok_shield.common.podman_info._SYSTEM_CONF_PATHS", (tmp_path / "nonexistent",)
+            "terok_shield.podman_info._SYSTEM_CONF_PATHS", (tmp_path / "nonexistent",)
         )
         system_dir = tmp_path / "system-hooks"
         system_dir.mkdir()
-        monkeypatch.setattr("terok_shield.common.podman_info._SYSTEM_HOOKS_DIRS", (system_dir,))
+        monkeypatch.setattr("terok_shield.podman_info._SYSTEM_HOOKS_DIRS", (system_dir,))
 
         dirs = find_hooks_dirs()
         assert dirs == [system_dir]
@@ -339,7 +339,7 @@ class TestEnsureContainersConf:
         """Creates containers.conf when absent."""
         conf_dir = tmp_path / "containers"
         monkeypatch.setattr(
-            "terok_shield.common.podman_info._user_containers_conf",
+            "terok_shield.podman_info._user_containers_conf",
             lambda: conf_dir / "containers.conf",
         )
         ensure_containers_conf_hooks_dir(Path("/my/hooks"))
@@ -353,7 +353,7 @@ class TestEnsureContainersConf:
         """Inserts hooks_dir into existing [engine] without duplicating the section."""
         conf = tmp_path / "containers.conf"
         conf.write_text('[engine]\nimage_copy_tmp_dir = "/data/tmp"\n')
-        monkeypatch.setattr("terok_shield.common.podman_info._user_containers_conf", lambda: conf)
+        monkeypatch.setattr("terok_shield.podman_info._user_containers_conf", lambda: conf)
         ensure_containers_conf_hooks_dir(Path("/my/hooks"))
         text = conf.read_text()
         assert text.count("[engine]") == 1
@@ -364,7 +364,7 @@ class TestEnsureContainersConf:
         """Comments in the file are preserved."""
         conf = tmp_path / "containers.conf"
         conf.write_text('# My config\n[engine]\n# temp dir\nimage_copy_tmp_dir = "/data"\n')
-        monkeypatch.setattr("terok_shield.common.podman_info._user_containers_conf", lambda: conf)
+        monkeypatch.setattr("terok_shield.podman_info._user_containers_conf", lambda: conf)
         ensure_containers_conf_hooks_dir(Path("/my/hooks"))
         text = conf.read_text()
         assert "# My config" in text
@@ -376,7 +376,7 @@ class TestEnsureContainersConf:
         """Does not match [engine] inside a comment."""
         conf = tmp_path / "containers.conf"
         conf.write_text('# see [engine] docs\n[engine]\nfoo = "bar"\n')
-        monkeypatch.setattr("terok_shield.common.podman_info._user_containers_conf", lambda: conf)
+        monkeypatch.setattr("terok_shield.podman_info._user_containers_conf", lambda: conf)
         ensure_containers_conf_hooks_dir(Path("/my/hooks"))
         text = conf.read_text()
         assert text.count("[engine]") == 2  # one in comment, one real
@@ -388,7 +388,7 @@ class TestEnsureContainersConf:
         """No-op when hooks_dir already points to the right path."""
         conf = tmp_path / "containers.conf"
         conf.write_text('[engine]\nhooks_dir = ["/my/hooks"]\n')
-        monkeypatch.setattr("terok_shield.common.podman_info._user_containers_conf", lambda: conf)
+        monkeypatch.setattr("terok_shield.podman_info._user_containers_conf", lambda: conf)
         ensure_containers_conf_hooks_dir(Path("/my/hooks"))
         assert conf.read_text().count("hooks_dir") == 1
 
@@ -398,7 +398,7 @@ class TestEnsureContainersConf:
         """Appends [engine] section when file exists but has no [engine]."""
         conf = tmp_path / "containers.conf"
         conf.write_text("[containers]\nlabel = false\n")
-        monkeypatch.setattr("terok_shield.common.podman_info._user_containers_conf", lambda: conf)
+        monkeypatch.setattr("terok_shield.podman_info._user_containers_conf", lambda: conf)
         ensure_containers_conf_hooks_dir(Path("/my/hooks"))
         text = conf.read_text()
         assert "[containers]" in text
@@ -411,7 +411,7 @@ class TestEnsureContainersConf:
         """Warns and does not modify when hooks_dir is already set differently."""
         conf = tmp_path / "containers.conf"
         conf.write_text('[engine]\nhooks_dir = ["/other/hooks"]\n')
-        monkeypatch.setattr("terok_shield.common.podman_info._user_containers_conf", lambda: conf)
+        monkeypatch.setattr("terok_shield.podman_info._user_containers_conf", lambda: conf)
         ensure_containers_conf_hooks_dir(Path("/my/hooks"))
         assert "Warning" in capsys.readouterr().out
         assert conf.read_text().count("hooks_dir") == 1  # unchanged
@@ -494,13 +494,13 @@ class TestSystemHooksDir:
         """Returns an existing system dir when available."""
         d = tmp_path / "hooks.d"
         d.mkdir()
-        monkeypatch.setattr("terok_shield.common.podman_info._SYSTEM_HOOKS_DIRS", (d,))
+        monkeypatch.setattr("terok_shield.podman_info._SYSTEM_HOOKS_DIRS", (d,))
         assert system_hooks_dir() == d
 
     def test_fallback_when_none_exist(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Falls back to last entry when no system dir exists."""
         monkeypatch.setattr(
-            "terok_shield.common.podman_info._SYSTEM_HOOKS_DIRS",
+            "terok_shield.podman_info._SYSTEM_HOOKS_DIRS",
             (Path("/nonexistent/a"), Path("/nonexistent/b")),
         )
         assert system_hooks_dir() == Path("/nonexistent/b")
@@ -534,7 +534,7 @@ class TestFindHooksDirsSystemConf:
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "no-user"))
         sys_conf = tmp_path / "system.conf"
         sys_conf.write_text('[engine]\nhooks_dir = ["/sys/hooks"]\n')
-        monkeypatch.setattr("terok_shield.common.podman_info._SYSTEM_CONF_PATHS", (sys_conf,))
-        monkeypatch.setattr("terok_shield.common.podman_info._SYSTEM_HOOKS_DIRS", ())
+        monkeypatch.setattr("terok_shield.podman_info._SYSTEM_CONF_PATHS", (sys_conf,))
+        monkeypatch.setattr("terok_shield.podman_info._SYSTEM_HOOKS_DIRS", ())
         dirs = find_hooks_dirs()
         assert dirs == [Path("/sys/hooks")]
