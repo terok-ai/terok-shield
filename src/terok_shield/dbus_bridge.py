@@ -76,6 +76,12 @@ class _ShieldInterface(ServiceInterface):
 
     Signals are emitted when the subprocess produces JSON events.
     The ``Verdict`` method routes operator decisions back to the subprocess.
+
+    Signal decorators use explicit ``name=`` to emit CamelCase member names
+    per the D-Bus specification, while keeping Pythonic snake_case in code.
+    dbus-fast defaults to the Python method name, which would produce
+    non-standard snake_case on the wire and break ``EventSubscriber``'s
+    member-name matching (and any other D-Bus client).
     """
 
     def __init__(self, bridge: "ShieldBridge") -> None:
@@ -83,7 +89,7 @@ class _ShieldInterface(ServiceInterface):
         super().__init__(SHIELD_INTERFACE_NAME)
         self._bridge = bridge
 
-    @signal()
+    @signal(name="ConnectionBlocked")
     def connection_blocked(
         self,
         container: "s",
@@ -96,7 +102,7 @@ class _ShieldInterface(ServiceInterface):
         """Emit when a new outbound connection is blocked."""
         return [container, dest, port, proto, domain, request_id]
 
-    @signal()
+    @signal(name="VerdictApplied")
     def verdict_applied(
         self,
         container: "s",
