@@ -114,7 +114,7 @@ class _ShieldInterface(ServiceInterface):
         """Emit after a verdict has been applied to the nft ruleset."""
         return [container, dest, request_id, action, ok]
 
-    @method()
+    @method(name="Verdict")
     async def verdict(self, request_id: "s", action: "s") -> "b":
         """Route an operator verdict to the subprocess stdin."""
         return await self._bridge.submit_verdict(request_id, action)

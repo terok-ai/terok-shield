@@ -363,6 +363,11 @@ def test_signal_wire_names_are_camelcase() -> None:
     assert "connection_blocked" not in signal_names
     assert "verdict_applied" not in signal_names
 
+    # Methods must also be CamelCase
+    method_names = {m.name for m in introspection.methods}
+    assert "Verdict" in method_names
+    assert "verdict" not in method_names
+
 
 def test_verdict_method_delegates() -> None:
     """The verdict method body awaits bridge.submit_verdict."""
