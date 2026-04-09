@@ -12,6 +12,7 @@ from unittest import mock
 import pytest
 
 from terok_shield import ExecError, Shield, ShieldConfig, ShieldState
+from terok_shield import state
 
 from ..testfs import NFT_BINARY
 from ..testnet import TEST_DOMAIN, TEST_IP1, TEST_IP2
@@ -461,6 +462,7 @@ class TestCheckEnvironment:
         assert env.health == "stale-hooks"
         assert any("Stale" in i for i in env.issues)
 
+    @mock.patch("terok_shield._read_installed_hook_version", return_value=state.BUNDLE_VERSION)
     @mock.patch("terok_shield.find_hooks_dirs", return_value=[Path("/fake/hooks")])
     @mock.patch("terok_shield.has_global_hooks", return_value=True)
     @mock.patch("terok_shield.system_hooks_dir", return_value=Path("/fake/hooks"))
@@ -469,6 +471,7 @@ class TestCheckEnvironment:
         _sys_dir: mock.Mock,
         _has_hooks: mock.Mock,
         _find_dirs: mock.Mock,
+        _hook_ver: mock.Mock,
         make_shield: ShieldHarnessFactory,
     ) -> None:
         """System global hooks → ok/global-system."""
@@ -479,12 +482,14 @@ class TestCheckEnvironment:
         assert env.health == "ok"
         assert env.hooks == "global-system"
 
+    @mock.patch("terok_shield._read_installed_hook_version", return_value=state.BUNDLE_VERSION)
     @mock.patch("terok_shield.find_hooks_dirs", return_value=[Path("/user/hooks")])
     @mock.patch("terok_shield.system_hooks_dir", return_value=Path("/nonexistent"))
     def test_global_user_hooks(
         self,
         _sys_dir: mock.Mock,
         _find_dirs: mock.Mock,
+        _hook_ver: mock.Mock,
         make_shield: ShieldHarnessFactory,
     ) -> None:
         """User global hooks (not system) → ok/global-user."""
@@ -514,6 +519,29 @@ class TestCheckEnvironment:
         hooks_dir = tmp_path / "hooks.d"
         hooks_dir.mkdir()
         (hooks_dir / "terok-shield-hook").write_text("_BUNDLE_VERSION = 1\n")
+        _find_dirs.return_value = [hooks_dir]
+
+        harness = make_shield()
+        harness.runner.run.side_effect = _run_side_effect("5.8.0")
+        env = harness.shield.check_environment()
+        assert env.health == "stale-hooks"
+        assert any("version" in i.lower() for i in env.issues)
+
+    @mock.patch("terok_shield.find_hooks_dirs")
+    @mock.patch("terok_shield.has_global_hooks", return_value=True)
+    @mock.patch("terok_shield.system_hooks_dir", return_value=Path("/fake/hooks"))
+    def test_unreadable_hook_version_treated_as_stale(
+        self,
+        _sys_dir: mock.Mock,
+        _has_hooks: mock.Mock,
+        _find_dirs: mock.Mock,
+        make_shield: ShieldHarnessFactory,
+        tmp_path: Path,
+    ) -> None:
+        """Hook file without _BUNDLE_VERSION line → stale-hooks (not silently ok)."""
+        hooks_dir = tmp_path / "hooks.d"
+        hooks_dir.mkdir()
+        (hooks_dir / "terok-shield-hook").write_text("#!/bin/sh\necho old hook\n")
         _find_dirs.return_value = [hooks_dir]
 
         harness = make_shield()

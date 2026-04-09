@@ -256,7 +256,7 @@ class Shield:
                 health = "ok"
                 # Check hook version matches current package
                 hook_ver = _read_installed_hook_version(hooks_dirs)
-                if hook_ver is not None and hook_ver != state.BUNDLE_VERSION:
+                if hook_ver != state.BUNDLE_VERSION:
                     health = "stale-hooks"
                     issues.append(
                         f"Installed hook version {hook_ver} != expected {state.BUNDLE_VERSION}. "
