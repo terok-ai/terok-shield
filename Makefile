@@ -127,9 +127,10 @@ check: lint test-unit tach security docstrings deadcode reuse
 install:
 	poetry install --only main
 
-# Install all dependencies (dev, test, docs)
+# Install all dependencies (dev, test, docs) and activate pre-commit hooks
 install-dev:
 	poetry install --with dev,test,docs
+	poetry run pre-commit install
 
 # Build documentation locally
 docs:
