@@ -915,7 +915,7 @@ class TestGatewayPortRules:
     def test_no_gateway_rules_without_ports(self) -> None:
         """hook_ruleset() with no loopback_ports produces no gateway rules."""
         rs = hook_ruleset(dns=SLIRP4NETNS_DNS, loopback_ports=())
-        assert "ip daddr 10.0.2.2 accept" not in rs
+        assert f"ip daddr {self._GW_V4} accept" not in rs
 
 
 # ── _safe_timeout validation ─────────────────────────────

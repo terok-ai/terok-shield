@@ -591,3 +591,7 @@ class TestSlirp4netnsGateway:
         conf = tmp_path / "ok.conf"
         conf.write_text('[engine]\nnetwork_cmd_options = ["cidr=10.1.0.0/16", "mtu=1500"]\n')
         assert _parse_network_cmd_options(conf) == ["cidr=10.1.0.0/16", "mtu=1500"]
+
+    def test_malformed_cidr_falls_back_to_default(self) -> None:
+        """Malformed CIDR override falls back to default gateway."""
+        assert slirp4netns_gateway("not-a-cidr") == "10.0.2.2"

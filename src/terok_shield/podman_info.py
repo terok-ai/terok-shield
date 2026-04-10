@@ -276,8 +276,12 @@ def slirp4netns_gateway(cidr: str | None = None) -> str:
     """Compute the slirp4netns gateway address (``CIDR base + 2``).
 
     Reads ``containers.conf`` for a ``cidr=`` override when *cidr* is None.
+    Falls back to the default CIDR on malformed input.
     """
-    net = ipaddress.IPv4Network(cidr or parse_slirp4netns_cidr())
+    try:
+        net = ipaddress.IPv4Network(cidr or parse_slirp4netns_cidr())
+    except ValueError:
+        net = ipaddress.IPv4Network(_DEFAULT_SLIRP4NETNS_CIDR)
     return str(net.network_address + 2)
 
 

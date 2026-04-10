@@ -71,8 +71,8 @@ class RulesetBuilder:
             _safe_timeout(set_timeout)
         self._dns = dns
         self._loopback_ports = loopback_ports
-        self._gateway_v4 = safe_ip(gateway_v4) if gateway_v4 else ""
-        self._gateway_v6 = safe_ip(gateway_v6) if gateway_v6 else ""
+        self._gateway_v4 = _safe_ipv4(gateway_v4) if gateway_v4 else ""
+        self._gateway_v6 = _safe_ipv6(gateway_v6) if gateway_v6 else ""
         self._set_timeout = set_timeout
 
     def build_hook(self) -> str:
@@ -656,6 +656,22 @@ def safe_ip(value: str) -> str:
         return str(ipaddress.ip_address(v))
     except ValueError as e:
         raise ValueError(f"Invalid IP/CIDR: {v!r}") from e
+
+
+def _safe_ipv4(value: str) -> str:
+    """Validate *value* as an IPv4 address.  Raises ValueError if IPv6 or invalid."""
+    addr = ipaddress.ip_address(value.strip())
+    if addr.version != 4:
+        raise ValueError(f"Expected IPv4, got IPv6: {value!r}")
+    return str(addr)
+
+
+def _safe_ipv6(value: str) -> str:
+    """Validate *value* as an IPv6 address.  Raises ValueError if IPv4 or invalid."""
+    addr = ipaddress.ip_address(value.strip())
+    if addr.version != 6:
+        raise ValueError(f"Expected IPv6, got IPv4: {value!r}")
+    return str(addr)
 
 
 def _safe_port(port: int) -> int:

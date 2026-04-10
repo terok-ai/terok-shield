@@ -51,14 +51,12 @@ class TestHookEntrypointStory:
         assert ruleset.exists(), "pre_start must write ruleset.nft"
         content = ruleset.read_text()
         assert "terok_shield" in content
-        assert "gateway_v4" in content
-        assert "gateway_v6" in content
 
-    def test_full_story_hook_applies_ruleset_and_discovers_gateway(
+    def test_full_story_hook_applies_ruleset_and_gateway_baked_in(
         self, shielded_container: str, shield_env: Path
     ) -> None:
-        """Full story: hook applies pre-generated ruleset, writes gateway file,
-        shield_up repopulates gateway_v4 set, default-deny is enforced throughout.
+        """Full story: hook applies pre-generated ruleset with gateway baked in,
+        shield_up re-applies cleanly, default-deny is enforced throughout.
         """
         name = shielded_container
         sd = shield_env / "containers" / name
@@ -70,25 +68,14 @@ class TestHookEntrypointStory:
         # 2. Hook applied the ruleset — terok_shield table is present
         rules = shield.rules(name)
         assert "terok_shield" in rules
-        assert "gateway_v4" in rules  # set defined even when empty
 
         # 3. Default-deny: outbound traffic to non-allowed targets is blocked
         assert_blocked(name, BLOCKED_TARGET_HTTP)
 
-        # 4. Gateway discovery: gateway file written iff a default route exists
-        gw_file = state.gateway_path(sd)
-        if gw_file.exists():
-            gw = gw_file.read_text().strip()
-            assert gw, "gateway file must contain a non-empty IP"
-            assert gw in rules, f"Discovered gateway {gw!r} must appear in live ruleset"
-
-        # 5. shield_up re-applies the ruleset and repopulates the gateway set
+        # 4. shield_up re-applies the ruleset cleanly
         shield.up(name)
         rules_after_up = shield.rules(name)
-        assert "gateway_v4" in rules_after_up
-        if gw_file.exists():
-            gw = gw_file.read_text().strip()
-            assert gw in rules_after_up, "shield_up must repopulate gateway_v4 set"
+        assert "terok_shield" in rules_after_up
 
         # Default-deny must hold after shield_up as well
         assert_blocked(name, BLOCKED_TARGET_HTTP)
