@@ -3,14 +3,12 @@
 
 """Integration tests: stdlib-only OCI hook entrypoint — end-to-end story.
 
-Exercises the complete flow introduced by the pre-generated ruleset architecture:
+Exercises the complete flow:
 
-1. ``pre_start()`` writes ``ruleset.nft`` before any container starts.
-2. The OCI hook (stdlib-only, ``#!/usr/bin/env python3``) applies the
-   pre-generated ruleset and discovers the container gateway from
-   ``/proc/{pid}/net/route``.
-3. ``shield_up()`` repopulates the gateway set from the persisted
-   ``gateway`` file after re-applying the ruleset.
+1. ``pre_start()`` writes ``ruleset.nft`` with gateway addresses baked in.
+2. The OCI hook (stdlib-only) applies the pre-generated ruleset as-is.
+3. ``shield_up()`` re-applies the ruleset — gateways are already embedded,
+   no runtime discovery or repopulation needed.
 """
 
 import os
