@@ -11,6 +11,7 @@ import pytest
 from terok_shield.podman_info import (
     HOOK_JSON_FILENAME,
     _parse_hooks_dir_from_conf,
+    _parse_network_cmd_options,
     _parse_version,
     ensure_containers_conf_hooks_dir,
     find_hooks_dirs,
@@ -19,6 +20,8 @@ from terok_shield.podman_info import (
     parse_podman_info,
     parse_proc_net_route,
     parse_resolv_conf,
+    parse_slirp4netns_cidr,
+    slirp4netns_gateway,
     system_hooks_dir,
 )
 
@@ -538,3 +541,53 @@ class TestFindHooksDirsSystemConf:
         monkeypatch.setattr("terok_shield.podman_info._SYSTEM_HOOKS_DIRS", ())
         dirs = find_hooks_dirs()
         assert dirs == [Path("/sys/hooks")]
+
+
+# ── slirp4netns gateway / CIDR tests ──────────────────
+
+
+class TestSlirp4netnsGateway:
+    """Tests for slirp4netns gateway and CIDR parsing."""
+
+    def test_default_gateway(self) -> None:
+        """Default CIDR produces 10.0.2.2."""
+        assert slirp4netns_gateway() == "10.0.2.2"
+
+    def test_custom_cidr(self) -> None:
+        """Custom CIDR computes base + 2."""
+        assert slirp4netns_gateway("192.168.0.0/24") == "192.168.0.2"
+
+    def test_parse_cidr_from_user_conf(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """User containers.conf with cidr= is picked up."""
+        conf = tmp_path / "containers" / "containers.conf"
+        conf.parent.mkdir()
+        conf.write_text('[engine]\nnetwork_cmd_options = ["cidr=172.16.0.0/24"]\n')
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+        monkeypatch.setattr("terok_shield.podman_info._SYSTEM_CONF_PATHS", ())
+        assert parse_slirp4netns_cidr() == "172.16.0.0/24"
+
+    def test_parse_cidr_defaults_when_absent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Returns default CIDR when no config sets cidr=."""
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "empty"))
+        monkeypatch.setattr("terok_shield.podman_info._SYSTEM_CONF_PATHS", ())
+        assert parse_slirp4netns_cidr() == "10.0.2.0/24"
+
+    def test_parse_network_cmd_options_missing_file(self, tmp_path: Path) -> None:
+        """Missing file returns empty list."""
+        assert _parse_network_cmd_options(tmp_path / "nope.conf") == []
+
+    def test_parse_network_cmd_options_bad_toml(self, tmp_path: Path) -> None:
+        """Corrupt TOML returns empty list."""
+        bad = tmp_path / "bad.conf"
+        bad.write_text("not valid {{{{ toml")
+        assert _parse_network_cmd_options(bad) == []
+
+    def test_parse_network_cmd_options_extracts_list(self, tmp_path: Path) -> None:
+        """Valid config returns the option strings."""
+        conf = tmp_path / "ok.conf"
+        conf.write_text('[engine]\nnetwork_cmd_options = ["cidr=10.1.0.0/16", "mtu=1500"]\n')
+        assert _parse_network_cmd_options(conf) == ["cidr=10.1.0.0/16", "mtu=1500"]

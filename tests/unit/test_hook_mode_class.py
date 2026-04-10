@@ -1178,6 +1178,14 @@ def test_upstream_dns_for_mode_raises_on_unknown_mode() -> None:
         _upstream_dns_for_mode("bridge")
 
 
+def test_gateways_for_mode_raises_on_unknown_mode() -> None:
+    """_gateways_for_mode() raises ValueError for unrecognised network modes."""
+    from terok_shield.hooks.mode import _gateways_for_mode
+
+    with pytest.raises(ValueError, match="Cannot determine gateways"):
+        _gateways_for_mode("bridge")
+
+
 @mock.patch("terok_shield.hooks.mode.has_global_hooks", return_value=True)
 def test_pre_start_includes_hooks_dir_when_persists(
     _has_hooks: mock.Mock,
