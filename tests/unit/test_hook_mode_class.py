@@ -667,8 +667,8 @@ def test_pre_start_writes_ruleset_nft(
     assert ruleset_file.is_file(), "pre_start() must write ruleset.nft"
     content = ruleset_file.read_text()
     assert "terok_shield" in content
-    assert "gateway_v4" in content
-    assert "gateway_v6" in content
+    # pasta mode: no gateway sets or literal IPs — gateways only for slirp4netns
+    assert "set gateway_v4" not in content
 
 
 def test_setup_global_hooks_non_sudo(tmp_path: Path) -> None:
@@ -1208,65 +1208,6 @@ def test_shield_state_returns_down_all(make_hook_mode: HookModeHarnessFactory) -
     harness.ruleset.verify_bypass.side_effect = [["not bypass"], []]
 
     assert harness.mode.shield_state("test-ctr") == ShieldState.DOWN_ALL
-
-
-def test_shield_up_repopulates_gateway_v4_from_file(
-    make_hook_mode: HookModeHarnessFactory,
-    make_config: ConfigFactory,
-) -> None:
-    """shield_up() re-adds the persisted IPv4 gateway to the nft gateway_v4 set."""
-    harness = make_hook_mode(config=make_config())
-    sd = harness.config.state_dir
-    state.gateway_path(sd).write_text("10.0.2.2\n")
-
-    harness.mode._container_ruleset = lambda _c: harness.ruleset
-    harness.runner.nft_via_nsenter.side_effect = [
-        "table inet terok_shield {}",  # shield_state() → UP
-        "",  # apply ruleset
-        "",  # add gateway element
-        "valid output",  # verify
-    ]
-    harness.ruleset.build_hook.return_value = "hook ruleset"
-    harness.ruleset.verify_hook.return_value = []
-    harness.ruleset.add_elements_dual.return_value = ""
-    harness.ruleset.verify_bypass.return_value = ["not bypass"]
-
-    harness.mode.shield_up("test-ctr")
-
-    gateway_calls = [
-        call for call in harness.runner.nft_via_nsenter.call_args_list if "gateway_v4" in call.args
-    ]
-    assert gateway_calls, "Expected nft call to add gateway_v4 element"
-    assert any("{ 10.0.2.2 }" in str(c) for c in gateway_calls)
-
-
-def test_shield_up_repopulates_gateway_v6_from_file(
-    make_hook_mode: HookModeHarnessFactory,
-    make_config: ConfigFactory,
-) -> None:
-    """shield_up() re-adds the persisted IPv6 gateway to the nft gateway_v6 set."""
-    harness = make_hook_mode(config=make_config())
-    sd = harness.config.state_dir
-    state.gateway_v6_path(sd).write_text("fd00::1\n")
-
-    harness.mode._container_ruleset = lambda _c: harness.ruleset
-    harness.runner.nft_via_nsenter.side_effect = [
-        "table inet terok_shield {}",  # shield_state() → UP
-        "",  # apply ruleset
-        "",  # add gateway element
-        "valid output",  # verify
-    ]
-    harness.ruleset.build_hook.return_value = "hook ruleset"
-    harness.ruleset.verify_hook.return_value = []
-    harness.ruleset.add_elements_dual.return_value = ""
-    harness.ruleset.verify_bypass.return_value = ["not bypass"]
-
-    harness.mode.shield_up("test-ctr")
-
-    gateway_calls = [
-        call for call in harness.runner.nft_via_nsenter.call_args_list if "gateway_v6" in call.args
-    ]
-    assert gateway_calls, "Expected nft call to add gateway_v6 element"
 
 
 @mock.patch("terok_shield.hooks.mode.has_global_hooks", return_value=True)

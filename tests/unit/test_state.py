@@ -180,7 +180,6 @@ def test_hook_entrypoint_path_strings_match_state_functions() -> None:
     from terok_shield.state import (
         dnsmasq_conf_path,
         dnsmasq_pid_path,
-        gateway_path,
         ruleset_path,
     )
 
@@ -205,7 +204,7 @@ def test_hook_entrypoint_path_strings_match_state_functions() -> None:
     }
     root = Path("x")
 
-    for fn in (ruleset_path, gateway_path, dnsmasq_conf_path, dnsmasq_pid_path):
+    for fn in (ruleset_path, dnsmasq_conf_path, dnsmasq_pid_path):
         filename = fn(root).name
         assert filename in literals, (
             f"hook_entrypoint.py has no code string literal {filename!r} but "

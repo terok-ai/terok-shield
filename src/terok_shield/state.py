@@ -15,9 +15,7 @@ Bundle layout::
     │   ├── terok-shield-createRuntime.json
     │   └── terok-shield-poststop.json
     ├── terok-shield-hook              # entrypoint script (stdlib-only Python)
-    ├── ruleset.nft                    # pre-generated nft ruleset (written by pre_start)
-    ├── gateway                        # discovered gateway IP (written by OCI hook)
-    ├── gateway_v6                     # discovered IPv6 gateway
+    ├── ruleset.nft                    # pre-generated nft ruleset (gateways baked in)
     ├── upstream.dns                   # upstream DNS address
     ├── dns.tier                       # active DNS tier (dig/getent/dnsmasq)
     ├── profile.allowed                # IPs from DNS resolution
@@ -68,17 +66,7 @@ def ruleset_path(state_dir: Path) -> Path:
     return state_dir / "ruleset.nft"
 
 
-# ── Network discovery ───────────────────────────────────
-
-
-def gateway_path(state_dir: Path) -> Path:
-    """Return the path to the persisted discovered IPv4 gateway IP."""
-    return state_dir / "gateway"
-
-
-def gateway_v6_path(state_dir: Path) -> Path:
-    """Return the path to the persisted discovered IPv6 gateway IP."""
-    return state_dir / "gateway_v6"
+# ── Network configuration ──────────────────────────────
 
 
 def upstream_dns_path(state_dir: Path) -> Path:

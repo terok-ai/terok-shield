@@ -46,6 +46,7 @@ from ..nft.constants import (
     PASTA_DNS,
     PASTA_HOST_LOOPBACK_MAP,
     SLIRP4NETNS_DNS,
+    SLIRP4NETNS_GATEWAY_V6,
 )
 from ..nft.rules import (
     NFT_TABLE,
@@ -60,6 +61,7 @@ from ..podman_info import (
     has_global_hooks,
     parse_podman_info,
     parse_resolv_conf,
+    slirp4netns_gateway,
 )
 from ..run import ExecError, ShieldNeedsSetup
 from ..util import is_ip as _is_ip, is_ipv4
@@ -134,17 +136,18 @@ class HookMode:
             hooks_dir=state.hooks_dir(sd),
         )
 
-        # Detect DNS tier and upstream DNS
+        # Detect DNS tier, upstream DNS, and gateway addresses
         tier = self._detect_dns_tier()
         mode = info.network_mode or "pasta"
         upstream_dns = _upstream_dns_for_mode(mode)
+        gw_v4, gw_v6 = _gateways_for_mode(mode)
 
         # Resolve DNS, write allowlists, generate ruleset + dnsmasq config
         entries = self._profiles.compose_profiles(profiles)
         self._resolve_and_write_allowlists(sd, tier, entries)
         state.upstream_dns_path(sd).write_text(f"{upstream_dns}\n")
         state.dns_tier_path(sd).write_text(f"{tier.value}\n")
-        self._write_ruleset(sd, tier, upstream_dns)
+        self._write_ruleset(sd, tier, upstream_dns, gw_v4, gw_v6)
         self._write_dnsmasq_config_or_scrub(sd, tier, upstream_dns)
 
         # Build podman args
@@ -214,12 +217,16 @@ class HookMode:
             # dig/getent tier: resolve everything to IPs at pre-start time.
             self._dns.resolve_and_cache(entries, state.profile_allowed_path(sd))
 
-    def _write_ruleset(self, sd: Path, tier: DnsTier, upstream_dns: str) -> None:
+    def _write_ruleset(
+        self, sd: Path, tier: DnsTier, upstream_dns: str, gw_v4: str = "", gw_v6: str = ""
+    ) -> None:
         """Pre-generate the complete nft ruleset into the state bundle."""
         set_timeout = NFT_SET_TIMEOUT_DNSMASQ if tier == DnsTier.DNSMASQ else ""
         ruleset_builder = RulesetBuilder(
             dns=upstream_dns,
             loopback_ports=self._config.loopback_ports,
+            gateway_v4=gw_v4,
+            gateway_v6=gw_v6,
             set_timeout=set_timeout,
         )
         ips = state.read_effective_ips(sd)
@@ -255,11 +262,12 @@ class HookMode:
         if os.geteuid() == 0:
             return []
         if mode == "slirp4netns":
+            gw = slirp4netns_gateway()
             return [
                 "--network",
                 "slirp4netns:allow_host_loopback=true",
                 "--add-host",
-                "host.containers.internal:10.0.2.2",
+                f"host.containers.internal:{gw}",
             ]
         # Use pasta --map-host-loopback unconditionally so that
         # host.containers.internal always resolves to an address
@@ -500,23 +508,7 @@ class HookMode:
             if deny_cmd:
                 self._runner.nft_via_nsenter(container, stdin=deny_cmd)
 
-        # Repopulate gateway sets from persisted discovery (hook wrote them at container start)
-        for gw_path, set_name in (
-            (state.gateway_path(sd), "gateway_v4"),
-            (state.gateway_v6_path(sd), "gateway_v6"),
-        ):
-            if gw_path.is_file():
-                gw = gw_path.read_text().strip()
-                if gw:
-                    self._runner.nft_via_nsenter(
-                        container,
-                        "add",
-                        "element",
-                        "inet",
-                        "terok_shield",
-                        set_name,
-                        f"{{ {gw} }}",
-                    )
+        # Gateway addresses are baked into the ruleset — no repopulation needed.
 
         output = self._runner.nft_via_nsenter(container, "list", "ruleset")
         errors = ruleset.verify_hook(output)
@@ -541,9 +533,13 @@ class HookMode:
             if tier_str == DnsTier.DNSMASQ.value:
                 set_timeout = NFT_SET_TIMEOUT_DNSMASQ
 
+        mode = self._get_podman_info().network_mode or "pasta"
+        gw_v4, gw_v6 = _gateways_for_mode(mode)
         return RulesetBuilder(
             dns=dns,
             loopback_ports=self._config.loopback_ports,
+            gateway_v4=gw_v4,
+            gateway_v6=gw_v6,
             set_timeout=set_timeout,
         )
 
@@ -640,6 +636,24 @@ def _upstream_dns_for_mode(network_mode: str) -> str:
     raise ValueError(
         f"Cannot determine upstream DNS for network mode {network_mode!r}. "
         "Add support for this mode in _upstream_dns_for_mode()."
+    )
+
+
+def _gateways_for_mode(network_mode: str) -> tuple[str, str]:
+    """Return ``(gateway_v4, gateway_v6)`` for a network mode.
+
+    slirp4netns uses a virtual 10.0.2.0/24 network; the gateway is
+    deterministically ``CIDR base + 2`` (reads ``containers.conf`` for a
+    custom ``cidr=`` override).  pasta host-service access is handled by
+    ``_loopback_port_rules()`` (literal 169.254.1.2) and needs no gateway.
+    """
+    if network_mode == "slirp4netns":
+        return slirp4netns_gateway(), SLIRP4NETNS_GATEWAY_V6
+    if network_mode == "pasta":
+        return "", ""
+    raise ValueError(
+        f"Cannot determine gateways for network mode {network_mode!r}. "
+        "Add support for this mode in _gateways_for_mode()."
     )
 
 

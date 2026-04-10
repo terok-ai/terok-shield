@@ -9,11 +9,16 @@ podman capabilities, version, and hooks directory configuration.
 This module is stateless — callers cache the result.
 """
 
+import ipaddress
 import json
 import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+
+# Duplicated from nft.constants to avoid a cross-boundary import
+# (tach: podman_info → nft.constants is disallowed).  Keep in sync.
+_DEFAULT_SLIRP4NETNS_CIDR = "10.0.2.0/24"
 
 # Well-known system hooks directories (containers-common standard).
 # Used as fallback when containers.conf doesn't specify hooks_dir.
@@ -262,6 +267,44 @@ def _insert_hooks_line(conf_path: Path, hooks_line: str) -> None:
     # No [engine] section — append one
     with conf_path.open("a") as f:
         f.write(f"\n[engine]\n{hooks_line}\n")
+
+
+# ── slirp4netns gateway ────────────────────────────────
+
+
+def slirp4netns_gateway(cidr: str | None = None) -> str:
+    """Compute the slirp4netns gateway address (``CIDR base + 2``).
+
+    Reads ``containers.conf`` for a ``cidr=`` override when *cidr* is None.
+    """
+    net = ipaddress.IPv4Network(cidr or parse_slirp4netns_cidr())
+    return str(net.network_address + 2)
+
+
+def parse_slirp4netns_cidr() -> str:
+    """Read the slirp4netns CIDR from ``containers.conf``, or return the default.
+
+    Checks user config first (XDG), then system overrides, matching the
+    precedence of :func:`find_hooks_dirs`.
+    """
+    for path in (_user_containers_conf(), *reversed(_SYSTEM_CONF_PATHS)):
+        for opt in _parse_network_cmd_options(path):
+            if opt.startswith("cidr="):
+                return opt.split("=", 1)[1]
+    return _DEFAULT_SLIRP4NETNS_CIDR
+
+
+def _parse_network_cmd_options(path: Path) -> list[str]:
+    """Extract ``[engine] network_cmd_options`` from a ``containers.conf``."""
+    if not path.is_file():
+        return []
+    try:
+        with path.open("rb") as f:
+            data = tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError):
+        return []
+    opts = data.get("engine", {}).get("network_cmd_options", [])
+    return [str(o) for o in opts if isinstance(o, str) and o] if isinstance(opts, list) else []
 
 
 # ── Network detection ──────────────────────────────────

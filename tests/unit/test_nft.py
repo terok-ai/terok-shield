@@ -846,46 +846,76 @@ def test_verify_block_ruleset_reports_errors_for_empty_input() -> None:
 
 
 class TestGatewayPortRules:
-    """Tests for dynamic gateway sets (gateway_v4/gateway_v6) and loopback port rules."""
+    """Tests for hardcoded gateway IP rules in rulesets."""
 
-    def test_hook_ruleset_always_defines_gateway_sets(self) -> None:
-        """hook_ruleset() always includes gateway_v4 and gateway_v6 set declarations."""
-        rs = hook_ruleset()
-        assert "set gateway_v4 { type ipv4_addr; }" in rs
-        assert "set gateway_v6 { type ipv6_addr; }" in rs
+    _GW_V4 = SLIRP4NETNS_DNS.replace(".3", ".2")  # 10.0.2.2
+    _GW_V6 = "fd00::2"
 
-    def test_bypass_ruleset_always_defines_gateway_sets(self) -> None:
-        """bypass_ruleset() always includes gateway_v4 and gateway_v6 set declarations."""
-        rs = bypass_ruleset()
-        assert "set gateway_v4 { type ipv4_addr; }" in rs
-        assert "set gateway_v6 { type ipv6_addr; }" in rs
+    def test_hook_ruleset_contains_literal_gateway_ips(self) -> None:
+        """hook_ruleset() with gateway params contains literal IP rules, no set declarations."""
+        rs = hook_ruleset(
+            dns=SLIRP4NETNS_DNS,
+            loopback_ports=(9418,),
+            gateway_v4=self._GW_V4,
+            gateway_v6=self._GW_V6,
+        )
+        assert f"ip daddr {self._GW_V4}" in rs
+        assert "set gateway_v4" not in rs
+        assert "set gateway_v6" not in rs
 
-    def test_gateway_port_rules_reference_sets(self) -> None:
-        """hook_ruleset() with loopback_ports generates rules referencing @gateway_v4/@gateway_v6."""
-        rs = hook_ruleset(dns=SLIRP4NETNS_DNS, loopback_ports=(9418,))
-        assert "tcp dport 9418 ip daddr @gateway_v4 accept" in rs
-        assert "tcp dport 9418 ip6 daddr @gateway_v6 accept" in rs
+    def test_bypass_ruleset_contains_literal_gateway_ips(self) -> None:
+        """bypass_ruleset() with gateway params contains literal IP rules, no set declarations."""
+        rs = bypass_ruleset(
+            dns=SLIRP4NETNS_DNS,
+            loopback_ports=(9418,),
+            gateway_v4=self._GW_V4,
+            gateway_v6=self._GW_V6,
+        )
+        assert f"ip daddr {self._GW_V4}" in rs
+        assert "set gateway_v4" not in rs
+        assert "set gateway_v6" not in rs
+
+    def test_gateway_port_rules_use_literal_ips(self) -> None:
+        """hook_ruleset() with loopback_ports generates literal IP accept rules."""
+        rs = hook_ruleset(
+            dns=SLIRP4NETNS_DNS,
+            loopback_ports=(9418,),
+            gateway_v4=self._GW_V4,
+            gateway_v6=self._GW_V6,
+        )
+        assert f"tcp dport 9418 ip daddr {self._GW_V4} accept" in rs
+        assert f"tcp dport 9418 ip6 daddr {self._GW_V6} accept" in rs
+        assert "@gateway_v4" not in rs
 
     def test_gateway_rules_before_private_range(self) -> None:
         """Gateway accept rules appear before private-range reject rules."""
-        rs = hook_ruleset(dns=SLIRP4NETNS_DNS, loopback_ports=(9418,))
-        gw_pos = rs.index("@gateway_v4 accept")
+        rs = hook_ruleset(
+            dns=SLIRP4NETNS_DNS,
+            loopback_ports=(9418,),
+            gateway_v4=self._GW_V4,
+            gateway_v6=self._GW_V6,
+        )
+        gw_pos = rs.index(f"ip daddr {self._GW_V4} accept")
         private_pos = rs.index(RFC1918[0])
         assert gw_pos < private_pos
 
     def test_gateway_multiple_ports(self) -> None:
-        """Both @gateway_v4 and @gateway_v6 rules are generated for each loopback port."""
-        rs = hook_ruleset(dns=SLIRP4NETNS_DNS, loopback_ports=(9418, 8080))
-        assert "tcp dport 9418 ip daddr @gateway_v4 accept" in rs
-        assert "tcp dport 8080 ip daddr @gateway_v4 accept" in rs
-        assert "tcp dport 9418 ip6 daddr @gateway_v6 accept" in rs
-        assert "tcp dport 8080 ip6 daddr @gateway_v6 accept" in rs
+        """Literal gateway IP rules are generated for each loopback port."""
+        rs = hook_ruleset(
+            dns=SLIRP4NETNS_DNS,
+            loopback_ports=(9418, 8080),
+            gateway_v4=self._GW_V4,
+            gateway_v6=self._GW_V6,
+        )
+        assert f"tcp dport 9418 ip daddr {self._GW_V4} accept" in rs
+        assert f"tcp dport 8080 ip daddr {self._GW_V4} accept" in rs
+        assert f"tcp dport 9418 ip6 daddr {self._GW_V6} accept" in rs
+        assert f"tcp dport 8080 ip6 daddr {self._GW_V6} accept" in rs
 
     def test_no_gateway_rules_without_ports(self) -> None:
-        """hook_ruleset() with no loopback_ports produces no @gateway_v4/@gateway_v6 rules."""
+        """hook_ruleset() with no loopback_ports produces no gateway rules."""
         rs = hook_ruleset(dns=SLIRP4NETNS_DNS, loopback_ports=())
-        assert "@gateway_v4 accept" not in rs
-        assert "@gateway_v6 accept" not in rs
+        assert "ip daddr 10.0.2.2 accept" not in rs
 
 
 # ── _safe_timeout validation ─────────────────────────────

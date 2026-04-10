@@ -11,8 +11,6 @@ hook_entrypoint``) even though it is installed verbatim as a hook binary.
 import io
 import json
 import os
-import socket
-import struct
 import subprocess
 from pathlib import Path
 from unittest import mock
@@ -20,30 +18,6 @@ from unittest import mock
 import pytest
 
 from terok_shield.resources import hook_entrypoint
-
-# ── helpers ──────────────────────────────────────────────────────────────────
-
-# Hex-encoded gateway for 10.0.2.2 as it appears in /proc/{pid}/net/route
-# (little-endian uint32: bytes 0A 00 02 02 → stored as 0202000A)
-_SLIRP_GW_HEX = format(struct.unpack("<I", socket.inet_aton("10.0.2.2"))[0], "08X")
-
-# Route table header + one default route pointing to 10.0.2.2
-_ROUTE_WITH_DEFAULT = (
-    "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n"
-    f"eth0\t00000000\t{_SLIRP_GW_HEX}\t0003\t0\t0\t100\t00000000\t0\t0\t0\n"
-)
-
-# Route table with no default route (pasta mode)
-_ROUTE_NO_DEFAULT = (
-    "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n"
-    "eth0\t0A000000\t00000000\t0001\t0\t0\t100\t00FFFFFF\t0\t0\t0\n"
-)
-
-# Default route with zero gateway (connected route, not a real gateway)
-_ROUTE_ZERO_GATEWAY = (
-    "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n"
-    "eth0\t00000000\t00000000\t0003\t0\t0\t100\t00000000\t0\t0\t0\n"
-)
 
 
 def _oci_json(
@@ -163,115 +137,6 @@ def test_find_binary_uses_which_or_falls_back(
         "terok_shield.resources.hook_entrypoint.shutil.which", return_value=which_result
     ):
         assert finder() == expected  # type: ignore[operator]
-
-
-# ── _read_gateway ─────────────────────────────────────────────────────────────
-
-
-def test_parse_gateway_v4_returns_ip_for_default_route() -> None:
-    """_parse_gateway_v4() parses the default gateway from a slirp4netns routing table."""
-    with mock.patch("terok_shield.resources.hook_entrypoint.Path") as mock_path_cls:
-        mock_path_cls.return_value.read_text.return_value = _ROUTE_WITH_DEFAULT
-        assert hook_entrypoint._parse_gateway_v4("42") == "10.0.2.2"
-
-
-def test_parse_gateway_v4_returns_empty_when_no_default_route() -> None:
-    """_parse_gateway_v4() returns '' when no default route exists."""
-    with mock.patch("terok_shield.resources.hook_entrypoint.Path") as mock_path_cls:
-        mock_path_cls.return_value.read_text.return_value = _ROUTE_NO_DEFAULT
-        assert hook_entrypoint._parse_gateway_v4("42") == ""
-
-
-def test_parse_gateway_v4_returns_empty_on_oserror() -> None:
-    """_parse_gateway_v4() returns '' when /proc/{pid}/net/route is unreadable."""
-    with mock.patch("terok_shield.resources.hook_entrypoint.Path") as mock_path_cls:
-        mock_path_cls.return_value.read_text.side_effect = OSError("no file")
-        assert hook_entrypoint._parse_gateway_v4("42") == ""
-
-
-def test_parse_gateway_v4_returns_empty_on_malformed_hex() -> None:
-    """_parse_gateway_v4() returns '' when the gateway hex is malformed."""
-    malformed = "Iface\tDestination\tGateway\neth0\t00000000\tZZZZZZZZ\n"
-    with mock.patch("terok_shield.resources.hook_entrypoint.Path") as mock_path_cls:
-        mock_path_cls.return_value.read_text.return_value = malformed
-        assert hook_entrypoint._parse_gateway_v4("42") == ""
-
-
-def test_parse_gateway_v4_skips_zero_gateway() -> None:
-    """_parse_gateway_v4() returns '' for a connected route with gateway 0.0.0.0."""
-    with mock.patch("terok_shield.resources.hook_entrypoint.Path") as mock_path_cls:
-        mock_path_cls.return_value.read_text.return_value = _ROUTE_ZERO_GATEWAY
-        assert hook_entrypoint._parse_gateway_v4("42") == ""
-
-
-def test_read_gateway_retries_until_route_appears() -> None:
-    """_read_gateway() polls until slirp4netns populates the routing table."""
-    call_count = 0
-
-    def _delayed_route(*_a: object, **_kw: object) -> str:
-        nonlocal call_count
-        call_count += 1
-        return _ROUTE_WITH_DEFAULT if call_count >= 3 else _ROUTE_NO_DEFAULT
-
-    with (
-        mock.patch("terok_shield.resources.hook_entrypoint.Path") as mock_path_cls,
-        mock.patch("terok_shield.resources.hook_entrypoint.time.sleep"),
-    ):
-        mock_path_cls.return_value.read_text.side_effect = _delayed_route
-        assert hook_entrypoint._read_gateway("42") == "10.0.2.2"
-    assert call_count == 3
-
-
-def test_read_gateway_raises_on_timeout() -> None:
-    """_read_gateway() raises RuntimeError when no route appears within the timeout."""
-    with (
-        mock.patch("terok_shield.resources.hook_entrypoint.Path") as mock_path_cls,
-        mock.patch(
-            "terok_shield.resources.hook_entrypoint.time.monotonic",
-            side_effect=[0.0, 0.0, 6.0],  # start, first check, expired
-        ),
-        mock.patch("terok_shield.resources.hook_entrypoint.time.sleep"),
-        pytest.raises(RuntimeError, match="no default IPv4 route"),
-    ):
-        mock_path_cls.return_value.read_text.return_value = _ROUTE_NO_DEFAULT
-        hook_entrypoint._read_gateway("42")
-
-
-# ── _read_gateway_v6 ─────────────────────────────────────────────────────────
-
-# Hex representation of the IPv6 default gateway fe80::1 in /proc/net/ipv6_route format
-# (128-bit big-endian: fe80::1 → fe800000 00000000 00000000 00000001)
-_IPV6_GW = "fe80::1"
-_IPV6_GW_HEX = "fe800000000000000000000000000001"
-
-_IPV6_ROUTE_WITH_DEFAULT = (
-    f"{'0' * 32} 00 {'0' * 32} 00 {_IPV6_GW_HEX} 00000100 00000001 00000000 00000001 eth0\n"
-)
-_IPV6_ROUTE_NO_DEFAULT = f"fe800000000000000000000000000000 80 {'0' * 32} 00 {'0' * 32} 00000100 00000001 00000000 00000001 eth0\n"
-
-
-def test_read_gateway_v6_returns_ip_for_default_route() -> None:
-    """_read_gateway_v6() parses the default IPv6 gateway from ipv6_route."""
-    with mock.patch("terok_shield.resources.hook_entrypoint.Path") as mock_path_cls:
-        mock_path_cls.return_value.read_text.return_value = _IPV6_ROUTE_WITH_DEFAULT
-        gw = hook_entrypoint._read_gateway_v6("42")
-    assert gw == _IPV6_GW
-
-
-def test_read_gateway_v6_returns_empty_when_no_default_route() -> None:
-    """_read_gateway_v6() returns '' when there is no all-zeros default route."""
-    with mock.patch("terok_shield.resources.hook_entrypoint.Path") as mock_path_cls:
-        mock_path_cls.return_value.read_text.return_value = _IPV6_ROUTE_NO_DEFAULT
-        gw = hook_entrypoint._read_gateway_v6("42")
-    assert gw == ""
-
-
-def test_read_gateway_v6_returns_empty_on_oserror() -> None:
-    """_read_gateway_v6() returns '' when /proc/{pid}/net/ipv6_route is unreadable."""
-    with mock.patch("terok_shield.resources.hook_entrypoint.Path") as mock_path_cls:
-        mock_path_cls.return_value.read_text.side_effect = OSError("no file")
-        gw = hook_entrypoint._read_gateway_v6("42")
-    assert gw == ""
 
 
 # ── _nsenter ─────────────────────────────────────────────────────────────────
@@ -443,8 +308,6 @@ def test_createruntime_treats_permission_error_as_ns_exists(tmp_path: Path) -> N
             _selective_permission_error,
         ),
         mock.patch("terok_shield.resources.hook_entrypoint._nsenter"),
-        mock.patch("terok_shield.resources.hook_entrypoint._read_gateway", return_value=""),
-        mock.patch("terok_shield.resources.hook_entrypoint._read_gateway_v6", return_value=""),
     ):
         # Must not raise — PermissionError is treated as "namespace exists but inaccessible"
         hook_entrypoint._createruntime("1", sd)
@@ -460,56 +323,19 @@ def test_createruntime_raises_when_ruleset_missing(tmp_path: Path) -> None:
         hook_entrypoint._createruntime("1", sd)
 
 
-def test_createruntime_applies_ruleset_without_gateway(tmp_path: Path) -> None:
-    """_createruntime() applies the nft ruleset even when no default gateway is found."""
+def test_createruntime_applies_ruleset_via_nsenter(tmp_path: Path) -> None:
+    """_createruntime() applies the nft ruleset via nsenter stdin."""
     sd = tmp_path / "sd"
     sd.mkdir()
     (sd / "ruleset.nft").write_text("table inet terok_shield {}")
 
     with mock.patch("terok_shield.resources.hook_entrypoint._nsenter") as mock_ns:
-        with mock.patch("terok_shield.resources.hook_entrypoint._read_gateway", return_value=""):
-            with mock.patch(
-                "terok_shield.resources.hook_entrypoint._read_gateway_v6", return_value=""
-            ):
-                hook_entrypoint._createruntime("1", sd)
+        hook_entrypoint._createruntime("1", sd)
 
-    # Only one nsenter call — apply the ruleset via stdin (not file path)
     assert mock_ns.call_count == 1
     args = mock_ns.call_args.args
     assert "-" in args  # nft -f - (stdin)
     assert mock_ns.call_args.kwargs.get("stdin") == "table inet terok_shield {}"
-    # No gateway file written
-    assert not (sd / "gateway").exists()
-
-
-def test_createruntime_populates_gateway_set_when_discovered(tmp_path: Path) -> None:
-    """_createruntime() writes gateway file and adds it to the nft set when found."""
-    sd = tmp_path / "sd"
-    sd.mkdir()
-    (sd / "ruleset.nft").write_text("table inet terok_shield {}")
-
-    with mock.patch("terok_shield.resources.hook_entrypoint._nsenter") as mock_ns:
-        with mock.patch(
-            "terok_shield.resources.hook_entrypoint._read_gateway", return_value="10.0.2.2"
-        ):
-            with mock.patch(
-                "terok_shield.resources.hook_entrypoint._read_gateway_v6", return_value=""
-            ):
-                with mock.patch(
-                    "terok_shield.resources.hook_entrypoint._find_nft",
-                    return_value="/usr/sbin/nft",
-                ):
-                    hook_entrypoint._createruntime("1", sd)
-
-    # Two nsenter calls: apply ruleset + add element to gateway_v4
-    assert mock_ns.call_count == 2
-    add_call_args = mock_ns.call_args.args
-    assert "gateway_v4" in add_call_args
-    assert "{ 10.0.2.2 }" in add_call_args
-
-    gw_file = sd / "gateway"
-    assert gw_file.exists()
-    assert gw_file.read_text().strip() == "10.0.2.2"
 
 
 def test_createruntime_starts_dnsmasq_when_conf_present(tmp_path: Path) -> None:
@@ -530,17 +356,13 @@ def test_createruntime_starts_dnsmasq_when_conf_present(tmp_path: Path) -> None:
         if any("conf-file" in str(a) for a in args):
             (sd / "dnsmasq.pid").write_text("42\n")
 
-    with mock.patch(
-        "terok_shield.resources.hook_entrypoint._nsenter", side_effect=_fake_nsenter
-    ) as mock_ns:
-        with mock.patch("terok_shield.resources.hook_entrypoint._read_gateway", return_value=""):
-            with mock.patch(
-                "terok_shield.resources.hook_entrypoint._read_gateway_v6", return_value=""
-            ):
-                with mock.patch(
-                    "terok_shield.resources.hook_entrypoint._is_our_dnsmasq", return_value=True
-                ):
-                    hook_entrypoint._createruntime("1", sd)
+    with (
+        mock.patch(
+            "terok_shield.resources.hook_entrypoint._nsenter", side_effect=_fake_nsenter
+        ) as mock_ns,
+        mock.patch("terok_shield.resources.hook_entrypoint._is_our_dnsmasq", return_value=True),
+    ):
+        hook_entrypoint._createruntime("1", sd)
 
     # nsenter called twice: apply ruleset + launch dnsmasq (no resolv.conf write)
     assert mock_ns.call_count == 2
@@ -556,12 +378,8 @@ def test_createruntime_raises_when_dnsmasq_pid_file_not_written(tmp_path: Path) 
     (sd / "dnsmasq.conf").write_text("[dnsmasq config]")
 
     with mock.patch("terok_shield.resources.hook_entrypoint._nsenter"):
-        with mock.patch("terok_shield.resources.hook_entrypoint._read_gateway", return_value=""):
-            with mock.patch(
-                "terok_shield.resources.hook_entrypoint._read_gateway_v6", return_value=""
-            ):
-                with pytest.raises(RuntimeError, match="PID file not written"):
-                    hook_entrypoint._createruntime("1", sd)
+        with pytest.raises(RuntimeError, match="PID file not written"):
+            hook_entrypoint._createruntime("1", sd)
 
 
 def test_createruntime_raises_when_dnsmasq_identity_check_fails(tmp_path: Path) -> None:
@@ -575,16 +393,12 @@ def test_createruntime_raises_when_dnsmasq_identity_check_fails(tmp_path: Path) 
         if any("conf-file" in str(a) for a in args):
             (sd / "dnsmasq.pid").write_text("42\n")
 
-    with mock.patch("terok_shield.resources.hook_entrypoint._nsenter", side_effect=_fake_nsenter):
-        with mock.patch("terok_shield.resources.hook_entrypoint._read_gateway", return_value=""):
-            with mock.patch(
-                "terok_shield.resources.hook_entrypoint._read_gateway_v6", return_value=""
-            ):
-                with mock.patch(
-                    "terok_shield.resources.hook_entrypoint._is_our_dnsmasq", return_value=False
-                ):
-                    with pytest.raises(RuntimeError, match="not the expected process"):
-                        hook_entrypoint._createruntime("1", sd)
+    with (
+        mock.patch("terok_shield.resources.hook_entrypoint._nsenter", side_effect=_fake_nsenter),
+        mock.patch("terok_shield.resources.hook_entrypoint._is_our_dnsmasq", return_value=False),
+    ):
+        with pytest.raises(RuntimeError, match="not the expected process"):
+            hook_entrypoint._createruntime("1", sd)
 
 
 # ── _is_our_dnsmasq ───────────────────────────────────────────────────────────
