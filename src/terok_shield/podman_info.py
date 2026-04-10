@@ -288,10 +288,14 @@ def slirp4netns_gateway(cidr: str | None = None) -> str:
 def parse_slirp4netns_cidr() -> str:
     """Read the slirp4netns CIDR from ``containers.conf``, or return the default.
 
-    Checks user config first (XDG), then system overrides, matching the
-    precedence of :func:`find_hooks_dirs`.
+    User config (XDG) is checked first in rootless mode, then system paths.
+    When running as root, user config is skipped to prevent untrusted
+    ``XDG_CONFIG_HOME`` from influencing firewall rules.
     """
-    for path in (_user_containers_conf(), *reversed(_SYSTEM_CONF_PATHS)):
+    paths = list(reversed(_SYSTEM_CONF_PATHS))
+    if os.geteuid() != 0:
+        paths.insert(0, _user_containers_conf())
+    for path in paths:
         for opt in _parse_network_cmd_options(path):
             if opt.startswith("cidr="):
                 return opt.split("=", 1)[1]

@@ -112,7 +112,7 @@ class HookMode:
         self._profiles = profiles
         self._ruleset = ruleset
         self._podman_info: PodmanInfo | None = None
-        self._gateways: tuple[str, str] = ("", "")
+        self._gateways: tuple[str, str] | None = None
 
     # ── Setup (pre_start) ───────────────────────────────
 
@@ -534,9 +534,9 @@ class HookMode:
             if tier_str == DnsTier.DNSMASQ.value:
                 set_timeout = NFT_SET_TIMEOUT_DNSMASQ
 
-        gw_v4, gw_v6 = self._gateways or _gateways_for_mode(
-            self._get_podman_info().network_mode or "pasta"
-        )
+        if self._gateways is None:
+            self._gateways = _gateways_for_mode(self._get_podman_info().network_mode or "pasta")
+        gw_v4, gw_v6 = self._gateways
         return RulesetBuilder(
             dns=dns,
             loopback_ports=self._config.loopback_ports,
