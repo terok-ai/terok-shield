@@ -16,9 +16,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-# Duplicated from nft.constants to avoid a cross-boundary import
-# (tach: podman_info → nft.constants is disallowed).  Keep in sync.
-_DEFAULT_SLIRP4NETNS_CIDR = "10.0.2.0/24"
+from .nft.constants import SLIRP4NETNS_CIDR as _DEFAULT_SLIRP4NETNS_CIDR
 
 # Well-known system hooks directories (containers-common standard).
 # Used as fallback when containers.conf doesn't specify hooks_dir.

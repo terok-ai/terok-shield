@@ -45,7 +45,9 @@ depends_on = []
 [[modules]]
 path = "terok_shield.podman_info"
 layer = "foundation"
-depends_on = []
+depends_on = [
+    "terok_shield.nft.constants",
+]
 
 # Per-container state bundle layout — zero internal deps
 [[modules]]
