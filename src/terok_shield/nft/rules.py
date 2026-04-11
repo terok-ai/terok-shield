@@ -125,6 +125,53 @@ class RulesetBuilder:
 # ── Ruleset generation ──────────────────────────────────
 
 
+def _ruleset_preamble(
+    dns: str,
+    loopback_ports: tuple[int, ...],
+    gateway_v4: str,
+    gateway_v6: str,
+    set_timeout: str,
+) -> tuple[str, str, str, str, str, str, str]:
+    """Validate inputs and build the shared fragments for both rulesets.
+
+    Returns ``(dns_af, dns, infra_block, set_v4, set_v6, set_deny_v4, set_deny_v6)``.
+    """
+    dns = safe_ip(dns)
+    if set_timeout:
+        _safe_timeout(set_timeout)
+    for p in loopback_ports:
+        _safe_port(p)
+    port_rules = _loopback_port_rules(loopback_ports)
+    gw_rules = _gateway_port_rules(loopback_ports, gateway_v4, gateway_v6)
+    infra_block = ""
+    if gw_rules:
+        infra_block += f"\n{gw_rules}"
+    if port_rules:
+        infra_block += f"\n{port_rules}"
+    infra_block += "\n"
+    dns_af = "ip" if _is_v4(dns) else "ip6"
+    return (
+        dns_af,
+        dns,
+        infra_block,
+        _set_declaration("allow_v4", "ipv4_addr", set_timeout),
+        _set_declaration("allow_v6", "ipv6_addr", set_timeout),
+        _set_declaration("deny_v4", "ipv4_addr"),
+        _set_declaration("deny_v6", "ipv6_addr"),
+    )
+
+
+_INPUT_CHAIN = """\
+            chain input {
+                type filter hook input priority filter; policy drop;
+                iifname "lo" accept
+                ct state established,related accept
+                udp sport 53 accept
+                tcp sport 53 accept
+                drop
+            }"""
+
+
 def hook_ruleset(
     dns: str = PASTA_DNS,
     loopback_ports: tuple[int, ...] = (),
@@ -151,24 +198,13 @@ def hook_ruleset(
         gateway_v6: IPv6 gateway for host-service port rules.
         set_timeout: nft set element timeout (e.g. ``30m``).
     """
-    dns = safe_ip(dns)
-    if set_timeout:
-        _safe_timeout(set_timeout)
-    for p in loopback_ports:
-        _safe_port(p)
-    port_rules = _loopback_port_rules(loopback_ports)
-    gw_rules = _gateway_port_rules(loopback_ports, gateway_v4, gateway_v6)
-    infra_block = ""
-    if gw_rules:
-        infra_block += f"\n{gw_rules}"
-    if port_rules:
-        infra_block += f"\n{port_rules}"
-    infra_block += "\n"
-    dns_af = "ip" if _is_v4(dns) else "ip6"
-    set_v4 = _set_declaration("allow_v4", "ipv4_addr", set_timeout)
-    set_v6 = _set_declaration("allow_v6", "ipv6_addr", set_timeout)
-    set_deny_v4 = _set_declaration("deny_v4", "ipv4_addr")
-    set_deny_v6 = _set_declaration("deny_v6", "ipv6_addr")
+    dns_af, dns, infra_block, set_v4, set_v6, set_deny_v4, set_deny_v6 = _ruleset_preamble(
+        dns,
+        loopback_ports,
+        gateway_v4,
+        gateway_v6,
+        set_timeout,
+    )
     allow_rules = _audit_allow_rules()
     deny_rules = _deny_set_rules()
     private_rules = _private_range_rules()
@@ -192,14 +228,7 @@ def hook_ruleset(
         {terminal_rule}
             }}
 
-            chain input {{
-                type filter hook input priority filter; policy drop;
-                iifname "lo" accept
-                ct state established,related accept
-                udp sport 53 accept
-                tcp sport 53 accept
-                drop
-            }}
+{_INPUT_CHAIN}
         }}
     """)
 
@@ -213,10 +242,11 @@ def bypass_ruleset(
     allow_all: bool = False,
     set_timeout: str = "",
 ) -> str:
-    """Generate a bypass (accept-all + log) nftables ruleset.
+    """Generate a shield-down (accept-all + log) nftables ruleset.
 
-    Same structure as ``hook_ruleset()`` but output chain policy is accept
-    and new connections are logged with the bypass prefix.
+    Same structure as ``hook_ruleset()`` but output chain policy is accept,
+    new connections are logged with the bypass prefix, and deny sets are
+    enforced so ``deny.list`` entries still block traffic.
 
     Args:
         dns: DNS server address (pasta default forwarder).
@@ -226,22 +256,14 @@ def bypass_ruleset(
         allow_all: If True, remove private-range reject rules.
         set_timeout: nft set element timeout (e.g. ``30m``).
     """
-    dns = safe_ip(dns)
-    if set_timeout:
-        _safe_timeout(set_timeout)
-    for p in loopback_ports:
-        _safe_port(p)
-    port_rules = _loopback_port_rules(loopback_ports)
-    gw_rules = _gateway_port_rules(loopback_ports, gateway_v4, gateway_v6)
-    infra_block = ""
-    if gw_rules:
-        infra_block += f"\n{gw_rules}"
-    if port_rules:
-        infra_block += f"\n{port_rules}"
-    infra_block += "\n"
-    dns_af = "ip" if _is_v4(dns) else "ip6"
-    set_v4 = _set_declaration("allow_v4", "ipv4_addr", set_timeout)
-    set_v6 = _set_declaration("allow_v6", "ipv6_addr", set_timeout)
+    dns_af, dns, infra_block, set_v4, set_v6, set_deny_v4, set_deny_v6 = _ruleset_preamble(
+        dns,
+        loopback_ports,
+        gateway_v4,
+        gateway_v6,
+        set_timeout,
+    )
+    deny_rules = _deny_set_rules()
     private_rules = _private_range_rules()
     private_block = "" if allow_all else f"\n{private_rules}"
     bypass_log = (
@@ -251,6 +273,8 @@ def bypass_ruleset(
         table {NFT_TABLE} {{
             {set_v4}
             {set_v6}
+            {set_deny_v4}
+            {set_deny_v6}
 
             chain output {{
                 type filter hook output priority filter; policy accept;
@@ -258,17 +282,11 @@ def bypass_ruleset(
                 ct state established,related accept
                 udp dport 53 {dns_af} daddr {dns} accept
                 tcp dport 53 {dns_af} daddr {dns} accept{infra_block}\
+        {deny_rules}
         {bypass_log}{private_block}
             }}
 
-            chain input {{
-                type filter hook input priority filter; policy drop;
-                iifname "lo" accept
-                ct state established,related accept
-                udp sport 53 accept
-                tcp sport 53 accept
-                drop
-            }}
+{_INPUT_CHAIN}
         }}
     """)
 
@@ -521,10 +539,9 @@ def verify_bypass_ruleset(nft_output: str, *, allow_all: bool = False) -> list[s
             errors.append(f"{chain} chain missing")
     if BYPASS_LOG_PREFIX not in nft_output:
         errors.append("bypass nflog prefix missing")
-    if "allow_v4" not in nft_output:
-        errors.append("allow_v4 set missing")
-    if "allow_v6" not in nft_output:
-        errors.append("allow_v6 set missing")
+    for sname in ("allow_v4", "allow_v6", "deny_v4", "deny_v6"):
+        if sname not in nft_output:
+            errors.append(f"{sname} set missing")
     if not allow_all:
         errors.extend(_verify_private_blocks(nft_output))
     return errors

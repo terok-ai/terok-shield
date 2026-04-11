@@ -1285,3 +1285,25 @@ def test_shield_up_repopulates_deny_sets(
     # Verify deny elements were sent via nsenter
     deny_calls = [c for c in harness.runner.nft_via_nsenter.call_args_list if c.kwargs.get("stdin")]
     assert any(TEST_IP1 in (c.kwargs.get("stdin", "") or "") for c in deny_calls)
+
+
+def test_shield_down_repopulates_deny_sets(
+    make_hook_mode: HookModeHarnessFactory,
+    make_config: ConfigFactory,
+) -> None:
+    """shield_down() repopulates deny sets from deny.list so denies survive shield-down."""
+    config = make_config()
+    harness = make_hook_mode(config=config)
+    harness.mode._container_ruleset = lambda _c: harness.ruleset
+    harness.runner.nft_via_nsenter.return_value = ""
+    harness.ruleset.build_bypass.return_value = "bypass ruleset"
+    harness.ruleset.verify_bypass.return_value = []
+
+    # Write a deny.list before going down
+    state.deny_path(config.state_dir).write_text(f"{TEST_IP1}\n")
+
+    harness.mode.shield_down("test-ctr", allow_all=False)
+
+    # Verify deny elements were sent via nsenter
+    deny_calls = [c for c in harness.runner.nft_via_nsenter.call_args_list if c.kwargs.get("stdin")]
+    assert any(TEST_IP1 in (c.kwargs.get("stdin", "") or "") for c in deny_calls)

@@ -456,7 +456,8 @@ class HookMode:
     # ── State transitions ───────────────────────────────
 
     def shield_down(self, container: str, *, allow_all: bool = False) -> None:
-        """Switch a running container to bypass mode."""
+        """Switch a running container to shield-down (accept-all + deny.list)."""
+        sd = self._config.state_dir.resolve()
         ruleset = self._container_ruleset(container)
         rs = ruleset.build_bypass(allow_all=allow_all)
         current = self.shield_state(container)
@@ -465,10 +466,18 @@ class HookMode:
         else:
             stdin = f"delete table {NFT_TABLE}\n{rs}"
         self._runner.nft_via_nsenter(container, stdin=stdin)
+
+        # Repopulate deny sets so deny.list is enforced even when shield is down.
+        denied_ips = list(state.read_denied_ips(sd))
+        if denied_ips:
+            deny_cmd = add_deny_elements_dual(denied_ips)
+            if deny_cmd:
+                self._runner.nft_via_nsenter(container, stdin=deny_cmd)
+
         output = self._runner.nft_via_nsenter(container, "list", "ruleset")
         errors = ruleset.verify_bypass(output, allow_all=allow_all)
         if errors:
-            raise RuntimeError(f"Bypass ruleset verification failed: {'; '.join(errors)}")
+            raise RuntimeError(f"Shield-down ruleset verification failed: {'; '.join(errors)}")
 
     def shield_block(self, container: str) -> None:
         """Total network blackout — drop all traffic, log for forensics."""

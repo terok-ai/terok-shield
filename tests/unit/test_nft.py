@@ -632,9 +632,12 @@ def test_bypass_ruleset_allow_all_removes_all_private_range_rejects() -> None:
         assert net not in rs, f"Private range {net!r} should be absent when allow_all=True"
 
 
-def test_bypass_ruleset_does_not_include_the_enforce_deny_rule() -> None:
-    """Bypass mode must log new flows without appending the enforce-mode deny rule."""
-    assert _DENY_LOG_PREFIX not in bypass_ruleset()
+def test_bypass_ruleset_includes_deny_sets() -> None:
+    """Shield-down ruleset includes deny sets so deny.list is enforced."""
+    rs = bypass_ruleset()
+    assert "deny_v4" in rs
+    assert "deny_v6" in rs
+    assert _DENY_LOG_PREFIX in rs
 
 
 def test_bypass_ruleset_emits_loopback_port_rules() -> None:
