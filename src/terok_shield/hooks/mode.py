@@ -43,13 +43,13 @@ from ..config import (
 from ..dns import dnsmasq
 from ..nft.constants import (
     NFT_SET_TIMEOUT_DNSMASQ,
+    NFT_TABLE,
     PASTA_DNS,
     PASTA_HOST_LOOPBACK_MAP,
     SLIRP4NETNS_DNS,
     SLIRP4NETNS_GATEWAY_V6,
 )
 from ..nft.rules import (
-    NFT_TABLE,
     RulesetBuilder,
     add_deny_elements_dual,
     delete_deny_elements_dual,

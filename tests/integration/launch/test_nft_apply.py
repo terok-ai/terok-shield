@@ -7,14 +7,14 @@ import subprocess
 
 import pytest
 
-from terok_shield.nft.rules import hook_ruleset, verify_ruleset
+from terok_shield.nft.rules import RulesetBuilder
 
 from ..conftest import nsenter_nft
 
 
 def _apply(pid: str) -> None:
     """Apply hook ruleset and assert success."""
-    result = nsenter_nft(pid, stdin=hook_ruleset())
+    result = nsenter_nft(pid, stdin=RulesetBuilder().build_hook())
     assert result.returncode == 0, f"nft apply failed: {result.stderr}"
 
 
@@ -40,7 +40,7 @@ class TestHookApply:
         """Apply hook ruleset and run verify_ruleset against the output."""
         _apply(container_pid)
         listed = _list(container_pid)
-        errors = verify_ruleset(listed.stdout)
+        errors = RulesetBuilder().verify_hook(listed.stdout)
         assert errors == [], f"Verification errors: {errors}"
 
     def test_policy_drop_enforced(self, container_pid: str) -> None:

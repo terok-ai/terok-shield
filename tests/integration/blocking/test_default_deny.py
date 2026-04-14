@@ -18,7 +18,7 @@ import time
 import pytest
 
 from terok_shield.nft.constants import IPV6_PRIVATE, RFC1918
-from terok_shield.nft.rules import hook_ruleset
+from terok_shield.nft.rules import RulesetBuilder
 from tests.testnet import (
     ALLOWED_TARGET_HTTP,
     ALLOWED_TARGET_HTTPS,
@@ -76,7 +76,7 @@ class TestFirewallBlocking:
         """Outbound HTTP to an external IP is rejected after applying the ruleset."""
         _preflight_wget(container, ALLOWED_TARGET_HTTP)
 
-        r = nsenter_nft(container_pid, stdin=hook_ruleset())
+        r = nsenter_nft(container_pid, stdin=RulesetBuilder().build_hook())
         assert r.returncode == 0, f"Ruleset apply failed: {r.stderr}"
 
         post = _wget(container, ALLOWED_TARGET_HTTP, timeout=10)
@@ -86,7 +86,7 @@ class TestFirewallBlocking:
         """Outbound HTTPS is rejected after applying the ruleset."""
         _preflight_wget(container, ALLOWED_TARGET_HTTPS)
 
-        r = nsenter_nft(container_pid, stdin=hook_ruleset())
+        r = nsenter_nft(container_pid, stdin=RulesetBuilder().build_hook())
         assert r.returncode == 0, f"Ruleset apply failed: {r.stderr}"
 
         post = _wget(container, ALLOWED_TARGET_HTTPS, timeout=10)
@@ -103,7 +103,7 @@ class TestFirewallBlocking:
         """
         _preflight_tcp(container, BLOCKED_TARGET_IP, BLOCKED_TARGET_DNS_PORT)
 
-        r = nsenter_nft(container_pid, stdin=hook_ruleset())
+        r = nsenter_nft(container_pid, stdin=RulesetBuilder().build_hook())
         assert r.returncode == 0, f"Ruleset apply failed: {r.stderr}"
 
         wget_timeout = 10
@@ -121,7 +121,7 @@ class TestFirewallBlocking:
         self, container: str, container_pid: str
     ) -> None:
         """RFC1918 addresses are rejected when not in the allow set."""
-        nsenter_nft(container_pid, stdin=hook_ruleset())
+        nsenter_nft(container_pid, stdin=RulesetBuilder().build_hook())
 
         # Structural: all RFC1918 reject rules present
         listed = nsenter_nft(container_pid, "list", "ruleset")
@@ -148,7 +148,7 @@ class TestFirewallBlockingIPv6:
 
     def test_ipv6_ruleset_has_dual_stack_sets(self, container: str, container_pid: str) -> None:
         """Applied ruleset contains allow_v6 set and IPv6 private reject rules."""
-        nsenter_nft(container_pid, stdin=hook_ruleset())
+        nsenter_nft(container_pid, stdin=RulesetBuilder().build_hook())
         listed = nsenter_nft(container_pid, "list", "ruleset")
         assert listed.returncode == 0, listed.stderr
         output = listed.stdout
@@ -160,7 +160,7 @@ class TestFirewallBlockingIPv6:
         """ICMPv6 ping to non-allowed IPv6 addresses is blocked."""
         _skip_unless_ipv6(container)
 
-        nsenter_nft(container_pid, stdin=hook_ruleset())
+        nsenter_nft(container_pid, stdin=RulesetBuilder().build_hook())
 
         for ip, label in [(IPV6_CLOUDFLARE, "Cloudflare"), (IPV6_GOOGLE, "Google")]:
             r = _exec(container, "ping", "-6", "-c1", "-W2", ip, timeout=5)
@@ -174,7 +174,7 @@ class TestFirewallBlockingIPv6:
         if pre.returncode != 0:
             pytest.skip("IPv6 DNS (port 53) not reachable pre-firewall")
 
-        nsenter_nft(container_pid, stdin=hook_ruleset())
+        nsenter_nft(container_pid, stdin=RulesetBuilder().build_hook())
 
         post = _exec(container, "nc", "-z", "-w", "3", IPV6_CLOUDFLARE, "53", timeout=8)
         assert post.returncode != 0, "IPv6 DNS (port 53) should be blocked"
@@ -187,7 +187,7 @@ class TestFirewallBlockingIPv6:
         if pre.returncode != 0:
             pytest.skip("IPv6 HTTP not reachable pre-firewall")
 
-        nsenter_nft(container_pid, stdin=hook_ruleset())
+        nsenter_nft(container_pid, stdin=RulesetBuilder().build_hook())
 
         post = _wget(container, IPV6_HTTP_URL, timeout=5)
         assert post.returncode != 0, "HTTP over IPv6 should be blocked"
@@ -200,7 +200,7 @@ class TestFirewallBlockingIPv6:
         if pre.returncode != 0:
             pytest.skip("IPv6 HTTPS (port 443) not reachable pre-firewall")
 
-        nsenter_nft(container_pid, stdin=hook_ruleset())
+        nsenter_nft(container_pid, stdin=RulesetBuilder().build_hook())
 
         post = _exec(container, "nc", "-z", "-w", "3", IPV6_CLOUDFLARE, "443", timeout=8)
         assert post.returncode != 0, "IPv6 HTTPS (port 443) should be blocked"

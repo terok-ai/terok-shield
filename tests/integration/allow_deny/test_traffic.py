@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from terok_shield import Shield, ShieldConfig
-from terok_shield.nft.rules import add_elements, hook_ruleset
+from terok_shield.nft.rules import RulesetBuilder, add_elements
 from tests.testnet import (
     ALLOWED_TARGET_HTTP,
     ALLOWED_TARGET_HTTPS,
@@ -34,7 +34,7 @@ class TestFirewallAllowing:
 
     def test_allowed_ip_reachable_http(self, container: str, container_pid: str) -> None:
         """HTTP traffic to an allowed IP is permitted."""
-        r = nsenter_nft(container_pid, stdin=hook_ruleset())
+        r = nsenter_nft(container_pid, stdin=RulesetBuilder().build_hook())
         assert r.returncode == 0, f"Ruleset apply failed: {r.stderr}"
         r = nsenter_nft(container_pid, stdin=add_elements("allow_v4", ALLOWED_TARGET_IPS))
         assert r.returncode == 0, f"Add elements failed: {r.stderr}"
@@ -44,7 +44,7 @@ class TestFirewallAllowing:
 
     def test_allowed_ip_reachable_https(self, container: str, container_pid: str) -> None:
         """HTTPS traffic to an allowed IP is permitted."""
-        r = nsenter_nft(container_pid, stdin=hook_ruleset())
+        r = nsenter_nft(container_pid, stdin=RulesetBuilder().build_hook())
         assert r.returncode == 0, f"Ruleset apply failed: {r.stderr}"
         r = nsenter_nft(container_pid, stdin=add_elements("allow_v4", ALLOWED_TARGET_IPS))
         assert r.returncode == 0, f"Add elements failed: {r.stderr}"
@@ -54,7 +54,7 @@ class TestFirewallAllowing:
 
     def test_non_allowed_ip_still_blocked(self, container: str, container_pid: str) -> None:
         """IPs not in the allow set remain blocked after adding others."""
-        r = nsenter_nft(container_pid, stdin=hook_ruleset())
+        r = nsenter_nft(container_pid, stdin=RulesetBuilder().build_hook())
         assert r.returncode == 0, f"Ruleset apply failed: {r.stderr}"
         r = nsenter_nft(container_pid, stdin=add_elements("allow_v4", ALLOWED_TARGET_IPS))
         assert r.returncode == 0, f"Add elements failed: {r.stderr}"
@@ -64,7 +64,7 @@ class TestFirewallAllowing:
 
     def test_allow_then_block_different_targets(self, container: str, container_pid: str) -> None:
         """One IP allowed, another blocked — in the same container."""
-        r = nsenter_nft(container_pid, stdin=hook_ruleset())
+        r = nsenter_nft(container_pid, stdin=RulesetBuilder().build_hook())
         assert r.returncode == 0, f"Ruleset apply failed: {r.stderr}"
         r = nsenter_nft(container_pid, stdin=add_elements("allow_v4", ALLOWED_TARGET_IPS))
         assert r.returncode == 0, f"Add elements failed: {r.stderr}"
@@ -90,7 +90,7 @@ class TestRFC1918Allow:
         """RFC1918 addresses in the allow set bypass the RFC1918 reject rules."""
         from terok_shield.nft.constants import RFC1918
 
-        nsenter_nft(container_pid, stdin=hook_ruleset())
+        nsenter_nft(container_pid, stdin=RulesetBuilder().build_hook())
         nsenter_nft(container_pid, stdin=add_elements("allow_v4", [RFC1918_HOST]))
 
         # Structural: allow set evaluates before RFC1918 reject

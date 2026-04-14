@@ -21,7 +21,7 @@ from terok_shield.config import (
 from terok_shield.hooks.install import install_hooks
 from terok_shield.hooks.mode import HookMode
 from terok_shield.nft.constants import PASTA_HOST_LOOPBACK_MAP
-from terok_shield.nft.rules import bypass_ruleset, hook_ruleset
+from terok_shield.nft.rules import RulesetBuilder
 from terok_shield.run import ExecError
 
 from ..testfs import BIN_DIR_NAME, HOOK_ENTRYPOINT_NAME, HOOKS_DIR_NAME
@@ -454,8 +454,8 @@ def test_shield_up_reapplies_hook_ruleset(
     ("nft_output", "verify_bypass", "verify_hook", "expected"),
     [
         pytest.param("", None, None, ShieldState.INACTIVE, id="inactive"),
-        pytest.param(hook_ruleset(), ["not bypass"], [], ShieldState.UP, id="up"),
-        pytest.param(bypass_ruleset(), [], None, ShieldState.DOWN, id="down"),
+        pytest.param(RulesetBuilder().build_hook(), ["not bypass"], [], ShieldState.UP, id="up"),
+        pytest.param(RulesetBuilder().build_bypass(), [], None, ShieldState.DOWN, id="down"),
         pytest.param(
             "random nft stuff", ["not bypass"], ["not hook"], ShieldState.ERROR, id="error"
         ),
