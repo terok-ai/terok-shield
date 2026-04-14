@@ -37,8 +37,6 @@ _INPUT_CHAIN = """\
                 type filter hook input priority filter; policy drop;
                 iifname "lo" accept
                 ct state established,related accept
-                udp sport 53 accept
-                tcp sport 53 accept
                 drop
             }"""
 
@@ -197,7 +195,11 @@ class RulesetBuilder:
     def verify_hook(self, nft_output: str) -> list[str]:
         """Check applied hook ruleset invariants.  Returns errors (empty = OK).
 
+        Expects output from ``nft list table inet terok_shield`` (scoped to the
+        managed table), not ``nft list ruleset``.
+
         Verifies:
+        - Managed table header is present
         - Default policy is drop
         - Both output and input chains exist
         - Reject type is present
@@ -207,6 +209,8 @@ class RulesetBuilder:
         - Terminal deny-all rule with BLOCKED prefix present
         """
         errors: list[str] = []
+        if f"table {NFT_TABLE}" not in nft_output:
+            errors.append(f"managed table '{NFT_TABLE}' not found in output")
         if "policy drop" not in nft_output:
             errors.append("policy is not drop")
         for chain in ("output", "input"):
@@ -236,7 +240,11 @@ class RulesetBuilder:
     def verify_bypass(self, nft_output: str, *, allow_all: bool = False) -> list[str]:
         """Check applied bypass ruleset invariants.  Returns errors (empty = OK).
 
+        Expects output from ``nft list table inet terok_shield`` (scoped to the
+        managed table), not ``nft list ruleset``.
+
         Verifies:
+        - Managed table header is present
         - Output chain has policy accept
         - Input chain has policy drop
         - Bypass nflog prefix is present
@@ -244,6 +252,8 @@ class RulesetBuilder:
         - Private-range reject rules present (unless *allow_all*)
         """
         errors: list[str] = []
+        if f"table {NFT_TABLE}" not in nft_output:
+            errors.append(f"managed table '{NFT_TABLE}' not found in output")
         if "policy accept" not in nft_output:
             errors.append("output policy is not accept")
         if "policy drop" not in nft_output:
@@ -264,12 +274,18 @@ class RulesetBuilder:
     def verify_block(nft_output: str) -> list[str]:
         """Check applied block ruleset invariants.  Returns errors (empty = OK).
 
+        Expects output from ``nft list table inet terok_shield`` (scoped to the
+        managed table), not ``nft list ruleset``.
+
         Verifies:
+        - Managed table header is present
         - Both chains present with policy drop
         - Blocked log prefix present
         - No allow sets (total blackout means no allowlists)
         """
         errors: list[str] = []
+        if f"table {NFT_TABLE}" not in nft_output:
+            errors.append(f"managed table '{NFT_TABLE}' not found in output")
         if "policy drop" not in nft_output:
             errors.append("policy is not drop")
         for chain in ("output", "input"):

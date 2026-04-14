@@ -90,8 +90,10 @@ class TestRFC1918Allow:
         """RFC1918 addresses in the allow set bypass the RFC1918 reject rules."""
         from terok_shield.nft.constants import RFC1918
 
-        nsenter_nft(container_pid, stdin=RulesetBuilder().build_hook())
-        nsenter_nft(container_pid, stdin=add_elements("allow_v4", [RFC1918_HOST]))
+        applied = nsenter_nft(container_pid, stdin=RulesetBuilder().build_hook())
+        assert applied.returncode == 0, f"Ruleset apply failed: {applied.stderr}"
+        added = nsenter_nft(container_pid, stdin=add_elements("allow_v4", [RFC1918_HOST]))
+        assert added.returncode == 0, f"Add elements failed: {added.stderr}"
 
         # Structural: allow set evaluates before RFC1918 reject
         listed = nsenter_nft(container_pid, "list", "ruleset")

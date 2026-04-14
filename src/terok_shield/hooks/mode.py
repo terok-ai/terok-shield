@@ -44,6 +44,7 @@ from ..dns import dnsmasq
 from ..nft.constants import (
     NFT_SET_TIMEOUT_DNSMASQ,
     NFT_TABLE,
+    NFT_TABLE_NAME,
     PASTA_DNS,
     PASTA_HOST_LOOPBACK_MAP,
     SLIRP4NETNS_DNS,
@@ -474,7 +475,13 @@ class HookMode:
             if deny_cmd:
                 self._runner.nft_via_nsenter(container, stdin=deny_cmd)
 
-        output = self._runner.nft_via_nsenter(container, "list", "ruleset")
+        output = self._runner.nft_via_nsenter(
+            container,
+            "list",
+            "table",
+            "inet",
+            NFT_TABLE_NAME,
+        )
         errors = ruleset.verify_bypass(output, allow_all=allow_all)
         if errors:
             raise RuntimeError(f"Shield-down ruleset verification failed: {'; '.join(errors)}")
@@ -486,7 +493,13 @@ class HookMode:
         current = self.shield_state(container)
         stdin = rs if current == ShieldState.INACTIVE else f"delete table {NFT_TABLE}\n{rs}"
         self._runner.nft_via_nsenter(container, stdin=stdin)
-        output = self._runner.nft_via_nsenter(container, "list", "ruleset")
+        output = self._runner.nft_via_nsenter(
+            container,
+            "list",
+            "table",
+            "inet",
+            NFT_TABLE_NAME,
+        )
         errors = ruleset.verify_block(output)
         if errors:
             raise RuntimeError(f"Block ruleset verification failed: {'; '.join(errors)}")
@@ -520,7 +533,13 @@ class HookMode:
 
         # Gateway addresses are baked into the ruleset — no repopulation needed.
 
-        output = self._runner.nft_via_nsenter(container, "list", "ruleset")
+        output = self._runner.nft_via_nsenter(
+            container,
+            "list",
+            "table",
+            "inet",
+            NFT_TABLE_NAME,
+        )
         errors = ruleset.verify_hook(output)
         if errors:
             raise RuntimeError(f"Ruleset verification failed: {'; '.join(errors)}")
