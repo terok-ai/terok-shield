@@ -32,6 +32,16 @@ from .constants import (
 _SAFE_TIMEOUT_RE = re.compile(r"^\d+[smhd]$")
 _SAFE_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
+_INPUT_CHAIN = """\
+            chain input {
+                type filter hook input priority filter; policy drop;
+                iifname "lo" accept
+                ct state established,related accept
+                udp sport 53 accept
+                tcp sport 53 accept
+                drop
+            }"""
+
 
 # ── RulesetBuilder ──────────────────────────────────────
 
@@ -75,42 +85,205 @@ class RulesetBuilder:
         self._gateway_v6 = _safe_ipv6(gateway_v6) if gateway_v6 else ""
         self._set_timeout = set_timeout
 
+    # ── Ruleset generation ─────────────────────────────
+
     def build_hook(self) -> str:
-        """Generate the hook-mode (deny-all) nftables ruleset."""
-        return hook_ruleset(
-            dns=self._dns,
-            loopback_ports=self._loopback_ports,
-            gateway_v4=self._gateway_v4,
-            gateway_v6=self._gateway_v6,
-            set_timeout=self._set_timeout,
-        )
+        """Generate the hook-mode (deny-all) nftables ruleset.
+
+        Applied by the OCI hook into the container's own netns.
+        Dual-stack: both IPv4 and IPv6 use deny-all + allowlist.
+
+        Gateway addresses are baked directly into the ruleset as literal
+        accept rules -- no dynamic sets or runtime discovery needed.
+
+        Chain order (output):
+            loopback -> established -> DNS -> gateway ports -> loopback ports
+            -> allow sets -> deny sets -> private-range reject -> terminal deny
+        """
+        dns_af, dns, infra_block, set_v4, set_v6, set_deny_v4, set_deny_v6 = self._preamble()
+        allow_rules = RulesetBuilder._audit_allow_rules()
+        deny_rules = RulesetBuilder._deny_set_rules()
+        private_rules = RulesetBuilder._private_range_rules()
+        terminal_rule = RulesetBuilder._terminal_deny_rule()
+        return textwrap.dedent(f"""\
+            table {NFT_TABLE} {{
+                {set_v4}
+                {set_v6}
+                {set_deny_v4}
+                {set_deny_v6}
+
+                chain output {{
+                    type filter hook output priority filter; policy drop;
+                    oifname "lo" accept
+                    ct state established,related accept
+                    udp dport 53 {dns_af} daddr {dns} accept
+                    tcp dport 53 {dns_af} daddr {dns} accept{infra_block}\
+            {allow_rules}
+            {deny_rules}
+            {private_rules}
+            {terminal_rule}
+                }}
+
+    {_INPUT_CHAIN}
+            }}
+        """)
 
     def build_bypass(self, *, allow_all: bool = False) -> str:
-        """Generate the bypass-mode (accept-all + log) ruleset."""
-        return bypass_ruleset(
-            dns=self._dns,
-            loopback_ports=self._loopback_ports,
-            gateway_v4=self._gateway_v4,
-            gateway_v6=self._gateway_v6,
-            allow_all=allow_all,
-            set_timeout=self._set_timeout,
+        """Generate the bypass-mode (accept-all + log) ruleset.
+
+        Same structure as ``build_hook()`` but output chain policy is accept,
+        new connections are logged with the bypass prefix, and deny sets are
+        enforced so ``deny.list`` entries still block traffic.
+
+        Args:
+            allow_all: If True, remove private-range reject rules.
+        """
+        dns_af, dns, infra_block, set_v4, set_v6, set_deny_v4, set_deny_v6 = self._preamble()
+        deny_rules = RulesetBuilder._deny_set_rules()
+        private_rules = RulesetBuilder._private_range_rules()
+        private_block = "" if allow_all else f"\n{private_rules}"
+        bypass_log = (
+            f'        ct state new log group {NFLOG_GROUP} prefix "{BYPASS_LOG_PREFIX}: " counter'
         )
+        return textwrap.dedent(f"""\
+            table {NFT_TABLE} {{
+                {set_v4}
+                {set_v6}
+                {set_deny_v4}
+                {set_deny_v6}
+
+                chain output {{
+                    type filter hook output priority filter; policy accept;
+                    oifname "lo" accept
+                    ct state established,related accept
+                    udp dport 53 {dns_af} daddr {dns} accept
+                    tcp dport 53 {dns_af} daddr {dns} accept{infra_block}\
+            {deny_rules}
+            {bypass_log}{private_block}
+                }}
+
+    {_INPUT_CHAIN}
+            }}
+        """)
+
+    @staticmethod
+    def build_block() -> str:
+        """Generate the block-mode (total blackout) ruleset.
+
+        Drops all traffic except loopback and established connections.
+        No DNS, no allowlists, no gateway ports.  Forensic logging only.
+        """
+        blocked_log = f'        log group {NFLOG_GROUP} prefix "{BLOCKED_LOG_PREFIX}: " drop'
+        return textwrap.dedent(f"""\
+            table {NFT_TABLE} {{
+                chain output {{
+                    type filter hook output priority filter; policy drop;
+                    oifname "lo" accept
+                    ct state established,related accept
+            {blocked_log}
+                }}
+
+                chain input {{
+                    type filter hook input priority filter; policy drop;
+                    iifname "lo" accept
+                    ct state established,related accept
+                    drop
+                }}
+            }}
+        """)
+
+    # ── Verification ───────────────────────────────────
 
     def verify_hook(self, nft_output: str) -> list[str]:
-        """Check applied hook ruleset invariants.  Returns errors (empty = OK)."""
-        return verify_ruleset(nft_output)
+        """Check applied hook ruleset invariants.  Returns errors (empty = OK).
 
-    def build_block(self) -> str:
-        """Generate the block-mode (total blackout) ruleset."""
-        return block_ruleset()
-
-    def verify_block(self, nft_output: str) -> list[str]:
-        """Check applied block ruleset invariants.  Returns errors (empty = OK)."""
-        return verify_block_ruleset(nft_output)
+        Verifies:
+        - Default policy is drop
+        - Both output and input chains exist
+        - Reject type is present
+        - Dual-stack allow sets are declared
+        - Dual-stack deny sets are declared
+        - All private ranges are present (RFC 1918 + RFC 4193/4291)
+        - Terminal deny-all rule with BLOCKED prefix present
+        """
+        errors: list[str] = []
+        if "policy drop" not in nft_output:
+            errors.append("policy is not drop")
+        for chain in ("output", "input"):
+            if f"chain {chain}" not in nft_output:
+                errors.append(f"{chain} chain missing")
+        if "admin-prohibited" not in nft_output:
+            errors.append("reject type missing")
+        if "allow_v4" not in nft_output:
+            errors.append("allow_v4 set missing")
+        if "allow_v6" not in nft_output:
+            errors.append("allow_v6 set missing")
+        if "deny_v4" not in nft_output:
+            errors.append("deny_v4 set missing")
+        if "deny_v6" not in nft_output:
+            errors.append("deny_v6 set missing")
+        # Verify the terminal deny-all rule -- a standalone log+reject with the
+        # BLOCKED prefix (no daddr selector, unlike deny-set rules).
+        terminal_deny_re = re.compile(
+            rf'^\s*log\s+.*prefix\s+"{re.escape(BLOCKED_LOG_PREFIX)}',
+            re.MULTILINE,
+        )
+        if not terminal_deny_re.search(nft_output):
+            errors.append("terminal deny-all rule missing")
+        errors.extend(RulesetBuilder._verify_private_blocks(nft_output))
+        return errors
 
     def verify_bypass(self, nft_output: str, *, allow_all: bool = False) -> list[str]:
-        """Check applied bypass ruleset invariants.  Returns errors (empty = OK)."""
-        return verify_bypass_ruleset(nft_output, allow_all=allow_all)
+        """Check applied bypass ruleset invariants.  Returns errors (empty = OK).
+
+        Verifies:
+        - Output chain has policy accept
+        - Input chain has policy drop
+        - Bypass nflog prefix is present
+        - Dual-stack allow sets are declared
+        - Private-range reject rules present (unless *allow_all*)
+        """
+        errors: list[str] = []
+        if "policy accept" not in nft_output:
+            errors.append("output policy is not accept")
+        if "policy drop" not in nft_output:
+            errors.append("input policy is not drop")
+        for chain in ("output", "input"):
+            if f"chain {chain}" not in nft_output:
+                errors.append(f"{chain} chain missing")
+        if BYPASS_LOG_PREFIX not in nft_output:
+            errors.append("bypass nflog prefix missing")
+        for sname in ("allow_v4", "allow_v6", "deny_v4", "deny_v6"):
+            if sname not in nft_output:
+                errors.append(f"{sname} set missing")
+        if not allow_all:
+            errors.extend(RulesetBuilder._verify_private_blocks(nft_output))
+        return errors
+
+    @staticmethod
+    def verify_block(nft_output: str) -> list[str]:
+        """Check applied block ruleset invariants.  Returns errors (empty = OK).
+
+        Verifies:
+        - Both chains present with policy drop
+        - Blocked log prefix present
+        - No allow sets (total blackout means no allowlists)
+        """
+        errors: list[str] = []
+        if "policy drop" not in nft_output:
+            errors.append("policy is not drop")
+        for chain in ("output", "input"):
+            if f"chain {chain}" not in nft_output:
+                errors.append(f"{chain} chain missing")
+        if BLOCKED_LOG_PREFIX not in nft_output:
+            errors.append("blocked nflog prefix missing")
+        if "allow_v4" in nft_output:
+            errors.append("allow_v4 set present in block mode")
+        if "allow_v6" in nft_output:
+            errors.append("allow_v6 set present in block mode")
+        return errors
+
+    # ── Set operations (instance) ──────────────────────
 
     def add_elements_dual(self, ips: list[str]) -> str:
         """Classify IPs by family and generate add-element commands for both sets.
@@ -121,237 +294,159 @@ class RulesetBuilder:
         """
         return add_elements_dual(ips, permanent=bool(self._set_timeout))
 
+    # ── Private helpers ────────────────────────────────
 
-# ── Ruleset generation ──────────────────────────────────
+    def _preamble(self) -> tuple[str, str, str, str, str, str, str]:
+        """Validate inputs and build the shared fragments for both rulesets.
 
+        Returns ``(dns_af, dns, infra_block, set_v4, set_v6, set_deny_v4, set_deny_v6)``.
+        """
+        dns = safe_ip(self._dns)
+        if self._set_timeout:
+            _safe_timeout(self._set_timeout)
+        for p in self._loopback_ports:
+            _safe_port(p)
+        port_rules = RulesetBuilder._loopback_port_rules(self._loopback_ports)
+        gw_rules = RulesetBuilder._gateway_port_rules(
+            self._loopback_ports, self._gateway_v4, self._gateway_v6
+        )
+        infra_block = ""
+        if gw_rules:
+            infra_block += f"\n{gw_rules}"
+        if port_rules:
+            infra_block += f"\n{port_rules}"
+        infra_block += "\n"
+        dns_af = "ip" if _is_v4(dns) else "ip6"
+        return (
+            dns_af,
+            dns,
+            infra_block,
+            RulesetBuilder._set_declaration("allow_v4", "ipv4_addr", self._set_timeout),
+            RulesetBuilder._set_declaration("allow_v6", "ipv6_addr", self._set_timeout),
+            RulesetBuilder._set_declaration("deny_v4", "ipv4_addr"),
+            RulesetBuilder._set_declaration("deny_v6", "ipv6_addr"),
+        )
 
-def _ruleset_preamble(
-    dns: str,
-    loopback_ports: tuple[int, ...],
-    gateway_v4: str,
-    gateway_v6: str,
-    set_timeout: str,
-) -> tuple[str, str, str, str, str, str, str]:
-    """Validate inputs and build the shared fragments for both rulesets.
+    @staticmethod
+    def _set_declaration(name: str, family: str, set_timeout: str = "") -> str:
+        """Generate an nft set declaration with optional timeout.
 
-    Returns ``(dns_af, dns, infra_block, set_v4, set_v6, set_deny_v4, set_deny_v6)``.
-    """
-    dns = safe_ip(dns)
-    if set_timeout:
-        _safe_timeout(set_timeout)
-    for p in loopback_ports:
-        _safe_port(p)
-    port_rules = _loopback_port_rules(loopback_ports)
-    gw_rules = _gateway_port_rules(loopback_ports, gateway_v4, gateway_v6)
-    infra_block = ""
-    if gw_rules:
-        infra_block += f"\n{gw_rules}"
-    if port_rules:
-        infra_block += f"\n{port_rules}"
-    infra_block += "\n"
-    dns_af = "ip" if _is_v4(dns) else "ip6"
-    return (
-        dns_af,
-        dns,
-        infra_block,
-        _set_declaration("allow_v4", "ipv4_addr", set_timeout),
-        _set_declaration("allow_v6", "ipv6_addr", set_timeout),
-        _set_declaration("deny_v4", "ipv4_addr"),
-        _set_declaration("deny_v6", "ipv6_addr"),
-    )
+        Args:
+            name: Set name (e.g. ``allow_v4``).
+            family: Address type (``ipv4_addr`` or ``ipv6_addr``).
+            set_timeout: Element timeout (e.g. ``30m``).  When set, adds
+                ``timeout`` flag so elements auto-expire.
+        """
+        if set_timeout:
+            return (
+                f"set {name} {{ type {family}; flags interval, timeout; timeout {set_timeout}; }}"
+            )
+        return f"set {name} {{ type {family}; flags interval; }}"
 
+    @staticmethod
+    def _audit_allow_rules() -> str:
+        """Generate audit rules for allowed traffic (IPv4 + IPv6).
 
-_INPUT_CHAIN = """\
-            chain input {
-                type filter hook input priority filter; policy drop;
-                iifname "lo" accept
-                ct state established,related accept
-                udp sport 53 accept
-                tcp sport 53 accept
-                drop
-            }"""
+        No rate limit -- only new connections reach these rules because
+        ``ct state established,related accept`` is earlier in the chain.
+        """
+        return (
+            f'        ip daddr @allow_v4 log group {NFLOG_GROUP} prefix "{ALLOWED_LOG_PREFIX}: " counter accept\n'
+            f'        ip6 daddr @allow_v6 log group {NFLOG_GROUP} prefix "{ALLOWED_LOG_PREFIX}: " counter accept'
+        )
 
+    @staticmethod
+    def _terminal_deny_rule() -> str:
+        """Generate the terminal default-deny rule with NFLOG audit.
 
-def hook_ruleset(
-    dns: str = PASTA_DNS,
-    loopback_ports: tuple[int, ...] = (),
-    gateway_v4: str = "",
-    gateway_v6: str = "",
-    set_timeout: str = "",
-) -> str:
-    """Generate a per-container nftables ruleset for hook mode.
+        Unclassified packets (not in any allow or deny set) are rejected and
+        logged with the ``BLOCKED`` prefix.  NFLOG is fire-and-forget: if a
+        clearance handler subscribes it can prompt the operator; otherwise
+        events are silently dropped by the kernel.
 
-    Applied by the OCI hook into the container's own netns.
-    Dual-stack: both IPv4 and IPv6 use deny-all + allowlist.
+        Uses ``icmpx`` for cross-family reject in ``inet`` tables --
+        auto-selects ICMP (IPv4) or ICMPv6 (IPv6).
+        """
+        return (
+            f'        log group {NFLOG_GROUP} prefix "{BLOCKED_LOG_PREFIX}: " '
+            f"counter reject with icmpx admin-prohibited"
+        )
 
-    Gateway addresses are baked directly into the ruleset as literal
-    accept rules — no dynamic sets or runtime discovery needed.
+    @staticmethod
+    def _deny_set_rules() -> str:
+        """Generate deny-set match rules (IPv4 + IPv6).
 
-    Chain order (output):
-        loopback -> established -> DNS -> gateway ports -> loopback ports
-        -> allow sets -> deny sets -> private-range reject -> terminal deny
+        Packets matching the deny sets are immediately rejected with an ICMP error.
+        Placed after allow-set rules, before private-range reject.
+        """
+        return (
+            f'        ip daddr @deny_v4 log group {NFLOG_GROUP} prefix "{DENIED_LOG_PREFIX}: " counter reject with icmpx admin-prohibited\n'
+            f'        ip6 daddr @deny_v6 log group {NFLOG_GROUP} prefix "{DENIED_LOG_PREFIX}: " counter reject with icmpx admin-prohibited'
+        )
 
-    Args:
-        dns: DNS server address (pasta default forwarder).
-        loopback_ports: TCP ports to allow on the loopback interface.
-        gateway_v4: IPv4 gateway for host-service port rules.
-        gateway_v6: IPv6 gateway for host-service port rules.
-        set_timeout: nft set element timeout (e.g. ``30m``).
-    """
-    dns_af, dns, infra_block, set_v4, set_v6, set_deny_v4, set_deny_v6 = _ruleset_preamble(
-        dns,
-        loopback_ports,
-        gateway_v4,
-        gateway_v6,
-        set_timeout,
-    )
-    allow_rules = _audit_allow_rules()
-    deny_rules = _deny_set_rules()
-    private_rules = _private_range_rules()
-    terminal_rule = _terminal_deny_rule()
-    return textwrap.dedent(f"""\
-        table {NFT_TABLE} {{
-            {set_v4}
-            {set_v6}
-            {set_deny_v4}
-            {set_deny_v6}
+    @staticmethod
+    def _private_range_rules() -> str:
+        """Generate private-range reject rules (RFC 1918 + RFC 4193/4291).
 
-            chain output {{
-                type filter hook output priority filter; policy drop;
-                oifname "lo" accept
-                ct state established,related accept
-                udp dport 53 {dns_af} daddr {dns} accept
-                tcp dport 53 {dns_af} daddr {dns} accept{infra_block}\
-        {allow_rules}
-        {deny_rules}
-        {private_rules}
-        {terminal_rule}
-            }}
+        Auto-detects address family for the ``daddr`` selector and uses
+        cross-family ``icmpx`` reject for all ranges.
+        """
+        return "\n".join(
+            f"        {'ip' if _is_v4(net) else 'ip6'} daddr {net}"
+            f' log group {NFLOG_GROUP} prefix "{PRIVATE_LOG_PREFIX}: " reject with icmpx admin-prohibited'
+            for net in PRIVATE_RANGES
+        )
 
-{_INPUT_CHAIN}
-        }}
-    """)
+    @staticmethod
+    def _loopback_port_rules(ports: tuple[int, ...]) -> str:
+        """Generate nft accept rules for host-loopback-proxy ports.
 
+        Traffic to ``PASTA_HOST_LOOPBACK_MAP`` (169.254.1.2) goes via pasta's
+        virtual interface, not ``lo``.  pasta's ``--map-host-loopback`` translates
+        this address to ``127.0.0.1`` on the host, enabling container->host
+        loopback access without the pasta 2.x "two loopbacks" splice bug.
+        These rules are placed before the private-range reject block so that
+        link-local traffic to 169.254.1.2 is accepted for the allowed ports.
+        """
+        return "\n".join(
+            f"            tcp dport {p} ip daddr {PASTA_HOST_LOOPBACK_MAP} accept" for p in ports
+        )
 
-def bypass_ruleset(
-    dns: str = PASTA_DNS,
-    loopback_ports: tuple[int, ...] = (),
-    gateway_v4: str = "",
-    gateway_v6: str = "",
-    *,
-    allow_all: bool = False,
-    set_timeout: str = "",
-) -> str:
-    """Generate a shield-down (accept-all + log) nftables ruleset.
+    @staticmethod
+    def _gateway_port_rules(
+        ports: tuple[int, ...], gateway_v4: str = "", gateway_v6: str = ""
+    ) -> str:
+        """Generate nft accept rules for gateway (slirp4netns) host-service ports.
 
-    Same structure as ``hook_ruleset()`` but output chain policy is accept,
-    new connections are logged with the bypass prefix, and deny sets are
-    enforced so ``deny.list`` entries still block traffic.
+        Uses literal gateway IPs baked into the ruleset at generation time --
+        no dynamic sets or runtime discovery needed.  Placed before the
+        private-range reject block so RFC 1918 traffic to the gateway is accepted.
+        """
+        if not ports or not (gateway_v4 or gateway_v6):
+            return ""
+        lines = []
+        for p in ports:
+            if gateway_v4:
+                lines.append(f"        tcp dport {p} ip daddr {safe_ip(gateway_v4)} accept")
+            if gateway_v6:
+                lines.append(f"        tcp dport {p} ip6 daddr {safe_ip(gateway_v6)} accept")
+        return "\n".join(lines)
 
-    Args:
-        dns: DNS server address (pasta default forwarder).
-        loopback_ports: TCP ports to allow on the loopback interface.
-        gateway_v4: IPv4 gateway for host-service port rules.
-        gateway_v6: IPv6 gateway for host-service port rules.
-        allow_all: If True, remove private-range reject rules.
-        set_timeout: nft set element timeout (e.g. ``30m``).
-    """
-    dns_af, dns, infra_block, set_v4, set_v6, set_deny_v4, set_deny_v6 = _ruleset_preamble(
-        dns,
-        loopback_ports,
-        gateway_v4,
-        gateway_v6,
-        set_timeout,
-    )
-    deny_rules = _deny_set_rules()
-    private_rules = _private_range_rules()
-    private_block = "" if allow_all else f"\n{private_rules}"
-    bypass_log = (
-        f'        ct state new log group {NFLOG_GROUP} prefix "{BYPASS_LOG_PREFIX}: " counter'
-    )
-    return textwrap.dedent(f"""\
-        table {NFT_TABLE} {{
-            {set_v4}
-            {set_v6}
-            {set_deny_v4}
-            {set_deny_v6}
+    @staticmethod
+    def _verify_private_blocks(nft_output: str) -> list[str]:
+        """Check private-range reject rules (RFC 1918 + RFC 4193/4291) are present.
 
-            chain output {{
-                type filter hook output priority filter; policy accept;
-                oifname "lo" accept
-                ct state established,related accept
-                udp dport 53 {dns_af} daddr {dns} accept
-                tcp dport 53 {dns_af} daddr {dns} accept{infra_block}\
-        {deny_rules}
-        {bypass_log}{private_block}
-            }}
-
-{_INPUT_CHAIN}
-        }}
-    """)
-
-
-def block_ruleset() -> str:
-    """Generate a total-blackout nftables ruleset for panic scenarios.
-
-    Drops all traffic except loopback and established connections.
-    No DNS, no allowlists, no gateway ports.  Forensic logging only.
-    """
-    blocked_log = f'        log group {NFLOG_GROUP} prefix "{BLOCKED_LOG_PREFIX}: " drop'
-    return textwrap.dedent(f"""\
-        table {NFT_TABLE} {{
-            chain output {{
-                type filter hook output priority filter; policy drop;
-                oifname "lo" accept
-                ct state established,related accept
-        {blocked_log}
-            }}
-
-            chain input {{
-                type filter hook input priority filter; policy drop;
-                iifname "lo" accept
-                ct state established,related accept
-                drop
-            }}
-        }}
-    """)
-
-
-def verify_block_ruleset(nft_output: str) -> list[str]:
-    """Check applied block ruleset invariants.  Returns errors (empty = OK).
-
-    Verifies:
-    - Both chains present with policy drop
-    - Blocked log prefix present
-    - No allow sets (total blackout means no allowlists)
-    """
-    errors: list[str] = []
-    if "policy drop" not in nft_output:
-        errors.append("policy is not drop")
-    for chain in ("output", "input"):
-        if f"chain {chain}" not in nft_output:
-            errors.append(f"{chain} chain missing")
-    if BLOCKED_LOG_PREFIX not in nft_output:
-        errors.append("blocked nflog prefix missing")
-    if "allow_v4" in nft_output:
-        errors.append("allow_v4 set present in block mode")
-    if "allow_v6" in nft_output:
-        errors.append("allow_v6 set present in block mode")
-    return errors
-
-
-def _set_declaration(name: str, family: str, set_timeout: str = "") -> str:
-    """Generate an nft set declaration with optional timeout.
-
-    Args:
-        name: Set name (e.g. ``allow_v4``).
-        family: Address type (``ipv4_addr`` or ``ipv6_addr``).
-        set_timeout: Element timeout (e.g. ``30m``).  When set, adds
-            ``timeout`` flag so elements auto-expire.
-    """
-    if set_timeout:
-        return f"set {name} {{ type {family}; flags interval, timeout; timeout {set_timeout}; }}"
-    return f"set {name} {{ type {family}; flags interval; }}"
+        Uses a regex to match reject rule context (``ip[6] daddr <net> ... reject``)
+        rather than bare CIDR presence, so set elements don't produce false passes.
+        Auto-detects address family from the CIDR.
+        """
+        errors: list[str] = []
+        for net in PRIVATE_RANGES:
+            selector = "ip" if _is_v4(net) else "ip6"
+            pattern = rf"{selector} daddr {re.escape(net)}.*reject"
+            if not re.search(pattern, nft_output):
+                errors.append(f"Private-range reject rule for {net} missing")
+        return errors
 
 
 # ── Set operations ──────────────────────────────────────
@@ -474,183 +569,6 @@ def delete_elements(set_name: str, ips: list[str], table: str = NFT_TABLE) -> st
         return ""
     elements = ", ".join(valid)
     return f"delete element {table} {set_name} {{ {elements} }}\n"
-
-
-# ── Verification ────────────────────────────────────────
-
-
-def verify_ruleset(nft_output: str) -> list[str]:
-    """Check applied ruleset invariants.  Returns errors (empty = OK).
-
-    Verifies:
-    - Default policy is drop
-    - Both output and input chains exist
-    - Reject type is present
-    - Dual-stack allow sets are declared
-    - Dual-stack deny sets are declared
-    - All private ranges are present (RFC 1918 + RFC 4193/4291)
-    - Terminal deny-all rule with BLOCKED prefix present
-    """
-    errors: list[str] = []
-    if "policy drop" not in nft_output:
-        errors.append("policy is not drop")
-    for chain in ("output", "input"):
-        if f"chain {chain}" not in nft_output:
-            errors.append(f"{chain} chain missing")
-    if "admin-prohibited" not in nft_output:
-        errors.append("reject type missing")
-    if "allow_v4" not in nft_output:
-        errors.append("allow_v4 set missing")
-    if "allow_v6" not in nft_output:
-        errors.append("allow_v6 set missing")
-    if "deny_v4" not in nft_output:
-        errors.append("deny_v4 set missing")
-    if "deny_v6" not in nft_output:
-        errors.append("deny_v6 set missing")
-    # Verify the terminal deny-all rule — a standalone log+reject with the
-    # BLOCKED prefix (no daddr selector, unlike deny-set rules).
-    _terminal_deny_re = re.compile(
-        rf'^\s*log\s+.*prefix\s+"{re.escape(BLOCKED_LOG_PREFIX)}',
-        re.MULTILINE,
-    )
-    if not _terminal_deny_re.search(nft_output):
-        errors.append("terminal deny-all rule missing")
-    errors.extend(_verify_private_blocks(nft_output))
-    return errors
-
-
-def verify_bypass_ruleset(nft_output: str, *, allow_all: bool = False) -> list[str]:
-    """Check applied bypass ruleset invariants.  Returns errors (empty = OK).
-
-    Verifies:
-    - Output chain has policy accept
-    - Input chain has policy drop
-    - Bypass nflog prefix is present
-    - Dual-stack allow sets are declared
-    - Private-range reject rules present (unless *allow_all*)
-    """
-    errors: list[str] = []
-    if "policy accept" not in nft_output:
-        errors.append("output policy is not accept")
-    if "policy drop" not in nft_output:
-        errors.append("input policy is not drop")
-    for chain in ("output", "input"):
-        if f"chain {chain}" not in nft_output:
-            errors.append(f"{chain} chain missing")
-    if BYPASS_LOG_PREFIX not in nft_output:
-        errors.append("bypass nflog prefix missing")
-    for sname in ("allow_v4", "allow_v6", "deny_v4", "deny_v6"):
-        if sname not in nft_output:
-            errors.append(f"{sname} set missing")
-    if not allow_all:
-        errors.extend(_verify_private_blocks(nft_output))
-    return errors
-
-
-def _verify_private_blocks(nft_output: str) -> list[str]:
-    """Check private-range reject rules (RFC 1918 + RFC 4193/4291) are present.
-
-    Uses a regex to match reject rule context (``ip[6] daddr <net> ... reject``)
-    rather than bare CIDR presence, so set elements don't produce false passes.
-    Auto-detects address family from the CIDR.
-    """
-    errors: list[str] = []
-    for net in PRIVATE_RANGES:
-        selector = "ip" if _is_v4(net) else "ip6"
-        pattern = rf"{selector} daddr {re.escape(net)}.*reject"
-        if not re.search(pattern, nft_output):
-            errors.append(f"Private-range reject rule for {net} missing")
-    return errors
-
-
-# ── Rule fragment generators ────────────────────────────
-
-
-def _audit_allow_rules() -> str:
-    """Generate audit rules for allowed traffic (IPv4 + IPv6).
-
-    No rate limit -- only new connections reach these rules because
-    ``ct state established,related accept`` is earlier in the chain.
-    """
-    return (
-        f'        ip daddr @allow_v4 log group {NFLOG_GROUP} prefix "{ALLOWED_LOG_PREFIX}: " counter accept\n'
-        f'        ip6 daddr @allow_v6 log group {NFLOG_GROUP} prefix "{ALLOWED_LOG_PREFIX}: " counter accept'
-    )
-
-
-def _terminal_deny_rule() -> str:
-    """Generate the terminal default-deny rule with NFLOG audit.
-
-    Unclassified packets (not in any allow or deny set) are rejected and
-    logged with the ``BLOCKED`` prefix.  NFLOG is fire-and-forget: if a
-    clearance handler subscribes it can prompt the operator; otherwise
-    events are silently dropped by the kernel.
-
-    Uses ``icmpx`` for cross-family reject in ``inet`` tables —
-    auto-selects ICMP (IPv4) or ICMPv6 (IPv6).
-    """
-    return (
-        f'        log group {NFLOG_GROUP} prefix "{BLOCKED_LOG_PREFIX}: " '
-        f"counter reject with icmpx admin-prohibited"
-    )
-
-
-def _deny_set_rules() -> str:
-    """Generate deny-set match rules (IPv4 + IPv6).
-
-    Packets matching the deny sets are immediately rejected with an ICMP error.
-    Placed after allow-set rules, before private-range reject.
-    """
-    return (
-        f'        ip daddr @deny_v4 log group {NFLOG_GROUP} prefix "{DENIED_LOG_PREFIX}: " counter reject with icmpx admin-prohibited\n'
-        f'        ip6 daddr @deny_v6 log group {NFLOG_GROUP} prefix "{DENIED_LOG_PREFIX}: " counter reject with icmpx admin-prohibited'
-    )
-
-
-def _private_range_rules() -> str:
-    """Generate private-range reject rules (RFC 1918 + RFC 4193/4291).
-
-    Auto-detects address family for the ``daddr`` selector and uses
-    cross-family ``icmpx`` reject for all ranges.
-    """
-    return "\n".join(
-        f"        {'ip' if _is_v4(net) else 'ip6'} daddr {net}"
-        f' log group {NFLOG_GROUP} prefix "{PRIVATE_LOG_PREFIX}: " reject with icmpx admin-prohibited'
-        for net in PRIVATE_RANGES
-    )
-
-
-def _loopback_port_rules(ports: tuple[int, ...]) -> str:
-    """Generate nft accept rules for host-loopback-proxy ports.
-
-    Traffic to ``PASTA_HOST_LOOPBACK_MAP`` (169.254.1.2) goes via pasta's
-    virtual interface, not ``lo``.  pasta's ``--map-host-loopback`` translates
-    this address to ``127.0.0.1`` on the host, enabling container→host
-    loopback access without the pasta 2.x "two loopbacks" splice bug.
-    These rules are placed before the private-range reject block so that
-    link-local traffic to 169.254.1.2 is accepted for the allowed ports.
-    """
-    return "\n".join(
-        f"            tcp dport {p} ip daddr {PASTA_HOST_LOOPBACK_MAP} accept" for p in ports
-    )
-
-
-def _gateway_port_rules(ports: tuple[int, ...], gateway_v4: str = "", gateway_v6: str = "") -> str:
-    """Generate nft accept rules for gateway (slirp4netns) host-service ports.
-
-    Uses literal gateway IPs baked into the ruleset at generation time —
-    no dynamic sets or runtime discovery needed.  Placed before the
-    private-range reject block so RFC 1918 traffic to the gateway is accepted.
-    """
-    if not ports or not (gateway_v4 or gateway_v6):
-        return ""
-    lines = []
-    for p in ports:
-        if gateway_v4:
-            lines.append(f"        tcp dport {p} ip daddr {safe_ip(gateway_v4)} accept")
-        if gateway_v6:
-            lines.append(f"        tcp dport {p} ip6 daddr {safe_ip(gateway_v6)} accept")
-    return "\n".join(lines)
 
 
 # ── Validation ──────────────────────────────────────────
