@@ -665,9 +665,8 @@ def _propagate_pythonpath(env: dict[str, str]) -> None:
     """
     # terok_shield/ is two levels up from cli/interactive.py; site-packages is three.
     site = str(Path(__file__).resolve().parent.parent.parent)
-    existing = env.get("PYTHONPATH", "")
-    if site not in existing.split(os.pathsep):
-        env["PYTHONPATH"] = f"{site}{os.pathsep}{existing}" if existing else site
+    paths = sys.path if site in sys.path else [site, *sys.path]
+    env["PYTHONPATH"] = os.pathsep.join(paths)
 
 
 # ── Helpers ──────────────────────────────────────────────

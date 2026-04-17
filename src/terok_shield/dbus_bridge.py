@@ -57,9 +57,8 @@ def _propagate_pythonpath(env: dict[str, str]) -> None:
     """
     # terok_shield/ is one level up from this file; site-packages is two.
     site = str(Path(__file__).resolve().parent.parent)
-    existing = env.get("PYTHONPATH", "")
-    if site not in existing.split(os.pathsep):
-        env["PYTHONPATH"] = f"{site}{os.pathsep}{existing}" if existing else site
+    paths = sys.path if site in sys.path else [site, *sys.path]
+    env["PYTHONPATH"] = os.pathsep.join(paths)
 
 
 def bus_name_for_container(short_id: str) -> str:
