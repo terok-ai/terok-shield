@@ -55,14 +55,10 @@ def _propagate_pythonpath(env: dict[str, str]) -> None:
     Mirrors :func:`terok_shield.cli.interactive._propagate_pythonpath` —
     duplicated because tach layer boundaries prevent support->cli imports.
     """
-    env["PYTHONPATH"] = os.pathsep.join(sys.path)
     # terok_shield/ is one level up from this file; site-packages is two.
     site = str(Path(__file__).resolve().parent.parent)
-    existing = env.get("PYTHONPATH", "")
-    if site not in existing.split(os.pathsep):
-        sitepath = f"{site}{os.pathsep}{existing}" if existing else site
-        env["PYTHONPATH"] = sitepath + env["PYTHONPATH"]
-
+    paths = sys.path if site in sys.path else [site, *sys.path]
+    env["PYTHONPATH"] = os.pathsep.join(paths)
 
 def bus_name_for_container(short_id: str) -> str:
     """Derive the per-container well-known bus name.
