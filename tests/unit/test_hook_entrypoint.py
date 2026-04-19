@@ -23,7 +23,7 @@ from terok_shield.resources import hook_entrypoint
 def _oci_json(
     pid: int = 42,
     state_dir: str = "/tmp/sd",
-    version: int = 4,
+    version: int = 5,
     container_id: str = "abc123def456789abcdef0123456789abcdef0123456789abcdef0123456789a",
 ) -> str:
     """Return a minimal OCI state JSON for hook_entrypoint.main()."""
@@ -536,7 +536,7 @@ def _run_main(json_str: str, *, stage: str = "createRuntime") -> int:
             id="annotations-not-dict",
         ),
         pytest.param(
-            json.dumps({"pid": 42, "annotations": {"terok.shield.version": "4"}}),
+            json.dumps({"pid": 42, "annotations": {"terok.shield.version": "5"}}),
             id="state-dir-missing",
         ),
         pytest.param(
@@ -565,7 +565,7 @@ def test_main_returns_1_when_pid_missing_for_createruntime(tmp_path: Path) -> No
             "pid": 0,
             "annotations": {
                 "terok.shield.state_dir": str(tmp_path),
-                "terok.shield.version": "4",
+                "terok.shield.version": "5",
             },
         }
     )
@@ -667,7 +667,7 @@ def test_main_returns_1_for_relative_state_dir() -> None:
             "pid": 42,
             "annotations": {
                 "terok.shield.state_dir": "relative/path",
-                "terok.shield.version": "4",
+                "terok.shield.version": "5",
             },
         }
     )

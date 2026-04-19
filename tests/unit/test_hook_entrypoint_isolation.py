@@ -27,6 +27,7 @@ class TestHookEntrypointImportIsolation:
         ).read_text()
         tree = ast.parse(source)
         stdlib = {
+            "contextlib",
             "json",
             "os",
             "pathlib",
@@ -35,6 +36,7 @@ class TestHookEntrypointImportIsolation:
             "signal",
             "subprocess",
             "sys",
+            "time",
         }
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):

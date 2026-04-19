@@ -35,11 +35,15 @@ Bundle layout::
 
 from pathlib import Path
 
-BUNDLE_VERSION = 4
+BUNDLE_VERSION = 5
 """Integer version of the state bundle layout.
 
 Bumped whenever the file layout changes in a backwards-incompatible way.
 The OCI hook hard-fails if the annotation version does not match.
+
+Version history:
+    5 — add the optional bridge hook pair and ``reader.pid`` lifecycle file.
+    4 — previous stable shape (nft + dnsmasq only).
 """
 
 
@@ -149,6 +153,11 @@ def resolv_conf_path(state_dir: Path) -> Path:
 def container_id_path(state_dir: Path) -> Path:
     """Return the path to the persisted podman container ID file."""
     return state_dir / "container.id"
+
+
+def reader_pid_path(state_dir: Path) -> Path:
+    """Return the path where the bridge hook tracks the live NFLOG reader PID."""
+    return state_dir / "reader.pid"
 
 
 def audit_path(state_dir: Path) -> Path:
