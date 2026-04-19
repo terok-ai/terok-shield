@@ -1097,8 +1097,8 @@ class TestSetupInteractive:
         assert kwargs.get("use_sudo") is True
 
 
-def test_interactive_command_routes_to_handler(cli_dispatch: CliDispatchHarness) -> None:
-    """interactive subcommand dispatches to _handle_interactive via the registry."""
-    with mock.patch("terok_shield.cli.interactive.run_interactive") as mock_run:
-        main(["interactive", _CONTAINER])
+def test_simple_clearance_command_routes_to_handler(cli_dispatch: CliDispatchHarness) -> None:
+    """simple-clearance subcommand dispatches to the terminal fallback handler."""
+    with mock.patch("terok_shield.cli.simple_clearance.run_simple_clearance") as mock_run:
+        main(["simple-clearance", _CONTAINER])
     mock_run.assert_called_once()

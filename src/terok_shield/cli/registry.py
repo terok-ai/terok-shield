@@ -134,18 +134,11 @@ def _handle_watch(shield: Shield, container: str) -> None:
     run_watch(shield.config.state_dir, container)
 
 
-def _handle_interactive(shield: Shield, container: str, *, raw: bool = False) -> None:
-    """Start the interactive NFLOG verdict handler."""
-    from .interactive import run_interactive
+def _handle_simple_clearance(shield: Shield, container: str) -> None:
+    """Run the terminal clearance fallback for hosts without the D-Bus hub."""
+    from .simple_clearance import run_simple_clearance
 
-    run_interactive(shield.config.state_dir, container, raw=raw)
-
-
-def _handle_dbus_bridge(shield: Shield, container: str) -> None:
-    """Start D-Bus event bridge for interactive egress control."""
-    from .dbus_bridge import run_dbus_bridge
-
-    run_dbus_bridge(shield.config.state_dir, container)
+    run_simple_clearance(shield.config.state_dir, container)
 
 
 def _handle_logs(shield: Shield, container: str, *, n: int = 50) -> None:
@@ -289,22 +282,9 @@ COMMANDS: tuple[CommandDef, ...] = (
         needs_container=True,
     ),
     CommandDef(
-        name="interactive",
-        help="Start NFLOG verdict handler — rejected unknown packets presented for operator accept/deny",
-        handler=_handle_interactive,
-        needs_container=True,
-        args=(
-            ArgDef(
-                name="--raw",
-                action="store_true",
-                help="Use raw JSON-lines protocol instead of human-friendly CLI",
-            ),
-        ),
-    ),
-    CommandDef(
-        name="dbus-bridge",
-        help="Start D-Bus event bridge for interactive egress control",
-        handler=_handle_dbus_bridge,
+        name="simple-clearance",
+        help="Terminal clearance fallback — prompts operator for each blocked connection (no D-Bus)",
+        handler=_handle_simple_clearance,
         needs_container=True,
     ),
     # NOTE: CLI special-cases logs with --container optional for aggregated mode.
