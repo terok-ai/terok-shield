@@ -4,7 +4,7 @@ build-backend = "poetry_dynamic_versioning.backend"
 
 [tool.poetry]
 name = "terok-shield"
-version = "0.6.20"
+version = "0.7.0"
 description = "nftables-based egress firewalling for Podman containers"
 readme = "README.md"
 license = "Apache-2.0"
@@ -20,6 +20,10 @@ classifiers = [
 
 packages = [
   { include = "terok_shield", from = "src" },
+]
+
+include = [
+  { path = "src/terok_shield/resources/nflog_reader.py", format = ["sdist", "wheel"] },
 ]
 
 [tool.poetry.dependencies]
@@ -40,13 +44,6 @@ pre-commit = ">=4.0"
 [tool.poetry.group.test.dependencies]
 pytest = ">=9.0.3"
 pytest-cov = ">=4.0"
-
-[tool.poetry.group.dbus]
-optional = true
-
-[tool.poetry.group.dbus.dependencies]
-dbus-fast = ">=2.0"
-terok-dbus = {url = "https://github.com/terok-ai/terok-dbus/releases/download/v0.5.6/terok_dbus-0.5.6-py3-none-any.whl"}
 
 [tool.poetry.group.docs.dependencies]
 mkdocs = ">=1.5,<2"
