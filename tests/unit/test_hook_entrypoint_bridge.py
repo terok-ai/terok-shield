@@ -3,12 +3,13 @@
 
 """Unit tests for the bridge-hook dispatch in the shared OCI entrypoint.
 
-The same ``hook_entrypoint.py`` serves both hook pairs; ``argv[0]``
-selects between the nft path (``terok-shield-hook``) and the NFLOG
-reader path (``terok-shield-bridge-hook``).  These tests cover the
-bridge path end-to-end: stage dispatch, reader spawn/reap, and the
-soft-fail behaviour that keeps container starts alive when D-Bus or
-the reader resource aren't available.
+The same ``hook_entrypoint.py`` serves both hook pairs; an explicit
+``--bridge`` token in ``sys.argv`` selects the NFLOG reader path
+(``terok-shield-bridge-hook``) over the default nft path
+(``terok-shield-hook``).  These tests cover the bridge path end-to-end:
+stage dispatch, reader spawn/reap, and the soft-fail behaviour that
+keeps container starts alive when D-Bus or the reader resource aren't
+available.
 """
 
 from __future__ import annotations
@@ -45,10 +46,18 @@ def _oci_json(state_dir: str, container_id: str = _CONTAINER_ID) -> str:
 
 
 def _run_bridge(payload: str, *, stage: str) -> int:
-    """Invoke ``hook_entrypoint.main`` as if dispatched through the bridge pair."""
+    """Invoke ``hook_entrypoint.main`` as if dispatched through the bridge pair.
+
+    The kernel's shebang loader strips the exec-supplied ``argv[0]`` and
+    substitutes the script path, so the mocked ``sys.argv`` here mirrors
+    what the hook actually sees at runtime: script-path plus the
+    ``--bridge`` dispatch flag plus the stage.
+    """
     with (
         mock.patch.object(hook_entrypoint.sys, "stdin", io.StringIO(payload)),
-        mock.patch.object(hook_entrypoint.sys, "argv", ["terok-shield-bridge-hook", stage]),
+        mock.patch.object(
+            hook_entrypoint.sys, "argv", ["/opt/terok-shield-hook", "--bridge", stage]
+        ),
     ):
         return hook_entrypoint.main()
 
@@ -57,7 +66,7 @@ def _run_bridge(payload: str, *, stage: str) -> int:
 
 
 class TestBridgeDispatch:
-    """``main`` routes based on ``argv[0]`` — bridge hook runs bridge logic."""
+    """``main`` routes on ``--bridge`` in argv — bridge hook runs bridge logic."""
 
     def test_createruntime_invokes_spawn_reader(self, tmp_path: Path) -> None:
         oci = _oci_json(str(tmp_path))

@@ -33,8 +33,13 @@ class TestInstallBridgeHooks:
         for stage in ("createRuntime", "poststop"):
             assert (hooks_dir / f"terok-shield-bridge-{stage}.json").exists()
 
-    def test_bridge_json_args_signal_the_dispatch_name(self, tmp_path: Path) -> None:
-        """Bridge hooks use args[0] = 'terok-shield-bridge-hook' for dispatch."""
+    def test_bridge_json_args_carry_the_dispatch_flag(self, tmp_path: Path) -> None:
+        """Bridge hooks pass ``--bridge`` between the cosmetic argv[0] and stage.
+
+        The kernel's shebang loader discards the exec-supplied argv[0] and
+        substitutes the script path, so dispatch has to ride on a real
+        positional argument.
+        """
         hook_entrypoint = tmp_path / BIN_DIR_NAME / HOOK_ENTRYPOINT_NAME
         hooks_dir = tmp_path / HOOKS_DIR_NAME
         install_hooks(hook_entrypoint=hook_entrypoint, hooks_dir=hooks_dir)
@@ -43,8 +48,22 @@ class TestInstallBridgeHooks:
 
         json_file = hooks_dir / "terok-shield-bridge-createRuntime.json"
         descriptor = json.loads(json_file.read_text())
-        assert descriptor["hook"]["args"] == ["terok-shield-bridge-hook", "createRuntime"]
+        assert descriptor["hook"]["args"] == [
+            "terok-shield-bridge-hook",
+            "--bridge",
+            "createRuntime",
+        ]
         assert descriptor["hook"]["path"] == str(hook_entrypoint)
+
+    def test_nft_json_args_have_no_bridge_flag(self, tmp_path: Path) -> None:
+        """The nft hook JSON must NOT carry ``--bridge`` or it would misroute."""
+        hook_entrypoint = tmp_path / BIN_DIR_NAME / HOOK_ENTRYPOINT_NAME
+        hooks_dir = tmp_path / HOOKS_DIR_NAME
+        install_hooks(hook_entrypoint=hook_entrypoint, hooks_dir=hooks_dir)
+
+        descriptor = json.loads((hooks_dir / "terok-shield-createRuntime.json").read_text())
+        assert "--bridge" not in descriptor["hook"]["args"]
+        assert descriptor["hook"]["args"] == ["terok-shield-hook", "createRuntime"]
 
     def test_nft_pair_is_untouched(self, tmp_path: Path) -> None:
         """Bridge install doesn't clobber the nft hook JSON files."""

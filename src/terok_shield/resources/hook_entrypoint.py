@@ -45,12 +45,17 @@ _BUNDLE_VERSION = 5
 _TABLE = "inet terok_shield"
 
 # ── Bridge-hook dispatch ──────────────────────────────
-# Hook programs are dispatched by argv[0]: the nft + dnsmasq pair uses
-# "terok-shield-hook"; the optional bridge pair uses
-# "terok-shield-bridge-hook".  Both share this entrypoint script and are
-# installed (or not) independently by `terok setup [--no-dbus-bridge]`.
-_HOOK_NAME_NFT = "terok-shield-hook"
-_HOOK_NAME_BRIDGE = "terok-shield-bridge-hook"
+# Dispatch between the nft + dnsmasq pair and the optional bridge pair
+# happens via an explicit ``--bridge`` token in the hook JSON ``args``
+# (``args[1]`` in the JSON, ``sys.argv[1]`` after shebang rewriting).
+# WORKAROUND(shebang-argv0-stripped): the kernel's shebang loader
+# (``fs/binfmt_script.c``) substitutes the original ``argv[0]`` with the
+# script path before ``env`` re-execs Python — so ``args[0]`` from the
+# hook JSON (the conventional program name) is *not* visible to the
+# entrypoint.  Dispatching by ``sys.argv[0].name`` would route both hook
+# kinds to the same branch.  Remove the workaround if the entrypoint is
+# ever compiled to a real binary (shebangs no longer apply).
+_BRIDGE_DISPATCH_FLAG = "--bridge"
 
 # SIGTERM→SIGKILL grace: how long to wait for the reader to exit cleanly
 # after poststop sends SIGTERM.  10 × 0.2s poll intervals = 2s total.
@@ -69,10 +74,9 @@ _REAP_POLL_TICKS = 10
 
 
 def main() -> int:
-    """OCI hook entry point: dispatch by program name and stage."""
+    """OCI hook entry point: dispatch by explicit role flag and stage."""
     _bootstrap_env()
-    hook_name = Path(sys.argv[0]).name if sys.argv else _HOOK_NAME_NFT
-    stage = sys.argv[1] if len(sys.argv) > 1 else "createRuntime"
+    is_bridge, stage = _parse_dispatch(sys.argv[1:])
     try:
         oci = json.load(sys.stdin)
     except ValueError as exc:
@@ -88,12 +92,20 @@ def main() -> int:
     log_path = sd / "hook-error.log"
 
     try:
-        if hook_name == _HOOK_NAME_BRIDGE:
+        if is_bridge:
             return _bridge_main(oci, sd, stage, log_path)
         return _nft_main(oci, sd, stage, log_path)
     except Exception as exc:  # noqa: BLE001
         _log(f"terok-shield hook: {exc}", log_path)
         return 1
+
+
+def _parse_dispatch(argv_tail: list[str]) -> tuple[bool, str]:
+    """Split the post-script argv into a bridge-flag and a stage name."""
+    is_bridge = bool(argv_tail) and argv_tail[0] == _BRIDGE_DISPATCH_FLAG
+    remaining = argv_tail[1:] if is_bridge else argv_tail
+    stage = remaining[0] if remaining else "createRuntime"
+    return is_bridge, stage
 
 
 def _nft_main(oci: dict, sd: Path, stage: str, log_path: Path) -> int:
@@ -233,6 +245,13 @@ def _start_container_dnsmasq(pid: str, sd: Path) -> None:
         return
 
     pid_file = sd / "dnsmasq.pid"
+    # Idempotent: if a dnsmasq is already running against our conf (because the
+    # hook fired twice — restart, re-dispatch, sibling hook re-entry, etc.),
+    # don't try to bind port 53 again.  Verifying pid + conf-arg avoids hitting
+    # an unrelated process that happens to hold the recycled PID.
+    if _our_dnsmasq_alive(pid_file, dnsmasq_conf):
+        return
+
     # Remove stale PID file so the post-launch check is not fooled
     # by a leftover from a previous run (mirrors dnsmasq.launch()).
     try:
@@ -439,6 +458,15 @@ def _nsenter(pid: str, *cmd: str, stdin: str | None = None) -> None:
 
 
 # ── Process identity ───────────────────────────────────
+
+
+def _our_dnsmasq_alive(pid_file: Path, conf_path: Path) -> bool:
+    """Return True when ``pid_file`` names a live dnsmasq using ``conf_path``."""
+    try:
+        pid_int = int(pid_file.read_text().strip())
+    except (OSError, ValueError):
+        return False
+    return _is_our_dnsmasq(pid_int, conf_path)
 
 
 def _is_our_dnsmasq(pid_int: int, conf_path: Path) -> bool:
