@@ -351,17 +351,37 @@ def _spawn_reader(sd: Path, container_id: str) -> None:
     finally:
         # Popen dup'd the fd; the parent's copy is safe to close.
         err_fh.close()
-    pid_file.write_text(f"{proc.pid}\n")
+    # Guard the pid-file write so a state-dir ENOSPC / EPERM doesn't escape
+    # as an exception that fails container start — bridge is opt-out; soft-
+    # fail everywhere.  If the write fails after the child already started,
+    # stop it ourselves so we don't leak a reader nobody tracks.
+    try:
+        pid_file.write_text(f"{proc.pid}\n")
+    except OSError as exc:
+        _log(f"terok-shield bridge hook: failed to write reader.pid: {exc}")
+        with contextlib.suppress(ProcessLookupError, OSError):
+            os.kill(proc.pid, signal.SIGTERM)
 
 
 def _reap_reader(sd: Path) -> None:
-    """SIGTERM the NFLOG reader at poststop, SIGKILL if it lingers past 2 s."""
+    """SIGTERM the NFLOG reader at poststop, SIGKILL if it lingers past 2 s.
+
+    Validates the PID against the expected reader cmdline before sending
+    signals — mirrors the ``_is_our_dnsmasq`` pattern elsewhere in this
+    file.  A recycled / stale PID with the same number would otherwise get
+    SIGTERMed here, potentially killing an unrelated user process.  If the
+    PID doesn't match we unlink ``reader.pid`` and return quietly: nothing
+    to reap.
+    """
     pid_file = sd / "reader.pid"
     if not pid_file.exists():
         return
     try:
         pid = int(pid_file.read_text().strip())
     except (OSError, ValueError):
+        pid_file.unlink(missing_ok=True)
+        return
+    if not _is_our_reader(pid, sd):
         pid_file.unlink(missing_ok=True)
         return
     try:
@@ -385,12 +405,45 @@ def _reap_reader(sd: Path) -> None:
 
 
 def _reader_alive(pid_file: Path) -> bool:
-    """Return True when ``reader.pid`` names a live process."""
+    """Return True only when ``reader.pid`` names a *live reader* process.
+
+    Existence of the PID isn't enough — a recycled PID number would fool a
+    pure ``_pid_exists`` check, and we'd skip spawning a fresh reader while
+    that unrelated process happily runs.  Use the cmdline identity guard.
+    """
     try:
         pid = int(pid_file.read_text().strip())
     except (OSError, ValueError):
         return False
-    return _pid_exists(pid)
+    if not _pid_exists(pid):
+        return False
+    return _is_our_reader(pid, pid_file.parent)
+
+
+def _is_our_reader(pid_int: int, sd: Path) -> bool:
+    """Return True if ``pid_int`` is the NFLOG reader we spawned for ``sd``.
+
+    Reads ``/proc/{pid}/cmdline`` and compares to the invocation shape from
+    ``_spawn_reader``.  Two signatures are accepted:
+
+    * the outer Popen shape — ``python3 <reader.py> <sd> <container> --emit=socket``
+    * the nsenter-exec'd self we produce when the reader re-enters its own
+      namespaces (argv mutated but sd still encoded in an arg)
+
+    Missing / unreadable cmdline maps to ``False``.  Lenient on argv[0]
+    (accept any python binary path) to tolerate different distros and
+    venv layouts.
+    """
+    try:
+        raw = Path(f"/proc/{pid_int}/cmdline").read_bytes()
+    except OSError:
+        return False
+    args = raw.rstrip(b"\x00").split(b"\x00")
+    if len(args) < 4:
+        return False
+    script_bytes = str(_reader_script_path()).encode()
+    sd_bytes = str(sd).encode()
+    return args[0].endswith(b"python3") and args[1] == script_bytes and sd_bytes in args[2:]
 
 
 def _pid_exists(pid: int) -> bool:
@@ -412,11 +465,16 @@ def _reader_script_path() -> Path:
 
 
 def _session_bus_address() -> str | None:
-    """Locate the operator's D-Bus session bus, or return ``None`` for headless."""
+    """Locate the operator's D-Bus session bus, or return ``None`` for headless.
+
+    Probes the *host* UID's runtime dir rather than the namespaced ``os.getuid()``:
+    the hook runs in ``NS_ROOTLESS`` where our UID is 0 but the real session
+    bus lives at ``/run/user/<host-uid>/bus``.
+    """
     addr = os.environ.get("DBUS_SESSION_BUS_ADDRESS")
     if addr:
         return addr
-    uid = os.getuid()
+    uid = _outer_host_uid()
     path = Path(f"/run/user/{uid}/bus")
     if path.exists():
         return f"unix:path={path}"
@@ -513,10 +571,17 @@ def _bootstrap_env() -> None:
     ``/etc/subuid``, ``~/.config/containers/``, and the rootless podman socket
     via these variables.  Without them it exits 1 silently.
 
+    Under rootless podman, the hook runs inside ``NS_ROOTLESS`` — ``os.getuid()``
+    is ``0`` (mapped from the invoking operator's host UID), so naively
+    resolving resources as if that were actually root points at ``/root`` /
+    ``/run/user/0`` instead of the operator's real home / session.
+    ``_outer_host_uid()`` parses ``/proc/self/uid_map`` to recover the host UID
+    and the resolution uses that throughout.
+
     Only sets variables that are absent; never overrides values the runtime did
     pass through.
     """
-    uid = os.getuid()
+    uid = _outer_host_uid()
 
     if not os.environ.get("HOME"):
         try:
@@ -530,6 +595,38 @@ def _bootstrap_env() -> None:
 
     if not os.environ.get("PATH"):
         os.environ["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+
+def _outer_host_uid() -> int:
+    """Return the invoking operator's host UID, even from inside ``NS_ROOTLESS``.
+
+    Parses ``/proc/self/uid_map`` to find the outer-side UID that the current
+    in-namespace UID maps to.  Each map line has the shape
+    ``<inner_start> <outer_start> <length>`` — we pick the mapping whose inner
+    range covers ``os.getuid()`` and project through it.
+
+    Falls back to ``os.getuid()`` on any parse trouble (init userns, no
+    uid_map, unreadable, unexpected format) — that path is valid for non-
+    rootless contexts where there's no userns layer to see through.
+    """
+    my_uid = os.getuid()
+    try:
+        raw = Path("/proc/self/uid_map").read_text()
+    except OSError:
+        return my_uid
+    for line in raw.splitlines():
+        parts = line.split()
+        if len(parts) != 3:
+            continue
+        try:
+            inner_start = int(parts[0])
+            outer_start = int(parts[1])
+            length = int(parts[2])
+        except ValueError:
+            continue
+        if inner_start <= my_uid < inner_start + length:
+            return outer_start + (my_uid - inner_start)
+    return my_uid
 
 
 # ── Binary finders ─────────────────────────────────────

@@ -68,7 +68,7 @@ def test_bootstrap_env_sets_missing_var(
     with (
         mock.patch.dict("os.environ", env, clear=True),
         mock.patch("terok_shield.resources.hook_entrypoint.pwd.getpwuid", return_value=fake_entry),
-        mock.patch("terok_shield.resources.hook_entrypoint.os.getuid", return_value=1000),
+        mock.patch("terok_shield.resources.hook_entrypoint._outer_host_uid", return_value=1000),
     ):
         hook_entrypoint._bootstrap_env()
         if expected_key == "PATH":
@@ -99,7 +99,9 @@ def test_bootstrap_env_falls_back_when_getpwuid_raises() -> None:
             "terok_shield.resources.hook_entrypoint.pwd.getpwuid",
             side_effect=KeyError("uid not found"),
         ):
-            with mock.patch("terok_shield.resources.hook_entrypoint.os.getuid", return_value=1234):
+            with mock.patch(
+                "terok_shield.resources.hook_entrypoint._outer_host_uid", return_value=1234
+            ):
                 hook_entrypoint._bootstrap_env()
         assert os.environ["HOME"] == "/home/1234"
 

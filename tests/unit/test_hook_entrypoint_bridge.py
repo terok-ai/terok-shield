@@ -125,7 +125,7 @@ class TestSessionBusAddress:
         fake_bus = tmp_path / "bus"
         fake_bus.touch()
         with (
-            mock.patch.object(hook_entrypoint.os, "getuid", return_value=1000),
+            mock.patch.object(hook_entrypoint, "_outer_host_uid", return_value=1000),
             mock.patch.object(
                 hook_entrypoint.Path,
                 "exists",
@@ -138,7 +138,7 @@ class TestSessionBusAddress:
     def test_returns_none_when_unreachable(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("DBUS_SESSION_BUS_ADDRESS", raising=False)
         with (
-            mock.patch.object(hook_entrypoint.os, "getuid", return_value=1000),
+            mock.patch.object(hook_entrypoint, "_outer_host_uid", return_value=1000),
             mock.patch.object(hook_entrypoint.Path, "exists", lambda _self: False),
         ):
             assert hook_entrypoint._session_bus_address() is None
@@ -205,12 +205,41 @@ class TestSpawnReader:
             mock.patch.object(
                 hook_entrypoint, "_session_bus_address", return_value="unix:path=/run/user/1000/bus"
             ),
+            # Both arms of the liveness check need to agree — the PID exists
+            # AND its cmdline identifies it as our reader.  Historical tests
+            # only mocked _pid_exists, which no longer suffices now that
+            # _reader_alive cross-checks with _is_our_reader.
             mock.patch.object(hook_entrypoint, "_pid_exists", return_value=True),
+            mock.patch.object(hook_entrypoint, "_is_our_reader", return_value=True),
             mock.patch.object(hook_entrypoint.subprocess, "Popen") as popen,
         ):
             hook_entrypoint._spawn_reader(tmp_path, _SHORT_ID)
         popen.assert_not_called()
         assert pid_file.read_text().strip() == "99999"
+
+    def test_stale_pid_file_does_not_block_respawn(self, tmp_path: Path) -> None:
+        """A reader.pid left behind by a crashed reader must not skip spawning.
+
+        The fix for the PID-recycle case: if _pid_exists returns True but
+        _is_our_reader says no (the PID belongs to an unrelated process),
+        treat it as no-reader and spawn fresh.
+        """
+        reader = tmp_path / "reader.py"
+        reader.touch()
+        (tmp_path / "reader.pid").write_text("99999\n")
+        fake_proc = mock.MagicMock(pid=4321)
+        with (
+            mock.patch.object(hook_entrypoint, "_reader_script_path", return_value=reader),
+            mock.patch.object(
+                hook_entrypoint, "_session_bus_address", return_value="unix:path=/run/user/1000/bus"
+            ),
+            mock.patch.object(hook_entrypoint, "_pid_exists", return_value=True),
+            mock.patch.object(hook_entrypoint, "_is_our_reader", return_value=False),
+            mock.patch.object(hook_entrypoint.subprocess, "Popen", return_value=fake_proc) as popen,
+        ):
+            hook_entrypoint._spawn_reader(tmp_path, _SHORT_ID)
+        popen.assert_called_once()
+        assert (tmp_path / "reader.pid").read_text().strip() == "4321"
 
     def test_popen_failure_is_soft_fail(self, tmp_path: Path) -> None:
         reader = tmp_path / "reader.py"
@@ -243,6 +272,7 @@ class TestReapReader:
         # First poll sees the process gone → no SIGKILL.
         with (
             mock.patch.object(hook_entrypoint.os, "kill") as kill,
+            mock.patch.object(hook_entrypoint, "_is_our_reader", return_value=True),
             mock.patch.object(hook_entrypoint, "_pid_exists", return_value=False),
             mock.patch.object(hook_entrypoint.time, "sleep"),
         ):
@@ -255,6 +285,7 @@ class TestReapReader:
         pid_file.write_text("12345\n")
         with (
             mock.patch.object(hook_entrypoint.os, "kill") as kill,
+            mock.patch.object(hook_entrypoint, "_is_our_reader", return_value=True),
             mock.patch.object(hook_entrypoint, "_pid_exists", return_value=True),
             mock.patch.object(hook_entrypoint.time, "sleep"),
         ):
@@ -266,7 +297,10 @@ class TestReapReader:
     def test_already_gone_process_is_handled(self, tmp_path: Path) -> None:
         pid_file = tmp_path / "reader.pid"
         pid_file.write_text("12345\n")
-        with mock.patch.object(hook_entrypoint.os, "kill", side_effect=ProcessLookupError):
+        with (
+            mock.patch.object(hook_entrypoint, "_is_our_reader", return_value=True),
+            mock.patch.object(hook_entrypoint.os, "kill", side_effect=ProcessLookupError),
+        ):
             hook_entrypoint._reap_reader(tmp_path)
         assert not pid_file.exists()
 
@@ -277,3 +311,99 @@ class TestReapReader:
             hook_entrypoint._reap_reader(tmp_path)
         kill.assert_not_called()
         assert not pid_file.exists()
+
+    def test_stale_pid_belonging_to_other_process_is_skipped(self, tmp_path: Path) -> None:
+        """If reader.pid names a process that isn't ours, don't signal it."""
+        pid_file = tmp_path / "reader.pid"
+        pid_file.write_text("12345\n")
+        with (
+            mock.patch.object(hook_entrypoint, "_is_our_reader", return_value=False),
+            mock.patch.object(hook_entrypoint.os, "kill") as kill,
+        ):
+            hook_entrypoint._reap_reader(tmp_path)
+        kill.assert_not_called()
+        assert not pid_file.exists()
+
+
+class TestIsOurReader:
+    """``_is_our_reader`` matches the spawn argv we actually produce."""
+
+    def test_matching_cmdline_returns_true(self, tmp_path: Path) -> None:
+        reader = tmp_path / "share" / "nflog-reader.py"
+        cmdline = (
+            b"/usr/bin/python3\x00"
+            + str(reader).encode()
+            + b"\x00"
+            + str(tmp_path).encode()
+            + b"\x00cccccccccccc\x00--emit=socket\x00"
+        )
+        with (
+            mock.patch.object(hook_entrypoint, "_reader_script_path", return_value=reader),
+            mock.patch.object(hook_entrypoint.Path, "read_bytes", return_value=cmdline),
+        ):
+            assert hook_entrypoint._is_our_reader(4321, tmp_path) is True
+
+    def test_wrong_script_returns_false(self, tmp_path: Path) -> None:
+        reader = tmp_path / "expected.py"
+        cmdline = (
+            b"/usr/bin/python3\x00/other/script.py\x00" + str(tmp_path).encode() + b"\x00x\x00"
+        )
+        with (
+            mock.patch.object(hook_entrypoint, "_reader_script_path", return_value=reader),
+            mock.patch.object(hook_entrypoint.Path, "read_bytes", return_value=cmdline),
+        ):
+            assert hook_entrypoint._is_our_reader(4321, tmp_path) is False
+
+    def test_wrong_state_dir_returns_false(self, tmp_path: Path) -> None:
+        reader = tmp_path / "reader.py"
+        cmdline = b"/usr/bin/python3\x00" + str(reader).encode() + b"\x00/other/state\x00x\x00y\x00"
+        with (
+            mock.patch.object(hook_entrypoint, "_reader_script_path", return_value=reader),
+            mock.patch.object(hook_entrypoint.Path, "read_bytes", return_value=cmdline),
+        ):
+            assert hook_entrypoint._is_our_reader(4321, tmp_path) is False
+
+    def test_missing_cmdline_returns_false(self, tmp_path: Path) -> None:
+        with mock.patch.object(
+            hook_entrypoint.Path, "read_bytes", side_effect=OSError("no such file")
+        ):
+            assert hook_entrypoint._is_our_reader(4321, tmp_path) is False
+
+
+class TestOuterHostUid:
+    """``_outer_host_uid`` projects the current uid through /proc/self/uid_map."""
+
+    def test_identity_mapping_returns_same_uid(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Init userns has an identity map; projection is a no-op."""
+        monkeypatch.setattr(hook_entrypoint.os, "getuid", lambda: 1000)
+        with mock.patch.object(
+            hook_entrypoint.Path,
+            "read_text",
+            return_value="         0          0 4294967295\n",
+        ):
+            assert hook_entrypoint._outer_host_uid() == 1000
+
+    def test_rootless_zero_to_host_uid(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """NS_ROOTLESS: in-ns uid 0 maps to outer host uid (typically 1000)."""
+        monkeypatch.setattr(hook_entrypoint.os, "getuid", lambda: 0)
+        with mock.patch.object(
+            hook_entrypoint.Path,
+            "read_text",
+            return_value="         0       1000          1\n         1     100000      65536\n",
+        ):
+            assert hook_entrypoint._outer_host_uid() == 1000
+
+    def test_uid_outside_range_falls_through(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """uid not covered by any mapping line falls back to os.getuid()."""
+        monkeypatch.setattr(hook_entrypoint.os, "getuid", lambda: 500)
+        with mock.patch.object(
+            hook_entrypoint.Path, "read_text", return_value="         0       1000          1\n"
+        ):
+            assert hook_entrypoint._outer_host_uid() == 500
+
+    def test_unreadable_uid_map_falls_back(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(hook_entrypoint.os, "getuid", lambda: 777)
+        with mock.patch.object(
+            hook_entrypoint.Path, "read_text", side_effect=OSError("no such file")
+        ):
+            assert hook_entrypoint._outer_host_uid() == 777
