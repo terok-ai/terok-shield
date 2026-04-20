@@ -57,7 +57,7 @@ def resolve_state_dir(container: str) -> Path | None:
     """
     podman = shutil.which("podman")
     if not podman:
-        _log.debug("podman not on PATH — cannot resolve state_dir for %s", container)
+        _log.warning("podman not on PATH — cannot resolve state_dir for %s", container)
         return None
     try:
         result = subprocess.run(  # nosec B603
@@ -68,10 +68,15 @@ def resolve_state_dir(container: str) -> Path | None:
             timeout=_INSPECT_TIMEOUT_S,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
-        _log.debug("podman inspect failed for %s: %s", container, exc)
+        _log.warning("podman inspect failed for %s: %s", container, exc)
         return None
     if result.returncode != 0:
-        _log.debug(
+        # Warn — every failure here translates into a verdict that silently
+        # fails downstream.  Operators hitting this need to know *why*
+        # podman couldn't speak to its own state (sandbox / hardening
+        # interaction, stale pause process, missing socket, etc.) rather
+        # than just "no annotation".
+        _log.warning(
             "podman inspect %s returned %d: %s",
             container,
             result.returncode,
@@ -81,7 +86,7 @@ def resolve_state_dir(container: str) -> Path | None:
     try:
         records = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
-        _log.debug("podman inspect %s returned malformed JSON: %s", container, exc)
+        _log.warning("podman inspect %s returned malformed JSON: %s", container, exc)
         return None
     return _extract_state_dir(records)
 
