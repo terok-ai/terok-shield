@@ -39,7 +39,7 @@ def _oci_json(state_dir: str, container_id: str = _CONTAINER_ID) -> str:
             "pid": 42,
             "annotations": {
                 "terok.shield.state_dir": state_dir,
-                "terok.shield.version": "7",
+                "terok.shield.version": "8",
             },
         }
     )
@@ -100,7 +100,7 @@ class TestBridgeDispatch:
                 "pid": 42,
                 "annotations": {
                     "terok.shield.state_dir": str(tmp_path),
-                    "terok.shield.version": "7",
+                    "terok.shield.version": "8",
                 },
             }
         )
@@ -190,7 +190,7 @@ class TestSpawnReader:
         assert cmd[:2] == ["/usr/bin/python3", str(reader)]
         assert str(tmp_path) in cmd
         assert _SHORT_ID in cmd
-        assert "--emit=dbus" in cmd
+        assert "--emit=socket" in cmd
         env = popen.call_args[1]["env"]
         assert env["DBUS_SESSION_BUS_ADDRESS"] == "unix:path=/run/user/1000/bus"
         assert popen.call_args[1]["start_new_session"] is True

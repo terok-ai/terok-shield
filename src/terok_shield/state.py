@@ -35,7 +35,7 @@ Bundle layout::
 
 from pathlib import Path
 
-BUNDLE_VERSION = 7
+BUNDLE_VERSION = 8
 """Integer version of the state bundle layout.
 
 Bumped whenever the file layout changes in a backwards-incompatible way.
@@ -46,6 +46,9 @@ changes even if the file layout itself is unchanged, so that
 ``terok setup`` rewrites the script instead of short-circuiting.
 
 Version history:
+    8 — reader emits JSON over a unix socket to the host-userns hub
+        (``--emit=socket``) instead of ``dbus-send`` from NS_ROOTLESS;
+        hook spawn line and reader script both need refreshing.
     7 — bridge hook captures reader stdout+stderr into ``reader.log``
         under the state dir; reader splits into host-userns outer and
         container-netns inner.  File layout adds ``reader.log``.

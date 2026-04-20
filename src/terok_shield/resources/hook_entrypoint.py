@@ -41,7 +41,7 @@ from pathlib import Path
 #   "reader.pid"     ↔  state.reader_pid_path()
 _ANN_STATE_DIR = "terok.shield.state_dir"
 _ANN_VERSION = "terok.shield.version"
-_BUNDLE_VERSION = 7
+_BUNDLE_VERSION = 8
 _TABLE = "inet terok_shield"
 
 # ── Bridge-hook dispatch ──────────────────────────────
@@ -336,7 +336,7 @@ def _spawn_reader(sd: Path, container_id: str) -> None:
         return
     try:
         proc = subprocess.Popen(  # nosec B603
-            ["/usr/bin/python3", str(reader), str(sd), container_id, "--emit=dbus"],
+            ["/usr/bin/python3", str(reader), str(sd), container_id, "--emit=socket"],
             env=env,
             stdin=subprocess.DEVNULL,
             stdout=err_fh,

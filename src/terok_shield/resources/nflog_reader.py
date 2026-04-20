@@ -6,10 +6,19 @@
 
 Subscribes to the kernel's NFLOG group inside a single container's network
 namespace, deduplicates by destination IP, and publishes each unique block as
-an event — either as an ``org.terok.Shield1.ConnectionBlocked`` D-Bus signal
-(for the host-side clearance hub) or as a JSON line on stdout (for the
-terminal fallback).  Emits ``ContainerStarted`` / ``ContainerExited`` around
-its own lifetime so consumers see the container's arrival and departure.
+an event.  Events always travel as JSON; the reader itself never speaks
+D-Bus.  Two destinations are supported:
+
+* ``--emit=socket`` (default): write events to a unix socket served by the
+  ``terok-dbus`` hub.  The hub lives in the *host* user namespace, where
+  it can emit the matching ``org.terok.Shield1`` signals onto the session
+  bus.  The reader itself is stuck inside ``NS_ROOTLESS`` (that's where
+  the container netns lives) and the session ``dbus-daemon`` rejects its
+  ``SO_PEERCRED`` check — so the reader can't emit D-Bus directly.
+
+* ``--emit=json``: write events as JSON lines on stdout.  Drives the
+  ``terok-shield simple-clearance`` terminal fallback, which runs in the
+  operator's own userns and parses the stream directly.
 
 The OCI bridge hook spawns one reader per shielded container at
 ``createRuntime`` and SIGTERMs it at ``poststop`` — the process tree is what
@@ -47,10 +56,6 @@ _log = logging.getLogger("terok-shield.nflog-reader")
 #                           interactive deny rule
 NFLOG_GROUP = 100
 _BLOCKED_PREFIX_TAG = "BLOCKED"
-
-_SHIELD_BUS_NAME = "org.terok.Shield1"
-_SHIELD_OBJECT_PATH = "/org/terok/Shield1"
-_SHIELD_INTERFACE = "org.terok.Shield1"
 
 # ── nsenter handshake ─────────────────────────────────────────────────
 # Re-exec sets this so the second invocation knows it's already inside
@@ -94,36 +99,44 @@ class BlockedEvent:
 
 
 def main() -> None:
-    """Two-stage entry: outer bridges, inner reads NFLOG inside the container netns.
+    """Parse arguments, cross into the container netns if needed, and run the loop.
 
-    The reader can't do everything in one process because the two things it
-    needs — NFLOG delivery and a live D-Bus session — sit in incompatible
-    namespaces.  NFLOG is per-netns, so the socket bind has to happen inside
-    the container's netns, which on rootless podman means going through
-    ``podman unshare`` into ``NS_ROOTLESS``.  But the user's session
-    ``dbus-daemon`` lives in the host user namespace, and its SO_PEERCRED
-    auth rejects connections originating from ``NS_ROOTLESS``.
-
-    So the process splits: the outer (re-entered with ``_NSENTER_ENV`` unset,
-    still in the host userns) spawns the inner via ``podman unshare nsenter``
-    and bridges its JSON stream.  The inner (re-entered with
-    ``_NSENTER_ENV=1``, inside the container netns) only does NFLOG → JSON —
-    it never touches D-Bus itself.
+    On first entry (``_TEROK_SHIELD_NFLOG_NSENTER`` unset) this process re-execs
+    itself under ``nsenter`` — with ``podman unshare`` prepended when we're not
+    already in ``NS_ROOTLESS`` — so the NFLOG bind happens in the container's
+    netns.  The re-exec carries the same ``--emit`` choice forward, so the
+    destination (unix socket or stdout JSON) stays whatever the caller picked.
     """
     args = _parse_args()
     logging.basicConfig(level=logging.INFO, format="nflog-reader: %(message)s")
 
     if os.environ.get(_NSENTER_ENV) != "1":
-        _run_outer(args.state_dir, args.container, args.emit)
+        _reexec_inside_container_netns(args.state_dir, args.container, args.emit)
         return
 
-    # Inner: NFLOG → JSON.  Ignore --emit; we never emit D-Bus from in here.
+    emitter = _select_emitter(args.emit)
     session = ReaderSession(
         state_dir=args.state_dir,
         container=args.container,
-        emitter=JsonEmitter(),
+        emitter=emitter,
     )
-    session.run()
+    try:
+        session.run()
+    finally:
+        emitter.close()
+
+
+def _select_emitter(mode: str) -> EventEmitter:
+    """Pick the emitter matching ``--emit`` — socket by default, JSON for the CLI."""
+    if mode == "json":
+        return JsonEmitter()
+    return SocketEmitter(_events_socket_path())
+
+
+def _events_socket_path() -> Path:
+    """Return the canonical hub-ingester socket path (mirrors ``terok_dbus``)."""
+    xdg = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+    return Path(xdg) / "terok-shield-events.sock"
 
 
 # ── Session ───────────────────────────────────────────────────────────
@@ -216,7 +229,7 @@ class ReaderSession:
 
 
 class EventEmitter(Protocol):
-    """The two publishing channels a reader can speak — D-Bus or JSON stdout."""
+    """The two publishing channels a reader can speak — hub socket or JSON stdout."""
 
     def container_started(self, container: str) -> None:
         """Publish a ``ContainerStarted`` lifecycle event."""
@@ -230,51 +243,89 @@ class EventEmitter(Protocol):
         """Publish one unique-destination block event."""
         ...
 
+    def close(self) -> None:
+        """Release any held resources (sockets, file handles); no-op when stateless."""
+        ...
 
-class DbusEmitter:
-    """Publish ephemeral D-Bus signals on ``org.terok.Shield1`` via ``dbus-send``.
 
-    Ownership of the well-known name lives with the host-side clearance hub;
-    this emitter is just a sender — any process can emit signals on an
-    interface without claiming its bus name.
+class SocketEmitter:
+    """Stream JSON events to the hub's unix-socket ingester.
+
+    The hub owns the D-Bus bus name in host userns and re-emits the signals
+    we feed it.  We only have the socket file to cross the userns boundary:
+    ``dbus-send --session`` from ``NS_ROOTLESS`` is rejected by the session
+    ``dbus-daemon``'s ``SO_PEERCRED`` check, but a plain AF_UNIX stream to
+    the same user's runtime dir still works fine.
+
+    Reconnect-on-failure lazily, so a hub restart doesn't kill the reader.
+    A persistent missing hub is logged once and then silently swallowed —
+    the NFLOG reader stays useful (counter, audit log) even when no hub is
+    up to receive the events.
     """
 
+    def __init__(self, path: Path) -> None:
+        """Remember the socket path but don't connect until the first send."""
+        self._path = path
+        self._sock: socket.socket | None = None
+        self._warned_unreachable = False
+
     def container_started(self, container: str) -> None:
-        """Send a ``ContainerStarted`` signal on the session bus."""
-        self._send("ContainerStarted", _dbus_str(container))
+        """Queue a ``container_started`` JSON event onto the hub socket."""
+        self._send({"type": "container_started", "container": container})
 
     def container_exited(self, container: str, *, reason: str) -> None:
-        """Send a ``ContainerExited`` signal on the session bus."""
-        self._send("ContainerExited", _dbus_str(container), _dbus_str(reason))
+        """Queue a ``container_exited`` JSON event onto the hub socket."""
+        self._send({"type": "container_exited", "container": container, "reason": reason})
 
     def connection_blocked(self, event: BlockedEvent) -> None:
-        """Send a ``ConnectionBlocked`` signal carrying the full event payload."""
+        """Queue a ``pending`` JSON event (block) onto the hub socket."""
         self._send(
-            "ConnectionBlocked",
-            _dbus_str(event.container),
-            _dbus_str(event.request_id),
-            _dbus_str(event.dest),
-            f"uint32:{event.port}",
-            f"uint32:{event.proto}",
-            _dbus_str(event.domain),
+            {
+                "type": "pending",
+                "container": event.container,
+                "id": event.request_id,
+                "dest": event.dest,
+                "port": event.port,
+                "proto": event.proto,
+                "domain": event.domain,
+                "ts": datetime.now(UTC).isoformat(),
+            }
         )
 
-    def _send(self, member: str, *args: str) -> None:
-        """Invoke ``dbus-send`` for one signal; log & continue on any failure."""
-        cmd = [
-            "dbus-send",
-            "--session",
-            "--type=signal",
-            _SHIELD_OBJECT_PATH,
-            f"{_SHIELD_INTERFACE}.{member}",
-            *args,
-        ]
+    def close(self) -> None:
+        """Disconnect from the hub socket if we're currently connected."""
+        if self._sock is not None:
+            with contextlib.suppress(OSError):
+                self._sock.close()
+            self._sock = None
+
+    def _ensure_connected(self) -> bool:
+        """Lazily connect; return True on success, False when the hub is absent."""
+        if self._sock is not None:
+            return True
         try:
-            subprocess.run(cmd, check=False, capture_output=True)  # noqa: S603
-        except FileNotFoundError:
-            _log.warning("dbus-send missing — signal %s dropped", member)
-        except OSError as exc:
-            _log.warning("dbus-send failed for %s: %s", member, exc)
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.connect(str(self._path))
+        except (OSError, ConnectionError):
+            if not self._warned_unreachable:
+                _log.warning("hub event socket unreachable at %s", self._path)
+                self._warned_unreachable = True
+            return False
+        self._sock = sock
+        self._warned_unreachable = False
+        return True
+
+    def _send(self, payload: dict) -> None:
+        """Serialise *payload* to a JSON line and push it to the hub socket."""
+        if not self._ensure_connected():
+            return
+        line = (json.dumps(payload, separators=(",", ":")) + "\n").encode()
+        assert self._sock is not None
+        try:
+            self._sock.sendall(line)
+        except (OSError, ConnectionError) as exc:
+            _log.warning("hub event socket send failed: %s", exc)
+            self.close()
 
 
 class JsonEmitter:
@@ -302,6 +353,9 @@ class JsonEmitter:
                 "ts": datetime.now(UTC).isoformat(),
             }
         )
+
+    def close(self) -> None:
+        """No-op — the JSON emitter holds no external state."""
 
 
 # ── NFLOG socket / parsing ────────────────────────────────────────────
@@ -477,94 +531,37 @@ class _DomainCache:
         }
 
 
-# ── Outer: spawn inner, bridge its events to the target channel ─────
+# ── nsenter re-exec ───────────────────────────────────────────────────
 
 
-def _run_outer(state_dir: Path, container: str, emit: str) -> None:
-    """Host-userns half: spawn the inner reader and forward its JSON events.
+def _reexec_inside_container_netns(state_dir: Path, container: str, emit: str) -> None:
+    """Re-enter this script inside the container's netns so NFLOG is reachable.
 
-    When *emit* is ``"dbus"``, parses each JSON line as it arrives and calls
-    ``dbus-send`` from here — where ``SO_PEERCRED`` against the session
-    dbus-daemon still succeeds.  When *emit* is ``"json"`` (fallback CLI),
-    the inner's stdout is passed straight through to our own stdout.
+    When we're already in ``NS_ROOTLESS`` (uid 0 inside the rootless userns
+    — the normal hook execution context), plain ``nsenter -n`` is enough.
+    When we're in the initial userns (a manual CLI run), prepend
+    ``podman unshare`` to cross into ``NS_ROOTLESS`` first and pick up
+    ``CAP_SYS_ADMIN`` over the container-owning userns.
     """
     pid = _podman_container_pid(container)
     script = Path(__file__).resolve()
-    cmd = [
-        "podman",
-        "unshare",
-        "nsenter",
-        "-t",
-        pid,
-        "-n",
+    tail = [
         "/usr/bin/python3",
         str(script),
         str(state_dir),
         container,
-        "--emit=json",  # inner always emits JSON; outer wraps if needed
+        f"--emit={emit}",
     ]
+    cmd = (
+        ["nsenter", "-t", pid, "-n", *tail]
+        if os.geteuid() == 0
+        else ["podman", "unshare", "nsenter", "-t", pid, "-n", *tail]
+    )
     env = {**os.environ, _NSENTER_ENV: "1"}
-
-    stdout = subprocess.PIPE if emit == "dbus" else None
-    proc = subprocess.Popen(cmd, env=env, stdout=stdout, text=True, bufsize=1)  # noqa: S603
-
-    # Forward SIGTERM/SIGINT to the inner so poststop → reader.pid → SIGTERM
-    # tears the whole pipeline down together.
-    def _on_stop(_signum: int, _frame: object) -> None:
-        with contextlib.suppress(ProcessLookupError):
-            proc.terminate()
-
-    signal.signal(signal.SIGTERM, _on_stop)
-    signal.signal(signal.SIGINT, _on_stop)
-
     try:
-        if emit == "dbus":
-            _bridge_json_to_dbus(proc)
-        else:
-            proc.wait()
-    finally:
-        with contextlib.suppress(ProcessLookupError, subprocess.TimeoutExpired):
-            proc.terminate()
-            proc.wait(timeout=2)
-
-    if proc.returncode not in (0, None):
-        raise SystemExit(proc.returncode)
-
-
-def _bridge_json_to_dbus(proc: subprocess.Popen) -> None:
-    """Read inner's JSON lines and forward each to the host session bus."""
-    emitter = DbusEmitter()
-    assert proc.stdout is not None
-    for raw_line in proc.stdout:
-        line = raw_line.strip()
-        if not line:
-            continue
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            _log.warning("dropping malformed JSON from inner reader: %s", line)
-            continue
-        _forward_event(event, emitter)
-
-
-def _forward_event(event: dict, emitter: EventEmitter) -> None:
-    """Dispatch one parsed JSON event to the matching ``EventEmitter`` method."""
-    kind = event.get("type")
-    if kind == "pending":
-        emitter.connection_blocked(
-            BlockedEvent(
-                container=event["container"],
-                request_id=event["id"],
-                dest=event["dest"],
-                port=event["port"],
-                proto=event["proto"],
-                domain=event.get("domain", ""),
-            )
-        )
-    elif kind == "container_started":
-        emitter.container_started(event["container"])
-    elif kind == "container_exited":
-        emitter.container_exited(event["container"], reason=event.get("reason", ""))
+        subprocess.run(cmd, env=env, check=True)  # noqa: S603
+    except subprocess.CalledProcessError as exc:
+        raise SystemExit(exc.returncode) from exc
 
 
 def _podman_container_pid(container: str) -> str:
@@ -591,16 +588,14 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("container", help="Container name (carried in event payloads).")
     parser.add_argument(
         "--emit",
-        choices=("dbus", "json"),
-        default="dbus",
-        help="Where to publish events: session-bus D-Bus signals (default) or JSON lines on stdout.",
+        choices=("socket", "json"),
+        default="socket",
+        help=(
+            "Where to publish events: the hub's unix-socket ingester (default) "
+            "or JSON lines on stdout for the terminal fallback CLI."
+        ),
     )
     return parser.parse_args()
-
-
-def _dbus_str(value: str) -> str:
-    """Format a Python string as a ``dbus-send`` string argument."""
-    return f"string:{value}"
 
 
 def _print_json(payload: dict) -> None:

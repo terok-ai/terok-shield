@@ -220,45 +220,74 @@ class TestJsonEmitter:
         assert types == ["container_started", "container_exited"]
 
 
-class TestDbusEmitter:
-    """``DbusEmitter`` shells out to ``dbus-send`` with the right arguments."""
+class TestSocketEmitter:
+    """``SocketEmitter`` streams JSON lines to the hub's unix socket."""
 
-    def test_connection_blocked_invokes_dbus_send(self) -> None:
-        emitter = reader.DbusEmitter()
-        event = reader.BlockedEvent(
-            container="c1",
-            request_id="c1:1",
-            dest=TEST_IP1,
-            port=443,
-            proto=socket.IPPROTO_TCP,
-            domain=TEST_DOMAIN,
-        )
-        with mock.patch.object(reader.subprocess, "run") as m_run:
-            emitter.connection_blocked(event)
-        assert m_run.call_count == 1
-        cmd = m_run.call_args[0][0]
-        assert cmd[0] == "dbus-send"
-        assert "--session" in cmd
-        assert "--type=signal" in cmd
-        assert cmd[3] == reader._SHIELD_OBJECT_PATH
-        assert cmd[4] == f"{reader._SHIELD_INTERFACE}.ConnectionBlocked"
-        assert f"string:{TEST_IP1}" in cmd
+    def test_connection_blocked_sends_pending_line(self, tmp_path: Path) -> None:
+        path = tmp_path / "events.sock"
+        fake_sock = mock.MagicMock()
+        emitter = reader.SocketEmitter(path)
+        with mock.patch.object(reader.socket, "socket", return_value=fake_sock):
+            emitter.connection_blocked(
+                reader.BlockedEvent(
+                    container="c1",
+                    request_id="c1:1",
+                    dest=TEST_IP1,
+                    port=443,
+                    proto=socket.IPPROTO_TCP,
+                    domain=TEST_DOMAIN,
+                )
+            )
+        fake_sock.connect.assert_called_once_with(str(path))
+        sent = fake_sock.sendall.call_args[0][0]
+        assert sent.endswith(b"\n")
+        payload = json.loads(sent)
+        assert payload["type"] == "pending"
+        assert payload["container"] == "c1"
+        assert payload["domain"] == TEST_DOMAIN
 
-    def test_missing_dbus_send_does_not_raise(self) -> None:
-        emitter = reader.DbusEmitter()
-        with mock.patch.object(reader.subprocess, "run", side_effect=FileNotFoundError):
-            emitter.container_started("c1")  # must not propagate
-
-    def test_lifecycle_signals_have_correct_members(self) -> None:
-        emitter = reader.DbusEmitter()
-        with mock.patch.object(reader.subprocess, "run") as m_run:
+    def test_connects_lazily_and_reuses_socket(self, tmp_path: Path) -> None:
+        path = tmp_path / "events.sock"
+        fake_sock = mock.MagicMock()
+        emitter = reader.SocketEmitter(path)
+        with mock.patch.object(reader.socket, "socket", return_value=fake_sock) as make_sock:
             emitter.container_started("c1")
-            emitter.container_exited("c1", reason="poststop")
-        members = [call[0][0][4] for call in m_run.call_args_list]
-        assert members == [
-            f"{reader._SHIELD_INTERFACE}.ContainerStarted",
-            f"{reader._SHIELD_INTERFACE}.ContainerExited",
-        ]
+            emitter.container_started("c1")
+        assert make_sock.call_count == 1  # single connection reused
+        assert fake_sock.sendall.call_count == 2
+
+    def test_reconnects_after_send_failure(self, tmp_path: Path) -> None:
+        path = tmp_path / "events.sock"
+        first = mock.MagicMock()
+        first.sendall.side_effect = ConnectionResetError("peer gone")
+        second = mock.MagicMock()
+        emitter = reader.SocketEmitter(path)
+        with mock.patch.object(reader.socket, "socket", side_effect=[first, second]):
+            emitter.container_started("c1")  # first try fails, socket closed
+            emitter.container_started("c1")  # second try connects fresh
+        assert first.close.called
+        assert second.sendall.called
+
+    def test_hub_unreachable_is_non_fatal(self, tmp_path: Path) -> None:
+        """If the hub socket isn't there, sends are silently dropped after one warning."""
+        path = tmp_path / "events.sock"
+        fake_sock = mock.MagicMock()
+        fake_sock.connect.side_effect = FileNotFoundError(path)
+        emitter = reader.SocketEmitter(path)
+        with mock.patch.object(reader.socket, "socket", return_value=fake_sock):
+            emitter.container_started("c1")
+            emitter.container_started("c1")  # must not raise, must not reconnect-loop
+        assert fake_sock.sendall.call_count == 0
+
+    def test_close_disconnects(self, tmp_path: Path) -> None:
+        path = tmp_path / "events.sock"
+        fake_sock = mock.MagicMock()
+        emitter = reader.SocketEmitter(path)
+        with mock.patch.object(reader.socket, "socket", return_value=fake_sock):
+            emitter.container_started("c1")
+            emitter.close()
+        fake_sock.close.assert_called_once()
+        emitter.close()  # idempotent
 
 
 # ── Session integration ───────────────────────────────────────────────
@@ -336,106 +365,3 @@ class _FakeSocket:
 
     def close(self) -> None:
         """No-op — present so ``ReaderSession.run``'s finally block can call it."""
-
-
-# ── Outer bridge: JSON → EventEmitter dispatch ───────────────────────
-
-
-class TestForwardEvent:
-    """``_forward_event`` maps the inner's JSON dialect onto the emitter protocol."""
-
-    def test_pending_dispatches_connection_blocked(self) -> None:
-        emitter = _RecordingEmitter()
-        reader._forward_event(
-            {
-                "type": "pending",
-                "container": "abc123def456",
-                "id": "abc123def456:7",
-                "dest": "1.2.3.4",
-                "port": 443,
-                "proto": 6,
-                "domain": "example.com",
-            },
-            emitter,
-        )
-        assert emitter.calls == [
-            (
-                "blocked",
-                reader.BlockedEvent(
-                    container="abc123def456",
-                    request_id="abc123def456:7",
-                    dest="1.2.3.4",
-                    port=443,
-                    proto=6,
-                    domain="example.com",
-                ),
-            )
-        ]
-
-    def test_container_started_and_exited_pass_through(self) -> None:
-        emitter = _RecordingEmitter()
-        reader._forward_event({"type": "container_started", "container": "x"}, emitter)
-        reader._forward_event(
-            {"type": "container_exited", "container": "x", "reason": "poststop"}, emitter
-        )
-        kinds = [k for k, _ in emitter.calls]
-        assert kinds == ["started", "exited"]
-
-    def test_missing_domain_defaults_to_empty_string(self) -> None:
-        emitter = _RecordingEmitter()
-        reader._forward_event(
-            {
-                "type": "pending",
-                "container": "c",
-                "id": "c:1",
-                "dest": "9.9.9.9",
-                "port": 80,
-                "proto": 6,
-            },
-            emitter,
-        )
-        assert emitter.calls[0][1].domain == ""
-
-    def test_unknown_type_is_ignored(self) -> None:
-        """Future event kinds the outer doesn't understand must not crash the bridge."""
-        emitter = _RecordingEmitter()
-        reader._forward_event({"type": "something-new", "whatever": 1}, emitter)
-        assert emitter.calls == []
-
-
-class TestBridgeJsonToDbus:
-    """``_bridge_json_to_dbus`` streams lines from the inner subprocess stdout."""
-
-    def test_forwards_each_valid_line(self) -> None:
-        lines = [
-            json.dumps({"type": "container_started", "container": "c"}) + "\n",
-            json.dumps(
-                {
-                    "type": "pending",
-                    "container": "c",
-                    "id": "c:1",
-                    "dest": "1.1.1.1",
-                    "port": 443,
-                    "proto": 6,
-                    "domain": "one.one",
-                }
-            )
-            + "\n",
-        ]
-        proc = mock.MagicMock(stdout=iter(lines))
-        emitter = _RecordingEmitter()
-        with mock.patch.object(reader, "DbusEmitter", return_value=emitter):
-            reader._bridge_json_to_dbus(proc)
-        assert [k for k, _ in emitter.calls] == ["started", "blocked"]
-
-    def test_skips_blank_and_malformed_lines(self) -> None:
-        lines = [
-            "\n",
-            "not-json\n",
-            json.dumps({"type": "container_started", "container": "c"}) + "\n",
-        ]
-        proc = mock.MagicMock(stdout=iter(lines))
-        emitter = _RecordingEmitter()
-        with mock.patch.object(reader, "DbusEmitter", return_value=emitter):
-            reader._bridge_json_to_dbus(proc)
-        assert [k for k, _ in emitter.calls] == ["started"]
