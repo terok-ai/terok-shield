@@ -100,7 +100,7 @@ class BlockedEvent:
 # ── Entry point ───────────────────────────────────────────────────────
 
 
-def main() -> None:
+def main() -> None:  # pragma: no cover — real argparse + subprocess re-exec
     """Parse arguments, cross into the container netns if needed, and run the loop.
 
     On first entry (``_TEROK_SHIELD_NFLOG_NSENTER`` unset) this process re-execs
@@ -388,7 +388,9 @@ class _RawBlockEvent:
     proto: int
 
 
-def _open_nflog_socket(group: int) -> socket.socket | None:
+def _open_nflog_socket(
+    group: int,
+) -> socket.socket | None:  # pragma: no cover — real AF_NETLINK socket
     """Bind an ``AF_NETLINK`` socket to *group*, or ``None`` if unavailable.
 
     Returns ``None`` in environments without NFLOG support (non-Linux, missing
@@ -415,7 +417,7 @@ def _open_nflog_socket(group: int) -> socket.socket | None:
         return None
 
 
-def _drain(sock: socket.socket) -> list[_RawBlockEvent]:
+def _drain(sock: socket.socket) -> list[_RawBlockEvent]:  # pragma: no cover — real socket recv
     """Read every pending NFLOG message and extract its block events."""
     events: list[_RawBlockEvent] = []
     while True:
@@ -552,7 +554,9 @@ class _DomainCache:
 # ── nsenter re-exec ───────────────────────────────────────────────────
 
 
-def _reexec_inside_container_netns(state_dir: Path, container: str, emit: str) -> None:
+def _reexec_inside_container_netns(
+    state_dir: Path, container: str, emit: str
+) -> None:  # pragma: no cover — real subprocess re-exec
     """Re-enter this script inside the container's netns so NFLOG is reachable.
 
     When we're already in ``NS_ROOTLESS`` (uid 0 inside the rootless userns
@@ -587,7 +591,7 @@ def _reexec_inside_container_netns(state_dir: Path, container: str, emit: str) -
         raise SystemExit(exc.returncode) from exc
 
 
-def _podman_container_pid(container: str) -> str:
+def _podman_container_pid(container: str) -> str:  # pragma: no cover — real podman subprocess
     """Resolve a container's host PID so nsenter can target its network namespace."""
     podman = _resolve_binary("podman")
     # nosec B603 — argv is a fixed literal plus the caller-supplied container
@@ -616,7 +620,7 @@ def _resolve_binary(name: str) -> str:
 # ── Utility helpers ───────────────────────────────────────────────────
 
 
-def _parse_args() -> argparse.Namespace:
+def _parse_args() -> argparse.Namespace:  # pragma: no cover — thin argparse wrapper
     """Define the CLI surface — positional state_dir + container, ``--emit`` channel."""
     parser = argparse.ArgumentParser(
         prog="nflog-reader",

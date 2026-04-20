@@ -75,3 +75,21 @@ class TestResolveStateDir:
             result = mock.MagicMock(returncode=0, stdout=json.dumps({"not": "a list"}))
             with mock.patch.object(resolver.subprocess, "run", return_value=result):
                 assert resolver.resolve_state_dir("ctr") is None
+
+
+class TestExtractStateDir:
+    """Hardening: each type-check branch of ``_extract_state_dir`` hits ``None``.
+
+    These are the tiny shape-guards that keep the resolver robust against
+    a future podman release changing its JSON contract — each deserves a
+    dedicated test so coverage tracks when the guard survives a refactor.
+    """
+
+    def test_head_is_not_dict(self) -> None:
+        assert resolver._extract_state_dir([["not", "a", "dict"]]) is None
+
+    def test_config_is_not_dict(self) -> None:
+        assert resolver._extract_state_dir([{"Config": "not-a-dict"}]) is None
+
+    def test_annotations_is_not_dict(self) -> None:
+        assert resolver._extract_state_dir([{"Config": {"Annotations": "not-a-dict"}}]) is None

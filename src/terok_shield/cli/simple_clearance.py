@@ -88,7 +88,7 @@ class ClearanceSession:
         self._queue: list[_Pending] = []
         self._stop_requested = False
 
-    def run(self) -> None:
+    def run(self) -> None:  # pragma: no cover — real subprocess + tty I/O, integration path
         """Spawn the reader, then multiplex its stdout with stdin prompts."""
         reader = self._spawn_reader()
         if reader.stdout is None:
@@ -102,8 +102,13 @@ class ClearanceSession:
         finally:
             self._shutdown_reader(reader)
 
-    def _event_loop(self, reader: subprocess.Popen) -> None:
-        """Read reader JSON lines on stdout and operator verdicts on stdin."""
+    def _event_loop(self, reader: subprocess.Popen) -> None:  # pragma: no cover
+        """Read reader JSON lines on stdout and operator verdicts on stdin.
+
+        No-cover because the loop ticks require a real reader subprocess and
+        a real stdin fd set to non-blocking.  The per-fd drain helpers
+        (``_drain_reader``, ``_drain_stdin``) are covered directly.
+        """
         reader_fd = reader.stdout.fileno()  # type: ignore[union-attr]
         stdin_fd = sys.stdin.fileno()
         _set_nonblocking(stdin_fd)

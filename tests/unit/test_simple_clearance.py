@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -193,3 +194,154 @@ class TestBufferHelpers:
     def test_no_newline_drains_nothing(self) -> None:
         assert simple_clearance._drain_lines("partial") == []
         assert simple_clearance._tail_partial("partial") == "partial"
+
+
+# ── Drain helpers (reader / stdin) ────────────────────────────────────
+
+
+def _make_session() -> simple_clearance.ClearanceSession:
+    """Test fixture: a bare ClearanceSession with no real subprocess."""
+    return simple_clearance.ClearanceSession(state_dir=Path("/tmp/sd"), container="c1")
+
+
+class TestDrainReader:
+    """``_drain_reader`` ticks the reader pipe, handling EOF + not-readable."""
+
+    def test_not_readable_returns_buf_unchanged(self) -> None:
+        session = _make_session()
+        buf, eof = session._drain_reader(reader_fd=5, buf="stale", readable=[])
+        assert buf == "stale"
+        assert eof is False
+
+    def test_readable_dispatches_complete_lines(self) -> None:
+        session = _make_session()
+        with mock.patch.object(simple_clearance, "_read_into_buffer", return_value=("x\n", False)):
+            session._handle_reader_event = mock.MagicMock()  # type: ignore[method-assign]
+            buf, eof = session._drain_reader(reader_fd=5, buf="", readable=[5])
+        session._handle_reader_event.assert_called_once_with("x")
+        assert buf == ""
+        assert eof is False
+
+    def test_eof_is_propagated(self) -> None:
+        session = _make_session()
+        with mock.patch.object(simple_clearance, "_read_into_buffer", return_value=("", True)):
+            _, eof = session._drain_reader(reader_fd=5, buf="", readable=[5])
+        assert eof is True
+
+
+class TestDrainStdin:
+    """``_drain_stdin`` ticks the operator prompt pipe, same contract as reader."""
+
+    def test_not_readable_returns_buf_unchanged(self) -> None:
+        session = _make_session()
+        buf, eof = session._drain_stdin(stdin_fd=0, buf="  ", readable=[])
+        assert buf == "  "
+        assert eof is False
+
+    def test_dispatches_stripped_input(self) -> None:
+        session = _make_session()
+        with mock.patch.object(simple_clearance, "_read_into_buffer", return_value=("a\n", False)):
+            session._handle_operator_input = mock.MagicMock()  # type: ignore[method-assign]
+            session._drain_stdin(stdin_fd=0, buf="", readable=[0])
+        session._handle_operator_input.assert_called_once_with("a")
+
+
+# ── Reader spawn + shutdown ───────────────────────────────────────────
+
+
+class TestSpawnReader:
+    """Missing reader script exits with SystemExit; happy path returns Popen."""
+
+    def test_missing_reader_script_exits(self) -> None:
+        session = _make_session()
+        with mock.patch.object(Path, "exists", return_value=False):
+            with pytest.raises(SystemExit, match="1"):
+                session._spawn_reader()
+
+    def test_spawn_passes_expected_argv(self) -> None:
+        session = simple_clearance.ClearanceSession(state_dir=Path("/sd"), container="cname")
+        fake_proc = mock.MagicMock()
+        with (
+            mock.patch.object(Path, "exists", return_value=True),
+            mock.patch.object(
+                simple_clearance.subprocess, "Popen", return_value=fake_proc
+            ) as popen,
+        ):
+            result = session._spawn_reader()
+        assert result is fake_proc
+        argv = popen.call_args[0][0]
+        assert argv[-4:] == [str(simple_clearance._READER_SCRIPT), "/sd", "cname", "--emit=json"]
+
+
+class TestShutdownReader:
+    """``_shutdown_reader`` escalates SIGTERM → SIGKILL when the child lingers."""
+
+    def test_already_exited_process_no_signals(self) -> None:
+        session = _make_session()
+        reader = mock.MagicMock()
+        reader.poll.return_value = 0
+        session._shutdown_reader(reader)
+        reader.terminate.assert_not_called()
+        reader.kill.assert_not_called()
+
+    def test_running_process_gets_sigterm_then_sigkill(self) -> None:
+        session = _make_session()
+        reader = mock.MagicMock()
+        reader.poll.side_effect = [None, None, None]
+        reader.wait.side_effect = subprocess.TimeoutExpired(cmd="", timeout=2)
+        session._shutdown_reader(reader)
+        reader.terminate.assert_called_once()
+        reader.kill.assert_called_once()
+
+    def test_terminated_after_wait_no_sigkill(self) -> None:
+        session = _make_session()
+        reader = mock.MagicMock()
+        reader.poll.side_effect = [None, 0]
+        session._shutdown_reader(reader)
+        reader.terminate.assert_called_once()
+        reader.kill.assert_not_called()
+
+
+# ── Signal handling ──────────────────────────────────────────────────
+
+
+class TestSignalHandling:
+    """Stop handler sets the flag; install wires SIGINT + SIGTERM to it."""
+
+    def test_on_stop_signal_sets_flag(self) -> None:
+        session = _make_session()
+        assert session._stop_requested is False
+        session._on_stop_signal(2, None)
+        assert session._stop_requested is True
+
+    def test_install_signal_handlers_registers_both(self) -> None:
+        session = _make_session()
+        installed: list[int] = []
+        with mock.patch.object(
+            simple_clearance.signal, "signal", side_effect=lambda sig, _h: installed.append(sig)
+        ):
+            session._install_signal_handlers()
+        assert simple_clearance.signal.SIGINT in installed
+        assert simple_clearance.signal.SIGTERM in installed
+
+
+# ── Read-into-buffer + nonblocking ───────────────────────────────────
+
+
+class TestReadIntoBuffer:
+    """``_read_into_buffer`` is the one place we touch raw fds."""
+
+    def test_eof_returns_original_buffer_and_eof_true(self) -> None:
+        with mock.patch.object(simple_clearance.os, "read", return_value=b""):
+            buf, eof = simple_clearance._read_into_buffer(fd=3, buf="head")
+        assert (buf, eof) == ("head", True)
+
+    def test_chunk_is_appended(self) -> None:
+        with mock.patch.object(simple_clearance.os, "read", return_value=b"x\n"):
+            buf, eof = simple_clearance._read_into_buffer(fd=3, buf="head")
+        assert (buf, eof) == ("headx\n", False)
+
+    def test_oserror_returns_buf_unchanged(self) -> None:
+        with mock.patch.object(simple_clearance.os, "read", side_effect=OSError):
+            buf, eof = simple_clearance._read_into_buffer(fd=3, buf="head")
+        assert (buf, eof) == ("head", False)

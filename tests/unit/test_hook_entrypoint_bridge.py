@@ -370,6 +370,85 @@ class TestIsOurReader:
             assert hook_entrypoint._is_our_reader(4321, tmp_path) is False
 
 
+class TestSpawnReaderFailureBranches:
+    """Soft-fail contract: rare I/O errors don't escape _spawn_reader."""
+
+    def test_reader_log_open_failure_soft_fails(self, tmp_path: Path) -> None:
+        """If ``<sd>/reader.log`` can't be opened (EACCES etc.), we log and return."""
+        reader = tmp_path / "reader.py"
+        reader.touch()
+        with (
+            mock.patch.object(hook_entrypoint, "_reader_script_path", return_value=reader),
+            mock.patch.object(
+                hook_entrypoint, "_session_bus_address", return_value="unix:path=/run/user/1000/bus"
+            ),
+            mock.patch.object(hook_entrypoint.Path, "open", side_effect=OSError("EACCES")),
+            mock.patch.object(hook_entrypoint.subprocess, "Popen") as popen,
+        ):
+            hook_entrypoint._spawn_reader(tmp_path, _SHORT_ID)
+        popen.assert_not_called()
+        assert not (tmp_path / "reader.pid").exists()
+
+    def test_pid_file_write_failure_sigterms_orphan(self, tmp_path: Path) -> None:
+        """If the child started but we can't write its pid, SIGTERM the orphan."""
+        reader = tmp_path / "reader.py"
+        reader.touch()
+        fake_proc = mock.MagicMock(pid=12345)
+        fake_sigterm = mock.MagicMock()
+        # write_text raises, we expect a SIGTERM back at the running child.
+        original_write_text = hook_entrypoint.Path.write_text
+        with (
+            mock.patch.object(hook_entrypoint, "_reader_script_path", return_value=reader),
+            mock.patch.object(
+                hook_entrypoint, "_session_bus_address", return_value="unix:path=/run/user/1000/bus"
+            ),
+            mock.patch.object(hook_entrypoint.subprocess, "Popen", return_value=fake_proc),
+            mock.patch.object(
+                hook_entrypoint.Path,
+                "write_text",
+                side_effect=lambda self, *a, **kw: (
+                    (_ for _ in ()).throw(OSError("ENOSPC"))
+                    if self.name == "reader.pid"
+                    else original_write_text(self, *a, **kw)
+                ),
+                autospec=True,
+            ),
+            mock.patch.object(hook_entrypoint.os, "kill", fake_sigterm),
+        ):
+            hook_entrypoint._spawn_reader(tmp_path, _SHORT_ID)
+        fake_sigterm.assert_called_once_with(12345, signal.SIGTERM)
+
+
+class TestReapReaderSIGTERMFailureBranches:
+    """Hardening: SIGTERM branches that log and still unlink the pid file."""
+
+    def test_sigterm_oserror_unlinks_pid_and_returns(self, tmp_path: Path) -> None:
+        """A non-ESRCH OSError on SIGTERM still cleans up the pid file."""
+        pid_file = tmp_path / "reader.pid"
+        pid_file.write_text("12345\n")
+        with (
+            mock.patch.object(hook_entrypoint, "_is_our_reader", return_value=True),
+            mock.patch.object(hook_entrypoint.os, "kill", side_effect=OSError("EPERM")),
+        ):
+            hook_entrypoint._reap_reader(tmp_path)
+        assert not pid_file.exists()
+
+
+class TestReaderAliveEdgeCases:
+    """_reader_alive interprets pid-file state conservatively."""
+
+    def test_malformed_pid_file_returns_false(self, tmp_path: Path) -> None:
+        pid_file = tmp_path / "reader.pid"
+        pid_file.write_text("not-an-int\n")
+        assert hook_entrypoint._reader_alive(pid_file) is False
+
+    def test_dead_pid_returns_false(self, tmp_path: Path) -> None:
+        pid_file = tmp_path / "reader.pid"
+        pid_file.write_text("12345\n")
+        with mock.patch.object(hook_entrypoint, "_pid_exists", return_value=False):
+            assert hook_entrypoint._reader_alive(pid_file) is False
+
+
 class TestOuterHostUid:
     """``_outer_host_uid`` projects the current uid through /proc/self/uid_map."""
 
