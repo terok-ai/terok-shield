@@ -35,13 +35,19 @@ Bundle layout::
 
 from pathlib import Path
 
-BUNDLE_VERSION = 5
+BUNDLE_VERSION = 6
 """Integer version of the state bundle layout.
 
 Bumped whenever the file layout changes in a backwards-incompatible way.
-The OCI hook hard-fails if the annotation version does not match.
+The OCI hook hard-fails if the annotation version does not match.  The
+same constant is the signal ``check_environment()`` uses to detect a
+stale on-disk entrypoint — bump it whenever the entrypoint *protocol*
+changes even if the file layout itself is unchanged, so that
+``terok setup`` rewrites the script instead of short-circuiting.
 
 Version history:
+    6 — hook-argv dispatch protocol: bridge hook adds ``--bridge`` flag
+        between ``args[0]`` and the stage; file layout unchanged.
     5 — add the optional bridge hook pair and ``reader.pid`` lifecycle file.
     4 — previous stable shape (nft + dnsmasq only).
 """
