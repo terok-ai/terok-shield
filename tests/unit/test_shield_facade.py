@@ -30,6 +30,7 @@ class ShieldHarness:
     profiles: mock.MagicMock
     ruleset: mock.MagicMock
     mode: mock.MagicMock
+    hub_events: mock.MagicMock
 
 
 ShieldHarnessFactory = Callable[..., ShieldHarness]
@@ -47,6 +48,7 @@ def make_shield(make_config: ConfigFactory) -> ShieldHarnessFactory:
         dns: mock.MagicMock | None = None,
         profiles: mock.MagicMock | None = None,
         ruleset: mock.MagicMock | None = None,
+        hub_events: mock.MagicMock | None = None,
     ) -> ShieldHarness:
         harness = ShieldHarness(
             shield=Shield.__new__(Shield),
@@ -56,6 +58,7 @@ def make_shield(make_config: ConfigFactory) -> ShieldHarnessFactory:
             profiles=profiles or mock.MagicMock(),
             ruleset=ruleset or mock.MagicMock(),
             mode=mode or mock.MagicMock(),
+            hub_events=hub_events or mock.MagicMock(),
         )
         harness.shield.config = config or make_config()
         harness.shield.runner = harness.runner
@@ -63,6 +66,7 @@ def make_shield(make_config: ConfigFactory) -> ShieldHarnessFactory:
         harness.shield.dns = harness.dns
         harness.shield.profiles = harness.profiles
         harness.shield.ruleset = harness.ruleset
+        harness.shield.hub_events = harness.hub_events
         harness.shield._mode = harness.mode
         return harness
 
@@ -78,6 +82,7 @@ def test_shield_default_collaborators(_find: mock.Mock, tmp_path: Path) -> None:
     assert shield.dns is not None
     assert shield.profiles is not None
     assert shield.ruleset is not None
+    assert shield.hub_events is not None
 
 
 def test_shield_uses_injected_collaborators(tmp_path: Path) -> None:
@@ -87,6 +92,7 @@ def test_shield_uses_injected_collaborators(tmp_path: Path) -> None:
     dns = mock.MagicMock()
     profiles = mock.MagicMock()
     ruleset = mock.MagicMock()
+    hub_events = mock.MagicMock()
 
     shield = Shield(
         ShieldConfig(state_dir=tmp_path),
@@ -95,6 +101,7 @@ def test_shield_uses_injected_collaborators(tmp_path: Path) -> None:
         dns=dns,
         profiles=profiles,
         ruleset=ruleset,
+        hub_events=hub_events,
     )
 
     assert shield.runner is runner
@@ -102,6 +109,7 @@ def test_shield_uses_injected_collaborators(tmp_path: Path) -> None:
     assert shield.dns is dns
     assert shield.profiles is profiles
     assert shield.ruleset is ruleset
+    assert shield.hub_events is hub_events
 
 
 def test_create_mode_rejects_unsupported_value(
@@ -240,21 +248,23 @@ def test_down_delegates_and_logs(
     allow_all: bool,
     expected_detail: str | None,
 ) -> None:
-    """down() delegates to the backend and records the right audit detail."""
+    """down() delegates to the backend, logs, and pings the hub."""
     harness = make_shield()
     harness.shield.down("test-ctr", allow_all=allow_all)
     harness.mode.shield_down.assert_called_once_with("test-ctr", allow_all=allow_all)
     harness.audit.log_event.assert_called_once_with(
         "test-ctr", "shield_down", detail=expected_detail
     )
+    harness.hub_events.shield_down.assert_called_once_with("test-ctr", allow_all=allow_all)
 
 
 def test_up_delegates_and_logs(make_shield: ShieldHarnessFactory) -> None:
-    """up() delegates to the backend and logs the transition."""
+    """up() delegates to the backend, logs, and pings the hub."""
     harness = make_shield()
     harness.shield.up("test-ctr")
     harness.mode.shield_up.assert_called_once_with("test-ctr")
     harness.audit.log_event.assert_called_once_with("test-ctr", "shield_up")
+    harness.hub_events.shield_up.assert_called_once_with("test-ctr")
 
 
 def test_block_delegates_and_logs(make_shield: ShieldHarnessFactory) -> None:

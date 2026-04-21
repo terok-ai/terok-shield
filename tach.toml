@@ -67,6 +67,12 @@ path = "terok_shield.run"
 layer = "foundation"
 depends_on = []
 
+# Hub event emitter — stdlib-only client for the terok-dbus unix ingester
+[[modules]]
+path = "terok_shield._hub_events"
+layer = "foundation"
+depends_on = []
+
 # ── Core ───────────────────────────────────────────────────
 # Security-critical modules — the auditable boundary.
 # May import from foundation freely; must declare same-layer deps.

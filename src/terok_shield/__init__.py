@@ -48,6 +48,7 @@ from .podman_info import (
 from .util import is_ip as _is_ip
 
 if TYPE_CHECKING:
+    from ._hub_events import HubEventEmitter
     from .audit import AuditLogger
     from .dns.resolver import DnsResolver
     from .nft.rules import RulesetBuilder
@@ -169,6 +170,7 @@ class Shield:
         dns: "DnsResolver | None" = None,
         profiles: "ProfileLoader | None" = None,
         ruleset: "RulesetBuilder | None" = None,
+        hub_events: "HubEventEmitter | None" = None,
     ) -> None:
         """Create the shield facade.
 
@@ -179,8 +181,13 @@ class Shield:
             dns: DNS resolver (default: from runner).
             profiles: Profile loader (default: from config.profiles_dir).
             ruleset: Ruleset builder (default: from config loopback_ports).
+            hub_events: Best-effort emitter for ``shield_up`` / ``shield_down``
+                events bound for the terok-dbus hub (default: a fresh
+                :class:`HubEventEmitter` pointed at the canonical socket).
+                Pass a no-op stub in tests that should not touch the socket.
         """
         from . import state
+        from ._hub_events import HubEventEmitter
         from .audit import AuditLogger
         from .dns.resolver import DnsResolver
         from .nft.rules import RulesetBuilder
@@ -198,6 +205,7 @@ class Shield:
             user_dir=config.profiles_dir or Path("/nonexistent"),
         )
         self.ruleset = ruleset or RulesetBuilder(loopback_ports=config.loopback_ports)
+        self.hub_events = hub_events or HubEventEmitter()
         self._mode = self._create_mode(config.mode)
 
     def _create_mode(self, mode: ShieldMode):  # noqa: ANN202
@@ -357,6 +365,7 @@ class Shield:
             "shield_down",
             detail="allow_all=True" if allow_all else None,
         )
+        self.hub_events.shield_down(container, allow_all=allow_all)
 
     def block(self, container: str) -> None:
         """Total network blackout — drop all traffic, log for forensics."""
@@ -367,6 +376,7 @@ class Shield:
         """Restore normal deny-all mode for a running container."""
         self._mode.shield_up(container)
         self.audit.log_event(container, "shield_up")
+        self.hub_events.shield_up(container)
 
     def state(self, container: str) -> ShieldState:
         """Query the live nft ruleset to determine a container's shield state."""
