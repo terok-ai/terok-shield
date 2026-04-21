@@ -31,6 +31,18 @@ class TestResolveStateDir:
             with mock.patch.object(resolver.subprocess, "run", return_value=result):
                 assert resolver.resolve_state_dir("ctr") == sd
 
+    def test_container_name_is_passed_after_dash_dash(self, tmp_path: Path) -> None:
+        """``--`` keeps podman from interpreting a hostile *container* as a flag."""
+        sd = tmp_path / "shield"
+        sd.mkdir()
+        with mock.patch.object(resolver.shutil, "which", return_value="/usr/bin/podman"):
+            result = mock.MagicMock(returncode=0, stdout=_fake_inspect_output({_ANN_KEY: str(sd)}))
+            with mock.patch.object(resolver.subprocess, "run", return_value=result) as run:
+                resolver.resolve_state_dir("--all")
+        argv = run.call_args.args[0]
+        assert "--" in argv
+        assert argv.index("--all") > argv.index("--")
+
     def test_returns_none_when_podman_missing(self) -> None:
         with mock.patch.object(resolver.shutil, "which", return_value=None):
             assert resolver.resolve_state_dir("ctr") is None

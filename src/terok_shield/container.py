@@ -60,8 +60,13 @@ def resolve_state_dir(container: str) -> Path | None:
         _log.warning("podman not on PATH — cannot resolve state_dir for %s", container)
         return None
     try:
+        # ``--`` bars podman from interpreting a hostile *container* value as
+        # one of its own flags (``--all``, ``--latest``, ``--format=bad`` …).
+        # The module's public contract accepts container identifiers from
+        # external callers that may not have validated them; ``--`` makes
+        # the positional boundary explicit regardless of what the caller did.
         result = subprocess.run(  # nosec B603
-            [podman, "inspect", "--format=json", container],
+            [podman, "inspect", "--format=json", "--", container],
             check=False,
             capture_output=True,
             text=True,
