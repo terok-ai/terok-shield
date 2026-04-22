@@ -424,6 +424,31 @@ class TestSocketEmitter:
             )
         assert ok is False
 
+    def test_send_returns_false_when_retry_also_fails(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Both attempts fail → WARNING + return False (no silent dedup)."""
+        path = tmp_path / READER_EVENTS_SOCK_FILENAME
+        first = mock.MagicMock()
+        first.sendall.side_effect = ConnectionResetError("peer gone")
+        second = mock.MagicMock()
+        second.sendall.side_effect = BrokenPipeError("still gone")
+        emitter = reader.SocketEmitter(path)
+        caplog.set_level("INFO", logger=reader.__name__)
+        with mock.patch.object(reader.socket, "socket", side_effect=[first, second]):
+            ok = emitter.connection_blocked(
+                reader.BlockedEvent(
+                    container="c1",
+                    request_id="c1:1",
+                    dest=TEST_IP1,
+                    port=443,
+                    proto=socket.IPPROTO_TCP,
+                    domain=TEST_DOMAIN,
+                )
+            )
+        assert ok is False
+        assert any("hub event socket send failed" in r.message for r in caplog.records)
+
     def test_hub_unreachable_is_non_fatal(self, tmp_path: Path) -> None:
         """If the hub socket isn't there, sends are silently dropped after one warning."""
         path = tmp_path / READER_EVENTS_SOCK_FILENAME
