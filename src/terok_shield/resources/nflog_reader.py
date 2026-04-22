@@ -299,7 +299,14 @@ class ReaderSession:
                 self._maybe_emit(event, now)
 
     def _maybe_emit(self, event: _RawBlockEvent, now: float) -> None:
-        """Filter noise, dedupe by domain-or-dest, emit if fresh."""
+        """Filter noise, dedupe by domain-or-dest, emit if fresh.
+
+        The dedup key is only mutated once the emit actually reaches
+        the hub.  Marking before the emit would poison the 30-s window
+        when the write fails (hub restarted, socket unreachable, …),
+        silently suppressing retries even though the operator never
+        saw a popup for the first attempt.
+        """
         if _is_noise_dest(event.dest):
             return
         domain = self._resolve_domain(event.dest)
@@ -307,8 +314,8 @@ class ReaderSession:
         last = self._last_emit.get(dedup_key)
         if last is not None and now - last < self._DEDUP_WINDOW_S:
             return
-        self._last_emit[dedup_key] = now
-        self._emit_connection_blocked(event, domain)
+        if self._emit_connection_blocked(event, domain):
+            self._last_emit[dedup_key] = now
 
     def _resolve_domain(self, dest: str) -> str:
         """Look *dest* up in the domain cache, refreshing once on miss."""
@@ -318,11 +325,16 @@ class ReaderSession:
             domain = self._domain_cache.lookup(dest)
         return domain
 
-    def _emit_connection_blocked(self, event: _RawBlockEvent, domain: str) -> None:
-        """Publish one ``ConnectionBlocked`` for *event* — caller supplies the domain."""
+    def _emit_connection_blocked(self, event: _RawBlockEvent, domain: str) -> bool:
+        """Publish one ``ConnectionBlocked`` for *event* — caller supplies the domain.
+
+        Returns ``True`` when the emitter accepted the event; ``False``
+        when it was dropped (socket emitter: hub unreachable).  Callers
+        use the result to decide whether to mark the dedup window.
+        """
         request_id = f"{self._container}:{self._next_id}"
         self._next_id += 1
-        self._emitter.connection_blocked(
+        return self._emitter.connection_blocked(
             BlockedEvent(
                 container=self._container,
                 request_id=request_id,
@@ -361,8 +373,12 @@ class EventEmitter(Protocol):
         """Publish a ``ContainerExited`` lifecycle event."""
         ...
 
-    def connection_blocked(self, event: BlockedEvent) -> None:
-        """Publish one unique-destination block event."""
+    def connection_blocked(self, event: BlockedEvent) -> bool:
+        """Publish one unique-destination block event.
+
+        Returns ``True`` if the event was successfully delivered,
+        ``False`` if it was dropped (e.g. hub socket unreachable).
+        """
         ...
 
     def close(self) -> None:
@@ -399,9 +415,9 @@ class SocketEmitter:
         """Queue a ``container_exited`` JSON event onto the hub socket."""
         self._send({"type": "container_exited", "container": container, "reason": reason})
 
-    def connection_blocked(self, event: BlockedEvent) -> None:
+    def connection_blocked(self, event: BlockedEvent) -> bool:
         """Queue a ``pending`` JSON event (block) onto the hub socket."""
-        self._send(
+        return self._send(
             {
                 "type": "pending",
                 "container": event.container,
@@ -438,17 +454,33 @@ class SocketEmitter:
         self._warned_unreachable = False
         return True
 
-    def _send(self, payload: dict) -> None:
-        """Serialise *payload* to a JSON line and push it to the hub socket."""
-        if not self._ensure_connected() or self._sock is None:
-            return
+    def _send(self, payload: dict) -> bool:
+        """Serialise *payload* to a JSON line and push it to the hub socket.
+
+        Returns ``True`` on successful send, ``False`` when the hub
+        swallowed neither a fresh nor a reconnected attempt.  One
+        reconnect is tried automatically: a hub restart leaves our
+        cached socket fd dangling, so the first write fails with
+        ``BrokenPipeError`` / ``ConnectionResetError``; reopening
+        against the (now fresh) socket file lets the same event land
+        on the new hub instead of being silently lost to
+        ``_maybe_emit``'s dedup window.
+        """
         line = (json.dumps(payload, separators=(",", ":")) + "\n").encode()
-        try:
-            self._sock.sendall(line)
-        except OSError as exc:
-            # ConnectionError subclasses OSError — covered by the single catch.
-            _log.warning("hub event socket send failed: %s", exc)
-            self.close()
+        for attempt in (1, 2):
+            if not self._ensure_connected() or self._sock is None:
+                return False
+            try:
+                self._sock.sendall(line)
+                return True
+            except OSError as exc:
+                # ConnectionError subclasses OSError — covered by the single catch.
+                if attempt == 1:
+                    _log.info("hub event socket needs reconnect: %s", exc)
+                else:
+                    _log.warning("hub event socket send failed: %s", exc)
+                self.close()
+        return False
 
 
 class JsonEmitter:
@@ -462,7 +494,7 @@ class JsonEmitter:
         """Emit a ``container_exited`` JSON line."""
         _print_json({"type": "container_exited", "container": container, "reason": reason})
 
-    def connection_blocked(self, event: BlockedEvent) -> None:
+    def connection_blocked(self, event: BlockedEvent) -> bool:
         """Emit a ``pending`` JSON line carrying the full event payload."""
         _print_json(
             {
@@ -476,6 +508,9 @@ class JsonEmitter:
                 "ts": datetime.now(UTC).isoformat(),
             }
         )
+        # Stdout writes are effectively unfailable here; the fallback
+        # CLI treats every emit as delivered.
+        return True
 
     def close(self) -> None:
         """No-op — the JSON emitter holds no external state."""

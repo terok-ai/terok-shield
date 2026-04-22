@@ -383,6 +383,47 @@ class TestSocketEmitter:
         assert first.close.called
         assert second.sendall.called
 
+    def test_single_send_retries_once_after_stale_socket(self, tmp_path: Path) -> None:
+        """Hub restart leaves our cached fd dangling — one call must reach the new hub."""
+        path = tmp_path / READER_EVENTS_SOCK_FILENAME
+        stale = mock.MagicMock()
+        stale.sendall.side_effect = BrokenPipeError("hub restarted")
+        fresh = mock.MagicMock()
+        emitter = reader.SocketEmitter(path)
+        with mock.patch.object(reader.socket, "socket", side_effect=[stale, fresh]):
+            ok = emitter.connection_blocked(
+                reader.BlockedEvent(
+                    container="c1",
+                    request_id="c1:1",
+                    dest=TEST_IP1,
+                    port=443,
+                    proto=socket.IPPROTO_TCP,
+                    domain=TEST_DOMAIN,
+                )
+            )
+        assert ok is True
+        assert stale.close.called
+        fresh.sendall.assert_called_once()
+
+    def test_send_returns_false_when_hub_unreachable(self, tmp_path: Path) -> None:
+        """Persistent unreachability is the no-dedup signal ``_maybe_emit`` wants."""
+        path = tmp_path / READER_EVENTS_SOCK_FILENAME
+        fake_sock = mock.MagicMock()
+        fake_sock.connect.side_effect = FileNotFoundError(path)
+        emitter = reader.SocketEmitter(path)
+        with mock.patch.object(reader.socket, "socket", return_value=fake_sock):
+            ok = emitter.connection_blocked(
+                reader.BlockedEvent(
+                    container="c1",
+                    request_id="c1:1",
+                    dest=TEST_IP1,
+                    port=443,
+                    proto=socket.IPPROTO_TCP,
+                    domain=TEST_DOMAIN,
+                )
+            )
+        assert ok is False
+
     def test_hub_unreachable_is_non_fatal(self, tmp_path: Path) -> None:
         """If the hub socket isn't there, sends are silently dropped after one warning."""
         path = tmp_path / READER_EVENTS_SOCK_FILENAME
@@ -420,8 +461,9 @@ class _RecordingEmitter:
     def container_exited(self, container: str, *, reason: str) -> None:
         self.calls.append(("exited", (container, reason)))
 
-    def connection_blocked(self, event: reader.BlockedEvent) -> None:
+    def connection_blocked(self, event: reader.BlockedEvent) -> bool:
         self.calls.append(("blocked", event))
+        return True
 
 
 class TestReaderSession:
@@ -455,6 +497,29 @@ class TestReaderSession:
         blocked_events = [payload for kind, payload in recorder.calls if kind == "blocked"]
         assert len(blocked_events) == 1
         assert blocked_events[0].dest == TEST_IP1
+
+    def test_failed_emit_does_not_poison_dedup_window(self, tmp_path: Path) -> None:
+        """Hub unreachable → emit fails → retry on next NFLOG tick must still fire."""
+
+        class _FlakyEmitter:
+            calls = 0
+
+            def container_started(self, container: str) -> None: ...
+            def container_exited(self, container: str, *, reason: str) -> None: ...
+            def close(self) -> None: ...
+
+            def connection_blocked(self, event: reader.BlockedEvent) -> bool:
+                self.calls += 1
+                return self.calls > 1  # first call fails, second succeeds
+
+        emitter = _FlakyEmitter()
+        session = reader.ReaderSession(state_dir=tmp_path, container="c1", emitter=emitter)
+        raw = reader._RawBlockEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP)
+        # Drive two ticks so a failed emit on tick 1 can retry on tick 2
+        # without the dedup window suppressing the retry.
+        session._maybe_emit(raw, now=0.0)
+        session._maybe_emit(raw, now=1.0)
+        assert emitter.calls == 2
 
     def test_lifecycle_brackets_the_stream(self, tmp_path: Path) -> None:
         recorder = _RecordingEmitter()
