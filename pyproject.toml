@@ -4,7 +4,7 @@ build-backend = "poetry_dynamic_versioning.backend"
 
 [tool.poetry]
 name = "terok-shield"
-version = "0.6.29"
+version = "0.6.30"
 description = "nftables-based egress firewalling for Podman containers"
 readme = "README.md"
 license = "Apache-2.0"

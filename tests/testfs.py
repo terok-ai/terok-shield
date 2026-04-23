@@ -49,6 +49,8 @@ STATE_DIR_WITH_SPACES = "/path/with spaces/dir"
 NFT_BINARY = "/usr/bin/nft"
 NFT_SBIN = "/usr/sbin/nft"
 PODMAN_BINARY = "/usr/bin/podman"
+DIG_BINARY = "/usr/bin/dig"
+DNSMASQ_SBIN = "/usr/sbin/dnsmasq"
 
 # ── Well-known terok-shield path segments used in tests ──
 
