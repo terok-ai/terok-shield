@@ -61,6 +61,7 @@ if TYPE_CHECKING:
 
 _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "AuditLogger": ("terok_shield.audit", "AuditLogger"),
+    "BinaryCheck": ("terok_shield.prereqs", "BinaryCheck"),
     "CommandRunner": ("terok_shield.run", "CommandRunner"),
     "DigNotFoundError": ("terok_shield.run", "DigNotFoundError"),
     "DnsResolver": ("terok_shield.dns.resolver", "DnsResolver"),
@@ -70,6 +71,7 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "RulesetBuilder": ("terok_shield.nft.rules", "RulesetBuilder"),
     "ShieldNeedsSetup": ("terok_shield.run", "ShieldNeedsSetup"),
     "SubprocessRunner": ("terok_shield.run", "SubprocessRunner"),
+    "check_firewall_binaries": ("terok_shield.prereqs", "check_firewall_binaries"),
     "setup_global_hooks": ("terok_shield.hooks.install", "setup_global_hooks"),
     # CLI registry — re-exported for terok integration layer
     "ArgDef": ("terok_shield.cli.registry", "ArgDef"),
