@@ -67,7 +67,7 @@ path = "terok_shield.run"
 layer = "foundation"
 depends_on = []
 
-# Hub event emitter — stdlib-only client for the terok-dbus unix ingester
+# Hub event emitter — stdlib-only client for the terok-clearance unix ingester
 [[modules]]
 path = "terok_shield._hub_events"
 layer = "foundation"

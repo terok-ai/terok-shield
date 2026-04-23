@@ -10,7 +10,7 @@ an event.  Events always travel as JSON; the reader itself never speaks
 D-Bus.  Two destinations are supported:
 
 * ``--emit=socket`` (default): write events to a unix socket served by the
-  ``terok-dbus`` hub.  The hub lives in the *host* user namespace, where
+  ``terok-clearance`` hub.  The hub lives in the *host* user namespace, where
   it can emit the matching ``org.terok.Shield1`` signals onto the session
   bus.  The reader itself is stuck inside ``NS_ROOTLESS`` (that's where
   the container netns lives) and the session ``dbus-daemon`` rejects its
@@ -137,7 +137,7 @@ def _select_emitter(mode: str) -> EventEmitter:
 
 
 def _events_socket_path() -> Path:
-    """Return the canonical hub-ingester socket path (mirrors ``terok_dbus``)."""
+    """Return the canonical hub-ingester socket path (mirrors ``terok_clearance``)."""
     xdg = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
     return Path(xdg) / "terok-shield-events.sock"
 

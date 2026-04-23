@@ -182,7 +182,7 @@ class Shield:
             profiles: Profile loader (default: from config.profiles_dir).
             ruleset: Ruleset builder (default: from config loopback_ports).
             hub_events: Best-effort emitter for ``shield_up`` / ``shield_down``
-                events bound for the terok-dbus hub (default: a fresh
+                events bound for the terok-clearance hub (default: a fresh
                 :class:`HubEventEmitter` pointed at the canonical socket).
                 Pass a no-op stub in tests that should not touch the socket.
         """

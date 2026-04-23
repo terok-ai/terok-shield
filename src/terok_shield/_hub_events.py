@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""Best-effort JSON event emitter for the terok-dbus hub.
+"""Best-effort JSON event emitter for the terok-clearance hub.
 
 Shield CLI calls (``up``/``down``) notify the hub so desktop/TUI consumers
 can reflect the state change — in particular, the hub closes pending
