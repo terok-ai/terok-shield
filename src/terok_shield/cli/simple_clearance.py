@@ -51,7 +51,7 @@ def run_simple_clearance(state_dir: Path, container: str) -> None:
         print(
             "D-Bus hub (org.terok.Shield1) is active — use a D-Bus clearance "
             "client (desktop notifier or TUI).  To use this terminal fallback, "
-            "stop the hub first:  systemctl --user stop terok-dbus",
+            "stop the hub first:  systemctl --user stop terok-clearance-hub",
             file=sys.stderr,
         )
         raise SystemExit(1)
