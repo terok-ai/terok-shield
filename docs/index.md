@@ -1,12 +1,27 @@
 # terok-shield
 
-nftables-based egress firewalling for rootless Podman containers.
+Default-deny egress firewall for rootless Podman containers.
 
-## What it does
+terok-shield enforces **default-deny outbound** network filtering on
+Podman containers using nftables.  Containers can only reach
+explicitly allowed destinations — everything else is rejected with
+an ICMP error and a per-packet audit entry.  No changes to images,
+no daemon, no host-wide rules.
 
-terok-shield enforces **default-deny outbound** network filtering on Podman
-containers using nftables. Containers can only reach explicitly allowed
-destinations — everything else is rejected with an ICMP error.
+![terok ecosystem — terok-shield is the security boundary at the bottom of the stack](img/architecture.svg)
+
+## Where it sits in the stack
+
+terok-shield is the security-boundary layer of the terok ecosystem.
+The hardened-Podman runtime
+([terok-sandbox](https://github.com/terok-ai/terok-sandbox)) installs
+the OCI hooks at setup time; the operator-in-the-loop verdict
+service ([terok-clearance](https://github.com/terok-ai/terok-clearance))
+mutates the live ruleset on Allow / Deny decisions.  The shield
+itself is independent of all of these — it works on any rootless
+Podman container, with or without the rest of terok, and is the
+piece you would use first to evaluate the approach before adopting
+the full stack.
 
 ### Key properties
 

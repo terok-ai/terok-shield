@@ -5,30 +5,55 @@
 [![codecov](https://codecov.io/gh/terok-ai/terok-shield/branch/master/graph/badge.svg?token=D74Q7lvnIF)](https://codecov.io/gh/terok-ai/terok-shield)
 [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=terok-ai_terok-shield&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=terok-ai_terok-shield)
 
-nftables-based egress firewalling for rootless Podman containers.
+Default-deny egress firewall for rootless Podman containers.
 
-## Overview
+terok-shield enforces **default-deny outbound** network filtering on
+Podman containers using nftables.  Containers can only reach
+explicitly allowed destinations — everything else is rejected with
+an ICMP error and a per-packet audit entry.  No changes to images,
+no daemon, no host-wide rules.
 
-terok-shield enforces **default-deny outbound** network filtering on Podman
-containers using nftables. Containers can only reach explicitly allowed
-destinations — everything else is rejected with an ICMP error.
+<p align="center">
+  <img src="docs/img/architecture.svg" alt="terok ecosystem — terok-shield is the security boundary at the bottom of the stack">
+</p>
 
-### Features
+## Where it sits in the stack
+
+terok-shield is the security-boundary layer of the terok ecosystem.
+The hardened-Podman runtime
+([terok-sandbox](https://github.com/terok-ai/terok-sandbox)) installs
+the OCI hooks at setup time; the operator-in-the-loop verdict
+service ([terok-clearance](https://github.com/terok-ai/terok-clearance))
+mutates the live ruleset on Allow / Deny decisions.  The shield
+itself is independent of all of these — it works on any rootless
+Podman container, with or without the rest of terok, and is the
+piece you would use first to evaluate the approach before adopting
+the full stack.
+
+## Features
 
 - **Default-deny egress** with curated allowlists (domains and IPs)
-- **Dynamic DNS allowlisting** — per-container dnsmasq with `--nftset` auto-populates allow sets on every DNS resolution, handling IP rotation at runtime; falls back to static pre-start resolution via `dig` or `getent` when dnsmasq is unavailable
+- **Dynamic DNS allowlisting** — per-container dnsmasq with
+  `--nftset` auto-populates allow sets on every DNS resolution,
+  handling IP rotation at runtime; falls back to static pre-start
+  resolution via `dig` or `getent` when dnsmasq is unavailable
 - **Live allow/deny** at runtime for individual containers
-- **Per-container isolation** — each container gets its own state bundle, hooks, and audit log
-- **Connection audit logging** (JSON-lines lifecycle logs + kernel-level per-packet nftables logs)
-- **Fail-closed**: hook failure prevents the container from starting
+- **Per-container isolation** — each container gets its own state
+  bundle, hooks, and audit log
+- **Connection audit logging** (JSON-lines lifecycle logs +
+  kernel-level per-packet nftables logs)
+- **Fail-closed** — hook failure prevents the container from
+  starting
 
-### Requirements
+## Requirements
 
-- Linux with nftables (`nft` binary)
-  - Tested on Fedora 43, Debian 12 and 13, and Ubuntu 24.04, probably also works on other modern Linux distros.
-- Podman (rootless, recommended > 5.6.0, untested < 4.3.1)
+- Linux with nftables (`nft` binary) — tested on Fedora 43,
+  Debian 12 and 13, and Ubuntu 24.04, also works on other modern
+  Linux distros
+- Podman (rootless, recommended ≥ 5.6.0, untested < 4.3.1)
 - Python 3.12+
-- `dnsmasq` (recommended) for dynamic DNS-based egress control; `dig` (`dnsutils` / `bind-utils`) as fallback
+- `dnsmasq` (recommended) for dynamic DNS-based egress control;
+  `dig` (`dnsutils` / `bind-utils`) as fallback
 
 ## Installation
 
@@ -51,8 +76,8 @@ terok-shield ships with several bundled profiles
 | `dev-node` | Yarn, jsDelivr, unpkg |
 | `nvidia-hpc` | CUDA, NGC, NVIDIA drivers |
 
-The default profile is `dev-standard`. To add a custom allowlist, create a
-`.txt` file with one domain or IP per line:
+The default profile is `dev-standard`.  To add a custom allowlist,
+create a `.txt` file with one domain or IP per line:
 
 ```bash
 mkdir -p ~/.config/terok/shield/profiles
@@ -69,9 +94,9 @@ EOF
 terok-shield run my-container -- alpine:latest sh
 ```
 
-This resolves DNS, installs OCI hooks, and launches the container with a
-default-deny firewall — only destinations in the `dev-standard` profile are
-reachable. To use custom profiles:
+This resolves DNS, installs OCI hooks, and launches the container
+with a default-deny firewall — only destinations in the
+`dev-standard` profile are reachable.  To use custom profiles:
 
 ```bash
 terok-shield run my-container --profiles dev-standard my-project -- alpine:latest sh
