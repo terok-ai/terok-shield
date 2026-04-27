@@ -102,7 +102,7 @@ except PackageNotFoundError:
 
 @dataclass(frozen=True)
 class EnvironmentCheck:
-    """Result of [`Shield.check_environment`][].
+    """Result of [`Shield.check_environment`][terok_shield.Shield.check_environment].
 
     Machine-readable fields for programmatic consumers (terok TUI, scripts).
     Human-readable ``issues`` and ``setup_hint`` for CLI display.
@@ -185,7 +185,7 @@ class Shield:
             ruleset: Ruleset builder (default: from config loopback_ports).
             hub_events: Best-effort emitter for ``shield_up`` / ``shield_down``
                 events bound for the terok-clearance hub (default: a fresh
-                [`HubEventEmitter`][] pointed at the canonical socket).
+                [`HubEventEmitter`][terok_shield.HubEventEmitter] pointed at the canonical socket).
                 Pass a no-op stub in tests that should not touch the socket.
         """
         from . import state
@@ -229,7 +229,7 @@ class Shield:
         """Check the podman environment for compatibility issues.
 
         Proactive check for API consumers (e.g. terok).  Returns an
-        [`EnvironmentCheck`][] with detected issues and setup hints.
+        [`EnvironmentCheck`][terok_shield.EnvironmentCheck] with detected issues and setup hints.
         Does not raise — the caller decides how to handle issues.
         """
         from . import state

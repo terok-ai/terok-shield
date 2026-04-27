@@ -90,7 +90,7 @@ class PodmanInfo:
 
 
 def parse_podman_info(json_str: str) -> PodmanInfo:
-    """Parse ``podman info -f json`` output into a [`PodmanInfo`][].
+    """Parse ``podman info -f json`` output into a [`PodmanInfo`][terok_shield.podman_info.PodmanInfo].
 
     Returns a zero-version fallback on invalid input.
     """
@@ -167,7 +167,7 @@ def has_global_hooks(hooks_dirs: list[Path] | None = None) -> bool:
 
     Args:
         hooks_dirs: Directories to check (default: auto-detect via
-            [`find_hooks_dirs`][]).
+            [`find_hooks_dirs`][terok_shield.podman_info.find_hooks_dirs]).
     """
     if hooks_dirs is None:
         hooks_dirs = find_hooks_dirs()

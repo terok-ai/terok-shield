@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 class DnsResolver:
     """Stateless DNS resolver — all persistence lives in the cache file.
 
-    The only dependency is a [`CommandRunner`][] for ``dig`` / ``getent``
+    The only dependency is a [`CommandRunner`][terok_shield.dns.resolver.CommandRunner] for ``dig`` / ``getent``
     subprocess calls.
     """
 

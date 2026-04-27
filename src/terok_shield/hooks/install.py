@@ -5,8 +5,8 @@
 
 Writes the hook entrypoint script and JSON descriptors that tell podman
 to invoke terok-shield at ``createRuntime`` and ``poststop``.  Two entry
-points: [`install_hooks`][] for per-container setup during pre_start,
-and [`setup_global_hooks`][] for one-time system-wide installation.
+points: [`install_hooks`][terok_shield.hooks.install.install_hooks] for per-container setup during pre_start,
+and [`setup_global_hooks`][terok_shield.hooks.install.setup_global_hooks] for one-time system-wide installation.
 
 Pure file I/O — no runtime container interaction.
 """

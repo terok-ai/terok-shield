@@ -203,7 +203,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _add_argdef(parser: argparse.ArgumentParser, arg: ArgDef) -> None:
-    """Add an [`ArgDef`][] to an argparse parser."""
+    """Add an [`ArgDef`][terok_shield.cli.main.ArgDef] to an argparse parser."""
     kwargs: dict = {}
     if arg.help:
         kwargs["help"] = arg.help
@@ -475,7 +475,7 @@ def _resolve_state_dir(container: str | None, state_dir_override: Path | None) -
 
 
 def _load_config_file() -> ShieldFileConfig:
-    """Load and validate ``config.yml`` via [`ShieldFileConfig`][].
+    """Load and validate ``config.yml`` via [`ShieldFileConfig`][terok_shield.cli.main.ShieldFileConfig].
 
     Returns defaults when the file is missing or contains invalid YAML.
     Validation errors (typos, wrong types) abort with a clear message.

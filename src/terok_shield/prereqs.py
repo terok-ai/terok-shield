@@ -61,11 +61,11 @@ def check_firewall_binaries() -> tuple[BinaryCheck, ...]:
 
 
 def which_sbin_aware(name: str) -> str:
-    """Resolve *name* like [`shutil.which`][], falling back to sbin directories.
+    """Resolve *name* like [`shutil.which`][shutil.which], falling back to sbin directories.
 
     Returns the absolute path of the first match or an empty string
     when the binary is not on ``PATH`` and not in ``/usr/sbin`` or
-    ``/sbin``.  The sbin fallback reuses [`shutil.which`][] with an
+    ``/sbin``.  The sbin fallback reuses [`shutil.which`][shutil.which] with an
     explicit ``path=`` so executability (``os.X_OK``) is checked the
     same way ``PATH`` resolution would — a regular non-executable file
     in ``/usr/sbin`` shouldn't count as a hit.

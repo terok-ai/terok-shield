@@ -3,8 +3,8 @@
 
 """Subprocess execution boundary for all external commands.
 
-Every shell-out in terok-shield flows through the [`CommandRunner`][]
-protocol.  Production code uses [`SubprocessRunner`][]; tests inject
+Every shell-out in terok-shield flows through the [`CommandRunner`][terok_shield.run.CommandRunner]
+protocol.  Production code uses [`SubprocessRunner`][terok_shield.run.SubprocessRunner]; tests inject
 fakes.  This keeps external dependencies auditable and mockable in one
 place.
 """

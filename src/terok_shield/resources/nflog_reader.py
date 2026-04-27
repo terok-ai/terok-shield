@@ -260,7 +260,7 @@ class ReaderSession:
     _DEDUP_WINDOW_S = 30.0
 
     def __init__(self, *, state_dir: Path, container: str, emitter: EventEmitter) -> None:
-        """Prepare the session; the socket is opened in [`run`][]."""
+        """Prepare the session; the socket is opened in [`run`][terok_shield.resources.nflog_reader.ReaderSession.run]."""
         self._state_dir = state_dir
         self._container = container
         self._emitter = emitter

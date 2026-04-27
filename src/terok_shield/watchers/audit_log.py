@@ -5,7 +5,7 @@
 
 Watches for new JSON-lines entries written by
 [`AuditLogger`][terok_shield.audit.AuditLogger] and surfaces them as
-[`WatchEvent`][] instances with ``source="audit"``.
+[`WatchEvent`][terok_shield.watchers.WatchEvent] instances with ``source="audit"``.
 """
 
 import json

@@ -82,7 +82,7 @@ class ClearanceSession:
     """
 
     def __init__(self, *, state_dir: Path, container: str) -> None:
-        """Prepare the session — the reader is spawned in [`run`][]."""
+        """Prepare the session — the reader is spawned in [`run`][terok_shield.cli.simple_clearance.ClearanceSession.run]."""
         self._state_dir = state_dir
         self._container = container
         self._queue: list[_Pending] = []

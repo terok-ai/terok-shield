@@ -27,7 +27,7 @@ def install_reader_resource(dest: Path | None = None) -> Path:
 
     Args:
         dest: Destination path for the reader script.  Defaults to
-            [`reader_script_path`][] — the canonical XDG-aware
+            [`reader_script_path`][terok_shield.hooks.reader_install.reader_script_path] — the canonical XDG-aware
             location that the OCI bridge hook looks for.  Parents are
             created on demand.
 

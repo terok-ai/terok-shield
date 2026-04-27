@@ -3,7 +3,7 @@
 
 """Host-wide filesystem paths and filenames for terok-shield artifacts.
 
-Per-container state paths live in [`terok_shield.state`][].  This
+Per-container state paths live in [`terok_shield.state`][terok_shield.state].  This
 module is the single source of truth for artifacts shared across
 containers or installed into host-wide locations:
 

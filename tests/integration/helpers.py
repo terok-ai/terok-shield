@@ -148,7 +148,7 @@ def assert_connectable(container: str, ip: str, port: int = 53, timeout: int = 5
 def assert_not_connectable(container: str, ip: str, port: int = 53, timeout: int = 5) -> None:
     """Assert that a TCP connection to ip:port is blocked from inside a container.
 
-    Inverse of [`assert_connectable`][].  Uses ``nc -z`` and expects failure.
+    Inverse of `assert_connectable`.  Uses ``nc -z`` and expects failure.
 
     Args:
         container: Container name or ID.
@@ -241,7 +241,7 @@ def assert_blocked(container: str, url: str, timeout: int = 10) -> None:
 def assert_reachable(container: str, url: str, timeout: int = 10) -> None:
     """Assert that a URL is reachable from inside a container.
 
-    Delegates to [`is_reachable`][] which tolerates busybox wget
+    Delegates to `is_reachable` which tolerates busybox wget
     redirect failures (``bad address``) as proof of TCP connectivity.
 
     Args:

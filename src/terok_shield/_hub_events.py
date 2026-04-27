@@ -47,7 +47,7 @@ class HubEventEmitter:
     """
 
     def __init__(self, socket_path: Path | None = None) -> None:
-        """Remember the target socket; defaults to [`hub_socket_path`][]."""
+        """Remember the target socket; defaults to `hub_socket_path`."""
         self._path = socket_path or hub_socket_path()
 
     def shield_up(self, container: str) -> None:
