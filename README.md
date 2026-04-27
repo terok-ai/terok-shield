@@ -111,13 +111,6 @@ terok-shield allow my-container example.com
 terok-shield deny my-container example.com   # revoke later
 ```
 
-## Documentation
-
-- **[User Guide](https://terok-ai.github.io/terok-shield/guide/)** —
-  getting started, allowlist profiles, firewall modes, CLI reference
-- **[Developer Guide](https://terok-ai.github.io/terok-shield/developer/)** —
-  contributing, security model, architecture
-
 ## License
 
 Apache-2.0 — see [LICENSES/Apache-2.0.txt](LICENSES/Apache-2.0.txt).
