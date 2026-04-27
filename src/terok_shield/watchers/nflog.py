@@ -102,7 +102,7 @@ class NflogWatcher:
     def __init__(self, sock: socket.socket, container: str) -> None:
         """Wrap an already-bound NFLOG netlink socket.
 
-        Use :meth:`create` instead of calling this directly.
+        Use [`create`][] instead of calling this directly.
         """
         self._sock = sock
         self._container = container
@@ -149,7 +149,7 @@ class NflogWatcher:
         return events
 
     def _attr_to_event(self, attrs: dict[int, bytes]) -> WatchEvent | None:
-        """Convert parsed NFLOG attributes into a :class:`WatchEvent`."""
+        """Convert parsed NFLOG attributes into a [`WatchEvent`][]."""
         prefix_raw = attrs.get(_NFULA_PREFIX, b"")
         prefix = prefix_raw.rstrip(b"\x00").decode("ascii", errors="replace").strip()
 

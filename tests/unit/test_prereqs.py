@@ -69,9 +69,9 @@ def test_which_sbin_aware_skips_non_executable_files(
 ) -> None:
     """A non-executable regular file in sbin doesn't count as a hit.
 
-    Exercises the executability check that real :func:`shutil.which`
+    Exercises the executability check that real [`shutil.which`][]
     performs (``os.X_OK``) — the reason we migrated from
-    :meth:`Path.is_file` to ``shutil.which(name, path=dir)``.  A host
+    [`Path.is_file`][] to ``shutil.which(name, path=dir)``.  A host
     with a mode-0o644 ``/usr/sbin/nft`` (rpm gone wrong, chmod
     accident) must probe as missing, not as present-but-broken.
     """
