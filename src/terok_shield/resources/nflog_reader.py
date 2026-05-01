@@ -371,6 +371,11 @@ class ReaderSession:
         retries would currently re-write the same ``"blocked"`` line
         to ``audit.jsonl`` — flooding the forensic log during the
         very window where it's least helpful.
+
+        Dossier resolution happens once per fresh tick; both the audit
+        line and the wire payload see the same snapshot, and a renamed
+        container won't appear differently on either side of the same
+        block.
         """
         if _is_noise_dest(event.dest):
             return
@@ -382,12 +387,13 @@ class ReaderSession:
         audit_fresh = last_audit is None or (now - last_audit) >= self._DEDUP_WINDOW_S
         if not emit_fresh and not audit_fresh:
             return
-        if audit_fresh and self._append_audit_block(event, domain):
+        dossier = self._resolve_dossier()
+        if audit_fresh and self._append_audit_block(event, domain, dossier):
             self._last_audit[dedup_key] = now
         if emit_fresh:
             request_id = f"{self._container}:{self._next_id}"
             self._next_id += 1
-            if self._emit_connection_blocked(event, domain, request_id):
+            if self._emit_connection_blocked(event, domain, request_id, dossier):
                 self._last_emit[dedup_key] = now
 
     def _resolve_domain(self, dest: str) -> str:
@@ -398,7 +404,13 @@ class ReaderSession:
             domain = self._domain_cache.lookup(dest)
         return domain
 
-    def _emit_connection_blocked(self, event: _RawBlockEvent, domain: str, request_id: str) -> bool:
+    def _emit_connection_blocked(
+        self,
+        event: _RawBlockEvent,
+        domain: str,
+        request_id: str,
+        dossier: dict[str, str],
+    ) -> bool:
         """Publish one ``ConnectionBlocked`` for *event* — caller supplies the domain.
 
         Audit-vs-wire dedup is split: ``_maybe_emit`` decides
@@ -418,7 +430,7 @@ class ReaderSession:
                 port=event.port,
                 proto=event.proto,
                 domain=domain,
-                dossier=self._resolve_dossier(),
+                dossier=dossier,
             )
         )
 
@@ -454,7 +466,9 @@ class ReaderSession:
         dossier.update({str(k): str(v) for k, v in decoded.items()})
         return dossier
 
-    def _append_audit_block(self, event: _RawBlockEvent, domain: str) -> bool:
+    def _append_audit_block(
+        self, event: _RawBlockEvent, domain: str, dossier: dict[str, str]
+    ) -> bool:
         """Write one ``"action": "blocked"`` entry to ``state_dir/audit.jsonl``.
 
         Inlined (rather than importing ``terok_shield.audit.AuditLogger``)
@@ -472,6 +486,10 @@ class ReaderSession:
         disappear into DEBUG noise on a host where the default log
         level is INFO — see ``terok_shield.audit.AuditLogger``'s
         host-side path for the same posture.
+
+        The optional ``dossier`` field carries whatever orchestrator
+        identity the wire event also got — present only when non-empty
+        so shield-only deployments don't pad audit rows with ``{}``.
         """
         entry = {
             "ts": datetime.now(UTC).isoformat(timespec="seconds"),
@@ -483,6 +501,8 @@ class ReaderSession:
         }
         if domain:
             entry["domain"] = domain
+        if dossier:
+            entry["dossier"] = dossier
         line = json.dumps(entry, separators=(",", ":")) + "\n"
         path = self._state_dir / "audit.jsonl"
         try:

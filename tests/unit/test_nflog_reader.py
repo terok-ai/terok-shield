@@ -902,6 +902,31 @@ class TestAuditBlockAppend:
         entry = json.loads((tmp_path / AUDIT_FILENAME).read_text().splitlines()[0])
         assert "domain" not in entry
 
+    def test_audit_includes_dossier_when_non_empty(self, tmp_path: Path) -> None:
+        """Resolved dossier flows into the audit entry alongside dest/port/proto."""
+        recorder = _RecordingEmitter()
+        session = reader.ReaderSession(
+            state_dir=tmp_path,
+            container="c1",
+            emitter=recorder,
+            static_dossier={"task": "abc", "project": "terok"},
+        )
+        raw = reader._RawBlockEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP)
+        session._maybe_emit(raw, now=0.0)
+
+        entry = json.loads((tmp_path / AUDIT_FILENAME).read_text().splitlines()[0])
+        assert entry["dossier"] == {"task": "abc", "project": "terok"}
+
+    def test_audit_omits_dossier_when_empty(self, tmp_path: Path) -> None:
+        """Shield-only deployments don't pad audit rows with an empty ``dossier`` key."""
+        recorder = _RecordingEmitter()
+        session = reader.ReaderSession(state_dir=tmp_path, container="c1", emitter=recorder)
+        raw = reader._RawBlockEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP)
+        session._maybe_emit(raw, now=0.0)
+
+        entry = json.loads((tmp_path / AUDIT_FILENAME).read_text().splitlines()[0])
+        assert "dossier" not in entry
+
     def test_audit_written_before_wire_emit(self, tmp_path: Path) -> None:
         """Hub down (emitter returns False) → audit entry is still recorded.
 
