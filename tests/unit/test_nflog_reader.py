@@ -205,6 +205,93 @@ class TestReaderSessionDossierStorage:
         assert session._meta_path is None
 
 
+class TestResolveDossier:
+    """``_resolve_dossier`` merges static annotations with the meta-path JSON."""
+
+    def test_static_only_when_no_meta_path(self, tmp_path: Path) -> None:
+        session = reader.ReaderSession(
+            state_dir=tmp_path,
+            container="c1",
+            emitter=_RecordingEmitter(),
+            static_dossier={"task": "abc", "project": "terok"},
+        )
+        assert session._resolve_dossier() == {"task": "abc", "project": "terok"}
+
+    def test_meta_path_key_does_not_leak_into_dossier(self, tmp_path: Path) -> None:
+        """``meta_path`` is plumbing — it must never appear on the wire."""
+        session = reader.ReaderSession(
+            state_dir=tmp_path,
+            container="c1",
+            emitter=_RecordingEmitter(),
+            static_dossier={"task": "abc", "meta_path": "/some/file.json"},
+        )
+        # File doesn't exist → dossier is just the static floor minus meta_path.
+        assert session._resolve_dossier() == {"task": "abc"}
+
+    def test_meta_path_overrides_static_keys(self, tmp_path: Path) -> None:
+        """Meta-path JSON wins over the static floor for matching keys."""
+        meta = tmp_path / "task.json"
+        meta.write_text(json.dumps({"task": "renamed", "container_name": "live-name"}))
+        session = reader.ReaderSession(
+            state_dir=tmp_path,
+            container="c1",
+            emitter=_RecordingEmitter(),
+            static_dossier={
+                "task": "original",
+                "project": "terok",
+                "meta_path": str(meta),
+            },
+        )
+        assert session._resolve_dossier() == {
+            "task": "renamed",
+            "project": "terok",
+            "container_name": "live-name",
+        }
+
+    def test_missing_meta_file_falls_back_to_static(self, tmp_path: Path) -> None:
+        session = reader.ReaderSession(
+            state_dir=tmp_path,
+            container="c1",
+            emitter=_RecordingEmitter(),
+            static_dossier={"task": "abc", "meta_path": str(tmp_path / "missing.json")},
+        )
+        assert session._resolve_dossier() == {"task": "abc"}
+
+    def test_malformed_meta_file_falls_back_to_static(self, tmp_path: Path) -> None:
+        meta = tmp_path / "task.json"
+        meta.write_text("{not json")
+        session = reader.ReaderSession(
+            state_dir=tmp_path,
+            container="c1",
+            emitter=_RecordingEmitter(),
+            static_dossier={"task": "abc", "meta_path": str(meta)},
+        )
+        assert session._resolve_dossier() == {"task": "abc"}
+
+    def test_non_object_meta_file_falls_back_to_static(self, tmp_path: Path) -> None:
+        """A JSON list/scalar at meta_path is rejected without crashing."""
+        meta = tmp_path / "task.json"
+        meta.write_text("[1, 2, 3]")
+        session = reader.ReaderSession(
+            state_dir=tmp_path,
+            container="c1",
+            emitter=_RecordingEmitter(),
+            static_dossier={"task": "abc", "meta_path": str(meta)},
+        )
+        assert session._resolve_dossier() == {"task": "abc"}
+
+    def test_meta_file_values_are_string_coerced(self, tmp_path: Path) -> None:
+        meta = tmp_path / "task.json"
+        meta.write_text(json.dumps({"port": 8080, "enabled": True}))
+        session = reader.ReaderSession(
+            state_dir=tmp_path,
+            container="c1",
+            emitter=_RecordingEmitter(),
+            static_dossier={"meta_path": str(meta)},
+        )
+        assert session._resolve_dossier() == {"port": "8080", "enabled": "True"}
+
+
 class TestIsNoiseDest:
     """``_is_noise_dest`` filters IPv6 link-local multicast only."""
 
@@ -387,6 +474,24 @@ class TestJsonEmitter:
         assert payload["container"] == "c1"
         assert payload["dest"] == TEST_IP1
         assert payload["domain"] == TEST_DOMAIN
+        assert payload["dossier"] == {}
+
+    def test_connection_blocked_carries_dossier(self, capsys: pytest.CaptureFixture) -> None:
+        """A non-empty ``dossier`` field lands as a JSON object on the wire."""
+        emitter = reader.JsonEmitter()
+        emitter.connection_blocked(
+            reader.BlockedEvent(
+                container="c1",
+                request_id="c1:1",
+                dest=TEST_IP1,
+                port=443,
+                proto=socket.IPPROTO_TCP,
+                domain=TEST_DOMAIN,
+                dossier={"task": "abc", "container_name": "n1"},
+            )
+        )
+        payload = json.loads(capsys.readouterr().out.strip())
+        assert payload["dossier"] == {"task": "abc", "container_name": "n1"}
 
     def test_container_lifecycle_prints_own_types(self, capsys: pytest.CaptureFixture) -> None:
         emitter = reader.JsonEmitter()
@@ -413,6 +518,7 @@ class TestSocketEmitter:
                     port=443,
                     proto=socket.IPPROTO_TCP,
                     domain=TEST_DOMAIN,
+                    dossier={"task": "abc"},
                 )
             )
         fake_sock.connect.assert_called_once_with(str(path))
@@ -422,6 +528,7 @@ class TestSocketEmitter:
         assert payload["type"] == "pending"
         assert payload["container"] == "c1"
         assert payload["domain"] == TEST_DOMAIN
+        assert payload["dossier"] == {"task": "abc"}
 
     def test_connects_lazily_and_reuses_socket(self, tmp_path: Path) -> None:
         path = tmp_path / READER_EVENTS_SOCK_FILENAME
@@ -690,6 +797,31 @@ class TestReaderSession:
         blocked_events = [payload for kind, payload in recorder.calls if kind == "blocked"]
         assert len(blocked_events) == 1
         assert blocked_events[0].domain == TEST_DOMAIN
+
+    def test_emit_carries_resolved_dossier_on_blocked_event(self, tmp_path: Path) -> None:
+        """End-to-end: static + meta-path JSON merge into ``BlockedEvent.dossier``."""
+        meta = tmp_path / "task.json"
+        meta.write_text(json.dumps({"task": "live", "container_name": "alpine-7"}))
+        recorder = _RecordingEmitter()
+        session = reader.ReaderSession(
+            state_dir=tmp_path,
+            container="c1",
+            emitter=recorder,
+            static_dossier={
+                "project": "terok",
+                "task": "stale",
+                "meta_path": str(meta),
+            },
+        )
+        raw = reader._RawBlockEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP)
+        session._maybe_emit(raw, now=0.0)
+
+        blocked = next(payload for kind, payload in recorder.calls if kind == "blocked")
+        assert blocked.dossier == {
+            "project": "terok",
+            "task": "live",  # meta-path file overrides the stale static value
+            "container_name": "alpine-7",
+        }
 
     def test_dedup_falls_back_to_dest_when_domain_unknown(self, tmp_path: Path) -> None:
         """With no cached domain, dedup stays on raw dest IP — no regression."""

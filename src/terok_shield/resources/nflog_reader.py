@@ -45,7 +45,7 @@ import socket
 import struct
 import subprocess  # nosec B404 — podman/nsenter re-exec for container netns
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
@@ -94,7 +94,14 @@ _NFA_HDR = struct.Struct("=HH")
 
 @dataclass(frozen=True)
 class BlockedEvent:
-    """A packet the kernel dropped at the interactive-deny rule — one per unique dest IP."""
+    """A packet the kernel dropped at the interactive-deny rule — one per unique dest IP.
+
+    ``dossier`` carries the orchestrator-supplied identity bundle resolved at
+    emit time — ``container_name``, ``project``, ``task`` etc.  Empty for
+    shield-only deployments where no orchestrator publishes ``dossier.*``
+    annotations; the consumer (clearance UI) renders the bare container
+    field in that case.
+    """
 
     container: str
     request_id: str
@@ -102,6 +109,7 @@ class BlockedEvent:
     port: int
     proto: int
     domain: str
+    dossier: dict[str, str] = field(default_factory=dict)
 
 
 # ── Entry point ───────────────────────────────────────────────────────
@@ -410,8 +418,41 @@ class ReaderSession:
                 port=event.port,
                 proto=event.proto,
                 domain=domain,
+                dossier=self._resolve_dossier(),
             )
         )
+
+    def _resolve_dossier(self) -> dict[str, str]:
+        """Build the per-emit dossier from static annotations + the meta-path file.
+
+        The orchestrator's static ``dossier.*`` annotations (set at
+        ``podman run``) form the floor.  When ``dossier.meta_path`` was
+        supplied, its JSON contents — re-read on every emit so name
+        changes (podman rename, late-bound task naming) propagate without
+        a reader restart — override matching keys.  ``meta_path`` itself
+        is internal plumbing and never leaks onto the wire.
+
+        Soft-fail at every step: missing file, EACCES, malformed JSON,
+        non-object payload — each lands at the static-only floor rather
+        than dropping the event.  Resolving is on the hot path of every
+        block, so we eat parse errors quietly here and surface them once
+        elsewhere if needed.
+        """
+        dossier = {k: v for k, v in self._static_dossier.items() if k != "meta_path"}
+        if self._meta_path is None:
+            return dossier
+        try:
+            text = self._meta_path.read_text(encoding="utf-8")
+        except OSError:
+            return dossier
+        try:
+            decoded = json.loads(text)
+        except ValueError:
+            return dossier
+        if not isinstance(decoded, dict):
+            return dossier
+        dossier.update({str(k): str(v) for k, v in decoded.items()})
+        return dossier
 
     def _append_audit_block(self, event: _RawBlockEvent, domain: str) -> bool:
         """Write one ``"action": "blocked"`` entry to ``state_dir/audit.jsonl``.
@@ -533,6 +574,7 @@ class SocketEmitter:
                 "port": event.port,
                 "proto": event.proto,
                 "domain": event.domain,
+                "dossier": event.dossier,
                 "ts": datetime.now(UTC).isoformat(),
             }
         )
@@ -612,6 +654,7 @@ class JsonEmitter:
                 "port": event.port,
                 "proto": event.proto,
                 "domain": event.domain,
+                "dossier": event.dossier,
                 "ts": datetime.now(UTC).isoformat(),
             }
         )

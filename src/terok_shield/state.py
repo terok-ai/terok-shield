@@ -37,7 +37,7 @@ from pathlib import Path
 
 from .paths import HOOK_ENTRYPOINT_NAME
 
-BUNDLE_VERSION = 10
+BUNDLE_VERSION = 11
 """Integer version of the state bundle layout.
 
 Bumped whenever the file layout changes in a backwards-incompatible way.
@@ -48,6 +48,13 @@ changes even if the file layout itself is unchanged, so that
 ``terok setup`` rewrites the script instead of short-circuiting.
 
 Version history:
+    11 — bridge hook extracts ``dossier.*`` OCI annotations and
+        forwards them to the reader as a JSON-encoded
+        ``--annotations=…`` argv element; reader resolves a per-emit
+        dossier (static annotations merged with optional meta-path
+        JSON) and ships it on the wire and in the audit log.  Old
+        readers reject the new flag; bumping forces ``terok setup``
+        to rewrite the on-disk reader script.
     10 — reader appends ``"action": "blocked"`` entries to
         ``audit.jsonl`` before each wire emit, closing the
         block→verdict timeline gap (verdicts were already audited
