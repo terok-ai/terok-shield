@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 """OCI hook: apply pre-generated terok-shield nft ruleset.
@@ -183,7 +184,28 @@ def _bridge_main(oci: dict, sd: Path, stage: str, log_path: Path) -> None:
         _log("terok-shield bridge hook: missing container id — skipping reader", log_path)
         return
 
-    _spawn_reader(sd, container_id)
+    annotations = oci.get("annotations") or {}
+    dossier = _extract_dossier(annotations if isinstance(annotations, dict) else {})
+    _spawn_reader(sd, container_id, dossier)
+
+
+def _extract_dossier(annotations: dict) -> dict[str, str]:
+    """Pluck the orchestrator-supplied identity bundle out of OCI annotations.
+
+    Annotations under the ``dossier.*`` namespace are the orchestrator's
+    contract with the shield: ``dossier.task`` etc. flow through to the
+    clearance UI as event-payload fields.  The prefix is stripped here so the
+    reader sees a flat dict it can pass through verbatim.
+
+    Non-string keys/values are coerced to ``str``; a non-dict input maps to
+    ``{}`` so the bridge path stays soft-fail.
+    """
+    out: dict[str, str] = {}
+    for key, value in annotations.items():
+        if not isinstance(key, str) or not key.startswith("dossier."):
+            continue
+        out[key[len("dossier.") :]] = str(value)
+    return out
 
 
 # ── Nft hook: ruleset + dnsmasq ────────────────────────
@@ -331,13 +353,20 @@ def _is_our_dnsmasq(pid_int: int, conf_path: Path) -> bool:
 # next banner.
 
 
-def _spawn_reader(sd: Path, container_id: str) -> None:
+def _spawn_reader(sd: Path, container_id: str, dossier: dict[str, str] | None = None) -> None:
     """Start the NFLOG reader for *container_id* as a detached child.
 
     No-op when the reader script is missing (``--no-dbus-bridge`` installs)
     or the operator's session bus is unreachable (headless host).  Safe to
     call repeatedly — a second call while the prior reader is still alive
     is treated as a no-op via the ``reader.pid`` liveness check.
+
+    *dossier* — orchestrator-supplied identity fields (``container_name``,
+    ``project``, ``task``, ``meta_path``, …) extracted from the OCI
+    ``dossier.*`` annotation namespace.  Forwarded to the reader as a
+    JSON-encoded ``--annotations`` argv element so the reader (which is
+    where the wire payload is actually composed) doesn't need to re-parse
+    the OCI state itself.
     """
     reader = _reader_script_path()
     if not reader.exists():
@@ -364,9 +393,17 @@ def _spawn_reader(sd: Path, container_id: str) -> None:
     # annotations (shield's own pre_start wrote them) and the 12-char
     # container id we already pulled out of the OCI state earlier in this
     # hook.  No shell involvement, no untrusted tokens.
+    annotations_json = json.dumps(dossier or {}, separators=(",", ":"), sort_keys=True)
     try:
         proc = subprocess.Popen(  # noqa: S603  # nosec B603  # NOSONAR(pythonsecurity:S6350)
-            ["/usr/bin/python3", str(reader), str(sd), container_id, "--emit=socket"],
+            [
+                "/usr/bin/python3",
+                str(reader),
+                str(sd),
+                container_id,
+                "--emit=socket",
+                f"--annotations={annotations_json}",
+            ],
             env=env,
             stdin=subprocess.DEVNULL,
             stdout=err_fh,

@@ -143,6 +143,68 @@ class TestSelectEmitter:
         assert isinstance(reader._select_emitter("socket"), reader.SocketEmitter)
 
 
+class TestParseAnnotations:
+    """``_parse_annotations`` turns the JSON ``--annotations`` payload into a flat dict."""
+
+    def test_well_formed_json_object_returns_dict(self) -> None:
+        assert reader._parse_annotations('{"task": "abc", "project": "terok"}') == {
+            "task": "abc",
+            "project": "terok",
+        }
+
+    def test_empty_string_returns_empty_dict(self) -> None:
+        assert reader._parse_annotations("") == {}
+
+    def test_empty_object_returns_empty_dict(self) -> None:
+        assert reader._parse_annotations("{}") == {}
+
+    def test_malformed_json_soft_fails_to_empty(self, caplog: pytest.LogCaptureFixture) -> None:
+        caplog.set_level("WARNING", logger=reader.__name__)
+        assert reader._parse_annotations("{not json") == {}
+        assert any("malformed" in r.message for r in caplog.records)
+
+    def test_non_object_payload_soft_fails_to_empty(self, caplog: pytest.LogCaptureFixture) -> None:
+        caplog.set_level("WARNING", logger=reader.__name__)
+        assert reader._parse_annotations("[1, 2, 3]") == {}
+        assert any("non-object" in r.message for r in caplog.records)
+
+    def test_non_string_values_are_coerced(self) -> None:
+        assert reader._parse_annotations('{"port": 1234}') == {"port": "1234"}
+
+
+class TestReaderSessionDossierStorage:
+    """ReaderSession holds onto the static dossier and meta_path for emit-time use."""
+
+    def test_static_dossier_round_trips_unchanged(self, tmp_path: Path) -> None:
+        session = reader.ReaderSession(
+            state_dir=tmp_path,
+            container="c1",
+            emitter=_RecordingEmitter(),
+            static_dossier={"task": "abc", "project": "terok"},
+        )
+        assert session._static_dossier == {"task": "abc", "project": "terok"}
+        assert session._meta_path is None
+
+    def test_meta_path_is_lifted_into_a_path(self, tmp_path: Path) -> None:
+        meta = tmp_path / "task.json"
+        session = reader.ReaderSession(
+            state_dir=tmp_path,
+            container="c1",
+            emitter=_RecordingEmitter(),
+            static_dossier={"meta_path": str(meta)},
+        )
+        assert session._meta_path == meta
+
+    def test_default_static_dossier_is_empty(self, tmp_path: Path) -> None:
+        session = reader.ReaderSession(
+            state_dir=tmp_path,
+            container="c1",
+            emitter=_RecordingEmitter(),
+        )
+        assert session._static_dossier == {}
+        assert session._meta_path is None
+
+
 class TestIsNoiseDest:
     """``_is_noise_dest`` filters IPv6 link-local multicast only."""
 

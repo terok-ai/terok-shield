@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
@@ -112,14 +113,17 @@ def main() -> None:  # pragma: no cover — real argparse + subprocess re-exec
     On first entry (``_TEROK_SHIELD_NFLOG_NSENTER`` unset) this process re-execs
     itself under ``nsenter`` — with ``podman unshare`` prepended when we're not
     already in ``NS_ROOTLESS`` — so the NFLOG bind happens in the container's
-    netns.  The re-exec carries the same ``--emit`` choice forward, so the
-    destination (unix socket or stdout JSON) stays whatever the caller picked.
+    netns.  The re-exec carries the same ``--emit`` and ``--annotations`` choice
+    forward, so the destination (unix socket or stdout JSON) and the orchestrator
+    dossier stay whatever the caller picked.
     """
     args = _parse_args()
     logging.basicConfig(level=logging.INFO, format="nflog-reader: %(message)s")
 
     if os.environ.get(_NSENTER_ENV) != "1":
-        _reexec_inside_container_netns(args.state_dir, args.container, args.emit)
+        _reexec_inside_container_netns(
+            args.state_dir, args.container, args.emit, args.annotations_raw
+        )
         return
 
     emitter = _select_emitter(args.emit)
@@ -127,6 +131,7 @@ def main() -> None:  # pragma: no cover — real argparse + subprocess re-exec
         state_dir=args.state_dir,
         container=args.container,
         emitter=emitter,
+        static_dossier=args.annotations,
     )
     try:
         session.run()
@@ -155,7 +160,7 @@ def _events_socket_path() -> Path:
 
 
 def _reexec_inside_container_netns(
-    state_dir: Path, container: str, emit: str
+    state_dir: Path, container: str, emit: str, annotations_raw: str
 ) -> None:  # pragma: no cover — real subprocess re-exec
     """Re-enter this script inside the container's netns so NFLOG is reachable.
 
@@ -164,6 +169,11 @@ def _reexec_inside_container_netns(
     When we're in the initial userns (a manual CLI run), prepend
     ``podman unshare`` to cross into ``NS_ROOTLESS`` first and pick up
     ``CAP_SYS_ADMIN`` over the container-owning userns.
+
+    ``annotations_raw`` is forwarded verbatim — keeping the JSON exactly as it
+    arrived avoids one round of dict→JSON re-encoding (and the dict-key-order
+    drift it would inflict on the cmdline that ``_is_our_reader`` later compares
+    against).
     """
     pid = _podman_container_pid(container)
     script = Path(__file__).resolve()
@@ -176,6 +186,7 @@ def _reexec_inside_container_netns(
         str(state_dir),
         container,
         f"--emit={emit}",
+        f"--annotations={annotations_raw}",
     ]
     cmd = (
         [nsenter, "-t", pid, "-n", *tail]
@@ -264,11 +275,30 @@ class ReaderSession:
     #: single wget retry burst doesn't produce a pile of duplicate signals.
     _DEDUP_WINDOW_S = 30.0
 
-    def __init__(self, *, state_dir: Path, container: str, emitter: EventEmitter) -> None:
-        """Prepare the session; the socket is opened in [`run`][terok_shield.resources.nflog_reader.ReaderSession.run]."""
+    def __init__(
+        self,
+        *,
+        state_dir: Path,
+        container: str,
+        emitter: EventEmitter,
+        static_dossier: dict[str, str] | None = None,
+    ) -> None:
+        """Prepare the session; the socket is opened in [`run`][terok_shield.resources.nflog_reader.ReaderSession.run].
+
+        ``static_dossier`` is the orchestrator-supplied identity bundle pulled
+        out of the container's ``dossier.*`` annotations at hook spawn time —
+        ``container_name``, ``project``, ``task``, and ``meta_path`` are the
+        keys terok itself uses, but the reader treats the dict as opaque.  A
+        ``meta_path`` entry, when present, points at a JSON file the reader
+        will re-read at every emit so name-changes (e.g. podman rename) and
+        late-bound metadata land on the wire without restarting the reader.
+        """
         self._state_dir = state_dir
         self._container = container
         self._emitter = emitter
+        self._static_dossier = dict(static_dossier or {})
+        meta_path = self._static_dossier.get("meta_path")
+        self._meta_path: Path | None = Path(meta_path) if meta_path else None
         self._domain_cache = _DomainCache(state_dir)
         # Two independent dedup windows, both keyed on (domain or dest):
         #
@@ -772,7 +802,7 @@ class _DomainCache:
 
 
 def _parse_args() -> argparse.Namespace:  # pragma: no cover — thin argparse wrapper
-    """Define the CLI surface — positional state_dir + container, ``--emit`` channel."""
+    """Define the CLI surface — positional state_dir + container, ``--emit``, dossier."""
     parser = argparse.ArgumentParser(
         prog="nflog-reader",
         description="Stream one container's blocked-connection events to the clearance flow.",
@@ -788,7 +818,39 @@ def _parse_args() -> argparse.Namespace:  # pragma: no cover — thin argparse w
             "or JSON lines on stdout for the terminal fallback CLI."
         ),
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--annotations",
+        default="{}",
+        help=(
+            "JSON object of orchestrator-supplied dossier fields (project, task, "
+            "container_name, meta_path, …) extracted from the container's "
+            "``dossier.*`` OCI annotations.  Forwarded verbatim through the "
+            "nsenter re-exec; defaults to ``{}`` for orchestrator-less use."
+        ),
+    )
+    args = parser.parse_args()
+    args.annotations_raw = args.annotations
+    args.annotations = _parse_annotations(args.annotations)
+    return args
+
+
+def _parse_annotations(raw: str) -> dict[str, str]:
+    """Parse a JSON string into a flat ``dict[str, str]`` — soft-fail to empty.
+
+    Malformed input or a non-string value lands at ``{}`` rather than crashing
+    the reader: the bridge hook is opt-in and a corrupt annotation block must
+    not block container start.  Non-string values are coerced via ``str()`` so
+    a numeric annotation (rare but legal in the OCI spec) still surfaces.
+    """
+    try:
+        decoded = json.loads(raw) if raw else {}
+    except ValueError:
+        _log.warning("ignoring malformed --annotations payload: %r", raw)
+        return {}
+    if not isinstance(decoded, dict):
+        _log.warning("ignoring non-object --annotations payload: %r", raw)
+        return {}
+    return {str(k): str(v) for k, v in decoded.items()}
 
 
 def _print_json(payload: dict) -> None:

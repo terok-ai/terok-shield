@@ -73,7 +73,38 @@ class TestBridgeDispatch:
         with mock.patch.object(hook_entrypoint, "_spawn_reader") as spawn:
             rc = _run_bridge(oci, stage="createRuntime")
         assert rc == 0
-        spawn.assert_called_once_with(tmp_path, _SHORT_ID)
+        spawn.assert_called_once_with(tmp_path, _SHORT_ID, {})
+
+    def test_createruntime_extracts_dossier_annotations(self, tmp_path: Path) -> None:
+        """``dossier.*`` annotations are stripped of their prefix and passed through."""
+        oci = json.dumps(
+            {
+                "id": _CONTAINER_ID,
+                "pid": 42,
+                "annotations": {
+                    "terok.shield.state_dir": str(tmp_path),
+                    "terok.shield.version": "11",
+                    "dossier.container_name": "my-task-7f3",
+                    "dossier.task": "abc",
+                    "dossier.project": "terok",
+                    "dossier.meta_path": "/var/lib/terok/tasks/abc.json",
+                    "io.container.manager": "libpod",  # unrelated, must not leak
+                },
+            }
+        )
+        with mock.patch.object(hook_entrypoint, "_spawn_reader") as spawn:
+            rc = _run_bridge(oci, stage="createRuntime")
+        assert rc == 0
+        spawn.assert_called_once_with(
+            tmp_path,
+            _SHORT_ID,
+            {
+                "container_name": "my-task-7f3",
+                "task": "abc",
+                "project": "terok",
+                "meta_path": "/var/lib/terok/tasks/abc.json",
+            },
+        )
 
     def test_poststop_invokes_reap_reader(self, tmp_path: Path) -> None:
         oci = _oci_json(str(tmp_path))
@@ -191,9 +222,29 @@ class TestSpawnReader:
         assert str(tmp_path) in cmd
         assert _SHORT_ID in cmd
         assert "--emit=socket" in cmd
+        # Default-empty dossier is still serialised so the reader's argparse always sees the flag.
+        assert "--annotations={}" in cmd
         env = popen.call_args[1]["env"]
         assert env["DBUS_SESSION_BUS_ADDRESS"] == "unix:path=/run/user/1000/bus"
         assert popen.call_args[1]["start_new_session"] is True
+
+    def test_dossier_is_forwarded_as_annotations_argv(self, tmp_path: Path) -> None:
+        """A non-empty dossier lands as a JSON-encoded ``--annotations=...`` argv element."""
+        reader = tmp_path / "reader.py"
+        reader.touch()
+        fake_proc = mock.MagicMock(pid=12345)
+        dossier = {"task": "abc", "project": "terok", "container_name": "n1"}
+        with (
+            mock.patch.object(hook_entrypoint, "_reader_script_path", return_value=reader),
+            mock.patch.object(
+                hook_entrypoint, "_session_bus_address", return_value="unix:path=/run/user/1000/bus"
+            ),
+            mock.patch.object(hook_entrypoint.subprocess, "Popen", return_value=fake_proc) as popen,
+        ):
+            hook_entrypoint._spawn_reader(tmp_path, _SHORT_ID, dossier)
+        cmd = popen.call_args[0][0]
+        ann_arg = next(a for a in cmd if a.startswith("--annotations="))
+        assert json.loads(ann_arg.removeprefix("--annotations=")) == dossier
 
     def test_idempotent_when_reader_already_alive(self, tmp_path: Path) -> None:
         reader = tmp_path / "reader.py"
@@ -335,7 +386,7 @@ class TestIsOurReader:
             + str(reader).encode()
             + b"\x00"
             + str(tmp_path).encode()
-            + b"\x00cccccccccccc\x00--emit=socket\x00"
+            + b"\x00cccccccccccc\x00--emit=socket\x00--annotations={}\x00"
         )
         with (
             mock.patch.object(hook_entrypoint, "_reader_script_path", return_value=reader),
