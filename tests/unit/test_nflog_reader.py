@@ -655,6 +655,107 @@ class TestReaderSession:
         assert {e.dest for e in blocked_events} == {TEST_IP1, TEST_IP99}
 
 
+class TestAuditBlockAppend:
+    """Reader writes ``"action": "blocked"`` to ``state_dir/audit.jsonl`` per emit.
+
+    Closes the audit-trail asymmetry: lifecycle (``shield_up`` /
+    ``shield_down``) and verdicts (``allowed`` / ``denied``) were
+    already audited by host-side shield code; blocks were not, leaving
+    the timeline missing the very events that triggered every verdict.
+    """
+
+    def test_block_writes_audit_line_with_expected_shape(self, tmp_path: Path) -> None:
+        recorder = _RecordingEmitter()
+        session = reader.ReaderSession(state_dir=tmp_path, container="c1", emitter=recorder)
+        raw = reader._RawBlockEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP)
+        session._maybe_emit(raw, now=0.0)
+
+        audit_path = tmp_path / "audit.jsonl"
+        assert audit_path.is_file()
+        entries = [json.loads(line) for line in audit_path.read_text().splitlines()]
+        assert len(entries) == 1
+        entry = entries[0]
+        assert entry["action"] == "blocked"
+        assert entry["container"] == "c1"
+        assert entry["dest"] == TEST_IP1
+        assert entry["port"] == 443
+        assert entry["proto"] == "tcp"
+        assert "ts" in entry  # don't pin timestamp content; just ensure presence
+
+    def test_audit_includes_domain_when_resolved(self, tmp_path: Path) -> None:
+        """Resolved domain ends up in the audit entry alongside dest IP."""
+        # Seed the dnsmasq log so DomainCache resolves TEST_IP1 → TEST_DOMAIN.
+        log_path = tmp_path / DNSMASQ_LOG_FILENAME
+        log_path.write_text(f"... reply {TEST_DOMAIN} is {TEST_IP1}\n")
+
+        recorder = _RecordingEmitter()
+        session = reader.ReaderSession(state_dir=tmp_path, container="c1", emitter=recorder)
+        raw = reader._RawBlockEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP)
+        session._maybe_emit(raw, now=0.0)
+
+        entries = [json.loads(line) for line in (tmp_path / "audit.jsonl").read_text().splitlines()]
+        assert entries[0]["domain"] == TEST_DOMAIN
+
+    def test_audit_omits_domain_when_unresolved(self, tmp_path: Path) -> None:
+        """No resolved domain → no ``domain`` key in the audit entry (vs. empty string)."""
+        recorder = _RecordingEmitter()
+        session = reader.ReaderSession(state_dir=tmp_path, container="c1", emitter=recorder)
+        raw = reader._RawBlockEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP)
+        session._maybe_emit(raw, now=0.0)
+
+        entry = json.loads((tmp_path / "audit.jsonl").read_text().splitlines()[0])
+        assert "domain" not in entry
+
+    def test_audit_written_before_wire_emit(self, tmp_path: Path) -> None:
+        """Hub down (emitter returns False) → audit entry is still recorded.
+
+        Auditing should be terminal-end, not best-effort: the operator
+        can lose a popup to a hub restart and still need the forensic
+        record of which destination got blocked when.
+        """
+
+        class _AlwaysFailingEmitter:
+            def container_started(self, container: str) -> None: ...
+            def container_exited(self, container: str, *, reason: str) -> None: ...
+            def close(self) -> None: ...
+
+            def connection_blocked(self, event: reader.BlockedEvent) -> bool:
+                return False  # hub unreachable
+
+        emitter = _AlwaysFailingEmitter()
+        session = reader.ReaderSession(state_dir=tmp_path, container="c1", emitter=emitter)
+        raw = reader._RawBlockEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP)
+        session._maybe_emit(raw, now=0.0)
+
+        audit_path = tmp_path / "audit.jsonl"
+        assert audit_path.is_file()
+        assert "blocked" in audit_path.read_text()
+
+    def test_audit_failure_does_not_break_wire_emit(self, tmp_path: Path) -> None:
+        """Unwriteable audit log soft-fails — the wire emit must still happen."""
+        recorder = _RecordingEmitter()
+        # Make the audit write impossible by replacing audit.jsonl with a directory.
+        (tmp_path / "audit.jsonl").mkdir()
+
+        session = reader.ReaderSession(state_dir=tmp_path, container="c1", emitter=recorder)
+        raw = reader._RawBlockEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP)
+        session._maybe_emit(raw, now=0.0)
+
+        # Wire still received the event despite audit failure.
+        kinds = [kind for kind, _ in recorder.calls]
+        assert "blocked" in kinds
+
+    def test_proto_falls_back_to_numeric_for_non_tcp_udp(self, tmp_path: Path) -> None:
+        """Anything other than TCP/UDP gets the numeric proto in the audit entry."""
+        recorder = _RecordingEmitter()
+        session = reader.ReaderSession(state_dir=tmp_path, container="c1", emitter=recorder)
+        raw = reader._RawBlockEvent(dest=TEST_IP1, port=0, proto=132)  # SCTP
+        session._maybe_emit(raw, now=0.0)
+
+        entry = json.loads((tmp_path / "audit.jsonl").read_text().splitlines()[0])
+        assert entry["proto"] == "132"
+
+
 class _FakeSocket:
     """Minimal file-like stand-in for the NFLOG netlink socket."""
 

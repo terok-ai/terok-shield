@@ -44,7 +44,7 @@ from pathlib import Path
 # (``reader.log`` is bridge-local — no state.py counterpart.)
 _ANN_STATE_DIR = "terok.shield.state_dir"
 _ANN_VERSION = "terok.shield.version"
-_BUNDLE_VERSION = 9
+_BUNDLE_VERSION = 10
 _TABLE = "inet terok_shield"
 _RULESET_NAME = "ruleset.nft"
 _DNSMASQ_CONF_NAME = "dnsmasq.conf"

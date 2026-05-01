@@ -80,6 +80,11 @@ _AF_INET = 2
 _IPPROTO_TCP = 6
 _IPPROTO_UDP = 17
 
+#: Human-readable protocol names for audit entries.  Numeric IP protocol
+#: numbers leak in for anything outside TCP/UDP — rare in practice (ICMP
+#: is suppressed earlier as noise) but better than a misleading "tcp" label.
+_PROTO_NAMES: dict[int, str] = {_IPPROTO_TCP: "tcp", _IPPROTO_UDP: "udp"}
+
 _NLMSG_HDR = struct.Struct("=IHHII")
 _NFGEN_HDR = struct.Struct("=BBH")
 _NFULNL_CFG_CMD = struct.Struct("=BBH")
@@ -328,12 +333,21 @@ class ReaderSession:
     def _emit_connection_blocked(self, event: _RawBlockEvent, domain: str) -> bool:
         """Publish one ``ConnectionBlocked`` for *event* — caller supplies the domain.
 
+        Audits the block to ``state_dir/audit.jsonl`` *before* the wire
+        emit so a hub-down or socket-rejected event is still recorded
+        forensically.  Auditing should be terminal-end, not best-effort
+        — the per-container forensic log is the single ground-truth
+        timeline of what shield decided and what the operator
+        subsequently said about it (verdict entries are written by the
+        host-side ``terok-shield allow|deny`` path).
+
         Returns ``True`` when the emitter accepted the event; ``False``
         when it was dropped (socket emitter: hub unreachable).  Callers
         use the result to decide whether to mark the dedup window.
         """
         request_id = f"{self._container}:{self._next_id}"
         self._next_id += 1
+        self._append_audit_block(event, domain)
         return self._emitter.connection_blocked(
             BlockedEvent(
                 container=self._container,
@@ -344,6 +358,39 @@ class ReaderSession:
                 domain=domain,
             )
         )
+
+    def _append_audit_block(self, event: _RawBlockEvent, domain: str) -> None:
+        """Write one ``"action": "blocked"`` entry to ``state_dir/audit.jsonl``.
+
+        Inlined (rather than importing ``terok_shield.audit.AuditLogger``)
+        because the reader script is shipped as a stdlib-only resource —
+        keeping the dependency surface flat preserves the
+        ``/usr/bin/python3``-can-run-it invariant.  Concurrent appends
+        with the host-side shield's own ``log_event`` writer are safe
+        for short JSON lines (atomic up to PIPE_BUF on Linux), so the
+        timeline interleaves cleanly without locks.
+
+        Soft-fail on every error: an unwriteable audit log must not
+        break the wire emit, since the wire is the operator's
+        immediate signal and the audit is the long-term record.
+        """
+        entry = {
+            "ts": datetime.now(UTC).isoformat(timespec="seconds"),
+            "container": self._container,
+            "action": "blocked",
+            "dest": event.dest,
+            "port": event.port,
+            "proto": _PROTO_NAMES.get(event.proto, str(event.proto)),
+        }
+        if domain:
+            entry["domain"] = domain
+        line = json.dumps(entry, separators=(",", ":")) + "\n"
+        path = self._state_dir / "audit.jsonl"
+        try:
+            with path.open("a", encoding="utf-8") as f:
+                f.write(line)
+        except OSError as exc:
+            _log.debug("audit append failed (%s): %s", path, exc)
 
     def _install_signal_handlers(self) -> None:
         """Arrange a clean shutdown on SIGTERM / SIGINT."""

@@ -37,7 +37,7 @@ from pathlib import Path
 
 from .paths import HOOK_ENTRYPOINT_NAME
 
-BUNDLE_VERSION = 9
+BUNDLE_VERSION = 10
 """Integer version of the state bundle layout.
 
 Bumped whenever the file layout changes in a backwards-incompatible way.
@@ -48,6 +48,11 @@ changes even if the file layout itself is unchanged, so that
 ``terok setup`` rewrites the script instead of short-circuiting.
 
 Version history:
+    10 — reader appends ``"action": "blocked"`` entries to
+        ``audit.jsonl`` before each wire emit, closing the
+        block→verdict timeline gap (verdicts were already audited
+        by the host-side ``allow``/``deny`` path; blocks were not).
+        Same on-disk layout; new action keyword in an existing file.
     9 — pre_start on dnsmasq tier seeds profile.allowed with resolved
         domains so the initial allow set has permanent entries before
         dnsmasq starts.  Reader swaps lifetime-dedup for a 30 s rolling
