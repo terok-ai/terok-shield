@@ -3,13 +3,16 @@
 
 """Tests for per-container state bundle layout (state.py)."""
 
-from collections.abc import Callable
+import os
+import stat
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
 
 from terok_shield.state import (
     BUNDLE_VERSION,
+    STATE_DIR_MODE,
     audit_path,
     container_id_path,
     denied_domains_path,
@@ -108,6 +111,60 @@ def test_ensure_state_dirs_is_idempotent(tmp_path: Path) -> None:
     ensure_state_dirs(state_dir)
     ensure_state_dirs(state_dir)
     assert state_dir.is_dir()
+
+
+@pytest.fixture
+def loose_umask() -> Iterator[None]:
+    """Run the test body under ``umask 0o002`` (Fedora's USERGROUPS_ENAB default)."""
+    old = os.umask(0o002)
+    try:
+        yield
+    finally:
+        os.umask(old)
+
+
+def _mode(path: Path) -> int:
+    """Return permission bits of *path* (``st_mode & 0o7777``)."""
+    return stat.S_IMODE(path.stat().st_mode)
+
+
+def test_ensure_state_dirs_forces_owner_only_mode(
+    tmp_path: Path,
+    loose_umask: None,
+) -> None:
+    """Fresh dirs land at 0o700 even when the caller's umask would relax them.
+
+    Regression test for the v0.6.35 ``_oci_state`` validator rejecting
+    bundles created under ``umask 0o002`` (group-writable).  ``mkdir``
+    alone is umask-masked, so ``ensure_state_dirs`` must ``chmod``.
+    """
+    state_dir = tmp_path / "container-1"
+
+    ensure_state_dirs(state_dir)
+
+    assert _mode(state_dir) == STATE_DIR_MODE
+    assert _mode(hooks_dir(state_dir)) == STATE_DIR_MODE
+    # Validator-side invariant: no group/world write bits.
+    assert state_dir.stat().st_mode & 0o022 == 0
+    assert hooks_dir(state_dir).stat().st_mode & 0o022 == 0
+
+
+def test_ensure_state_dirs_repairs_loose_existing_mode(tmp_path: Path) -> None:
+    """A pre-existing too-permissive bundle is tightened on next call.
+
+    Users hit by v0.6.35 with a 0o775 dir from a prior 0.6.34 run
+    should recover automatically — no manual ``chmod`` required.
+    """
+    state_dir = tmp_path / "container-1"
+    state_dir.mkdir()
+    hooks_dir(state_dir).mkdir()
+    state_dir.chmod(0o775)
+    hooks_dir(state_dir).chmod(0o775)
+
+    ensure_state_dirs(state_dir)
+
+    assert _mode(state_dir) == STATE_DIR_MODE
+    assert _mode(hooks_dir(state_dir)) == STATE_DIR_MODE
 
 
 def test_read_denied_ips_empty_when_file_missing(tmp_path: Path) -> None:

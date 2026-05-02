@@ -264,7 +264,28 @@ def read_effective_ips(state_dir: Path) -> list[str]:
 # ── Setup ───────────────────────────────────────────────
 
 
+STATE_DIR_MODE = 0o700
+"""Permission mode for ``state_dir`` and its subdirectories.
+
+Owner-only.  The OCI hook in ``_oci_state.py`` rejects ``state_dir`` if
+``st_mode & 0o022`` (group- or world-writable), because a loose mode
+would let any local peer drop a ``ruleset.nft`` for the hook to apply
+with ``CAP_NET_ADMIN``.  ``mkdir(mode=…)`` is masked by ``umask``, so
+the writer side has to ``chmod`` after creation to guarantee the bit
+pattern the validator demands.
+"""
+
+
 def ensure_state_dirs(state_dir: Path) -> None:
-    """Create the state directory and its required subdirectories."""
+    """Create the state directory and its required subdirectories.
+
+    Both directories are forced to ``STATE_DIR_MODE`` (``0o700``) on
+    every call — the OCI hook rejects anything looser, and a prior
+    run under a permissive ``umask`` (Fedora's default ``0o002`` is
+    a common offender) would otherwise leave the bundle stranded.
+    """
     state_dir.mkdir(parents=True, exist_ok=True)
-    hooks_dir(state_dir).mkdir(parents=True, exist_ok=True)
+    state_dir.chmod(STATE_DIR_MODE)
+    hd = hooks_dir(state_dir)
+    hd.mkdir(parents=True, exist_ok=True)
+    hd.chmod(STATE_DIR_MODE)
