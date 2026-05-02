@@ -206,9 +206,10 @@ class TestReaderSessionDossierStorage:
 
 
 class TestResolveDossier:
-    """``_resolve_dossier`` merges static annotations with the meta-path JSON."""
+    """``_resolve_dossier`` projects the orchestrator's task-meta JSON onto the wire-dossier shape."""
 
     def test_static_only_when_no_meta_path(self, tmp_path: Path) -> None:
+        """Standalone path: static ``dossier.*`` annotations alone form the wire dossier."""
         session = reader.ReaderSession(
             state_dir=tmp_path,
             container="c1",
@@ -228,27 +229,32 @@ class TestResolveDossier:
         # File doesn't exist → dossier is just the static floor minus meta_path.
         assert session._resolve_dossier() == {"task": "abc"}
 
-    def test_meta_path_overrides_static_keys(self, tmp_path: Path) -> None:
-        """Meta-path JSON wins over the static floor for matching keys."""
+    def test_meta_json_overrides_static_keys(self, tmp_path: Path) -> None:
+        """Live meta JSON wins over static floor for the projected keys.
+
+        Static ``dossier.task=original`` (set at podman run) is
+        overridden by the meta JSON's ``task_id=renamed`` — the meta
+        JSON is the orchestrator's live state and re-read on every
+        emit so renames surface without a reader restart.
+        """
         meta = tmp_path / "task.json"
-        meta.write_text(json.dumps({"task": "renamed", "container_name": "live-name"}))
+        meta.write_text(
+            json.dumps({"project_id": "terok", "task_id": "renamed", "name": "live-name"})
+        )
         session = reader.ReaderSession(
             state_dir=tmp_path,
             container="c1",
             emitter=_RecordingEmitter(),
-            static_dossier={
-                "task": "original",
-                "project": "terok",
-                "meta_path": str(meta),
-            },
+            static_dossier={"task": "original", "project": "terok", "meta_path": str(meta)},
         )
         assert session._resolve_dossier() == {
             "task": "renamed",
             "project": "terok",
-            "container_name": "live-name",
+            "name": "live-name",
         }
 
     def test_missing_meta_file_falls_back_to_static(self, tmp_path: Path) -> None:
+        """A pointer at a deleted task → drop to the static-only floor."""
         session = reader.ReaderSession(
             state_dir=tmp_path,
             container="c1",
@@ -280,39 +286,52 @@ class TestResolveDossier:
         )
         assert session._resolve_dossier() == {"task": "abc"}
 
-    def test_meta_file_values_are_string_coerced(self, tmp_path: Path) -> None:
-        meta = tmp_path / "task.json"
-        meta.write_text(json.dumps({"port": 8080, "enabled": True}))
-        session = reader.ReaderSession(
-            state_dir=tmp_path,
-            container="c1",
-            emitter=_RecordingEmitter(),
-            static_dossier={"meta_path": str(meta)},
-        )
-        assert session._resolve_dossier() == {"port": "8080", "enabled": "True"}
+    def test_orchestrator_bookkeeping_stays_off_the_wire(self, tmp_path: Path) -> None:
+        """Lifecycle / web-port / hooks_fired etc. are orchestrator state, not dossier — keep them off the wire.
 
-    def test_meta_file_cannot_smuggle_meta_path_into_wire(self, tmp_path: Path) -> None:
-        """A meta JSON containing ``meta_path`` must not leak the host path on the wire.
-
-        Defensive case: a confused orchestrator (or a hand-edited
-        meta file) could write its own ``meta_path`` key.  The
-        resolver strips it after the merge so the on-disk path
-        stays internal — never reaches the wire payload or the
-        ``audit.jsonl`` row, which would otherwise expose a
-        host-side filesystem reference to whoever consumes the
-        clearance event.
+        Pre-projection the resolver blind-merged the entire meta JSON
+        onto the dossier, leaking ``mode``, ``web_port``, ``workspace``
+        through to every block popup.  The projection drops to just
+        ``{project, task, name}``.
         """
         meta = tmp_path / "task.json"
-        meta.write_text(json.dumps({"task": "abc", "meta_path": "/host/secret/path.json"}))
+        meta.write_text(
+            json.dumps(
+                {
+                    "project_id": "terok",
+                    "task_id": "abc",
+                    "name": "diligent-octopus",
+                    "mode": "cli",
+                    "web_port": 8080,
+                    "workspace": "/var/lib/terok/tasks/abc",
+                    "hooks_fired": ["pre_start", "post_start"],
+                    "exit_code": None,
+                }
+            )
+        )
         session = reader.ReaderSession(
             state_dir=tmp_path,
             container="c1",
             emitter=_RecordingEmitter(),
             static_dossier={"meta_path": str(meta)},
         )
-        resolved = session._resolve_dossier()
-        assert "meta_path" not in resolved
-        assert resolved == {"task": "abc"}
+        assert session._resolve_dossier() == {
+            "project": "terok",
+            "task": "abc",
+            "name": "diligent-octopus",
+        }
+
+    def test_meta_file_values_are_string_coerced(self, tmp_path: Path) -> None:
+        """Forward-compat int/bool values still land as strings on the wire."""
+        meta = tmp_path / "task.json"
+        meta.write_text(json.dumps({"task_id": 42, "name": True}))
+        session = reader.ReaderSession(
+            state_dir=tmp_path,
+            container="c1",
+            emitter=_RecordingEmitter(),
+            static_dossier={"meta_path": str(meta)},
+        )
+        assert session._resolve_dossier() == {"task": "42", "name": "True"}
 
 
 class TestIsNoiseDest:
@@ -822,9 +841,9 @@ class TestReaderSession:
         assert blocked_events[0].domain == TEST_DOMAIN
 
     def test_emit_carries_resolved_dossier_on_blocked_event(self, tmp_path: Path) -> None:
-        """End-to-end: static + meta-path JSON merge into ``BlockedEvent.dossier``."""
+        """End-to-end: static floor + meta-JSON projection land in ``BlockedEvent.dossier``."""
         meta = tmp_path / "task.json"
-        meta.write_text(json.dumps({"task": "live", "container_name": "alpine-7"}))
+        meta.write_text(json.dumps({"task_id": "live", "name": "diligent-octopus"}))
         recorder = _RecordingEmitter()
         session = reader.ReaderSession(
             state_dir=tmp_path,
@@ -842,8 +861,8 @@ class TestReaderSession:
         blocked = next(payload for kind, payload in recorder.calls if kind == "blocked")
         assert blocked.dossier == {
             "project": "terok",
-            "task": "live",  # meta-path file overrides the stale static value
-            "container_name": "alpine-7",
+            "task": "live",  # meta JSON's task_id overrides the stale static value
+            "name": "diligent-octopus",
         }
 
     def test_dedup_falls_back_to_dest_when_domain_unknown(self, tmp_path: Path) -> None:

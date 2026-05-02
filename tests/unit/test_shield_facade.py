@@ -269,19 +269,22 @@ def test_up_delegates_and_logs(make_shield: ShieldHarnessFactory) -> None:
     harness.hub_events.shield_up.assert_called_once_with("test-ctr", dossier={})
 
 
-def test_up_attaches_persisted_dossier_to_hub_event(
-    make_shield: ShieldHarnessFactory, state_dir: Path
+def test_up_resolves_dossier_via_meta_path(
+    make_shield: ShieldHarnessFactory, state_dir: Path, tmp_path: Path
 ) -> None:
-    """A ``state_dir/dossier.json`` written by the bridge hook flows out via ``shield_up``.
+    """``Shield.up()`` resolves its hub-event dossier by following ``state_dir/meta_path`` into the orchestrator's task meta JSON.
 
-    Without this, the clearance UI rendered shield state changes with
-    a bare container slug while block popups carried the full
-    ``project/task · name`` triple — the same container, two visual
-    identities in one session.
+    Single source of truth: the meta JSON the orchestrator already
+    maintains.  Without this projection the clearance UI rendered
+    shield state changes with a bare container slug while block popups
+    carried the full ``project/task · name`` triple — the same
+    container, two visual identities in one session.
     """
-    state.dossier_path(state_dir).write_text(
-        '{"project": "terok", "task": "abc", "name": "diligent-octopus"}'
+    meta = tmp_path / "abc.json"
+    meta.write_text(
+        json.dumps({"project_id": "terok", "task_id": "abc", "name": "diligent-octopus"})
     )
+    state.meta_path_file(state_dir).write_text(str(meta))
     harness = make_shield()
     harness.shield.up("test-ctr")
     harness.hub_events.shield_up.assert_called_once_with(
@@ -290,11 +293,13 @@ def test_up_attaches_persisted_dossier_to_hub_event(
     )
 
 
-def test_down_attaches_persisted_dossier_to_hub_event(
-    make_shield: ShieldHarnessFactory, state_dir: Path
+def test_down_resolves_dossier_via_meta_path(
+    make_shield: ShieldHarnessFactory, state_dir: Path, tmp_path: Path
 ) -> None:
-    """``Shield.down()`` carries the same identity bundle as ``up()``."""
-    state.dossier_path(state_dir).write_text('{"project": "terok", "task": "xyz"}')
+    """``Shield.down()`` carries the same identity bundle as ``up()`` (resolved live each call)."""
+    meta = tmp_path / "xyz.json"
+    meta.write_text(json.dumps({"project_id": "terok", "task_id": "xyz"}))
+    state.meta_path_file(state_dir).write_text(str(meta))
     harness = make_shield()
     harness.shield.down("test-ctr", allow_all=True)
     harness.hub_events.shield_down.assert_called_once_with(

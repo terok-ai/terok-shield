@@ -66,6 +66,17 @@ _BLOCKED_PREFIX_TAG = "BLOCKED"
 #: in the audit log.  ``_resolve_dossier`` strips it from any dict it merges.
 _META_PATH_KEY = "meta_path"
 
+#: Translation from orchestrator-meta-JSON keys (``project_id`` /
+#: ``task_id`` / ``name``) to the wire-dossier keys (``project`` /
+#: ``task`` / ``name``) the clearance UI renders.  The host-side
+#: shield_up/down path applies the same map in
+#: ``_oci_state.resolve_dossier_from_meta`` — keep them in lock-step.
+_TASK_META_KEY_MAP = {
+    "project_id": "project",
+    "task_id": "task",
+    "name": "name",
+}
+
 # ── nsenter handshake ─────────────────────────────────────────────────
 # Re-exec sets this so the second invocation knows it's already inside
 # the container netns and skips the podman-unshare dance.
@@ -451,41 +462,35 @@ class ReaderSession:
         )
 
     def _resolve_dossier(self) -> Dossier:
-        """Build the per-emit dossier from static annotations + the meta-path file.
+        """Project the orchestrator's task-meta JSON onto the wire-dossier shape.
 
-        The orchestrator's static ``dossier.*`` annotations (set at
-        ``podman run``) form the floor.  When ``dossier.meta_path`` was
-        supplied, its JSON contents — re-read on every emit so name
-        changes (podman rename, late-bound task naming) propagate without
-        a reader restart — override matching keys.  ``meta_path`` itself
-        is internal plumbing and never leaks onto the wire.
+        The orchestrator's static ``dossier.*`` annotations form a
+        floor.  When ``dossier.meta_path`` was supplied, the meta JSON
+        is re-read on every emit (so podman rename / late-bound naming
+        propagate without a reader restart) and the orchestrator's
+        storage keys (``project_id`` / ``task_id`` / ``name``) are
+        translated to the wire keys (``project`` / ``task`` / ``name``)
+        the clearance UI renders.  Identical projection runs on the
+        host-side shield_up/down path (see ``_oci_state``); both event
+        paths produce the same dossier shape for one container.
 
-        Soft-fail at every step: missing file, EACCES, malformed JSON,
-        non-object payload — each lands at the static-only floor rather
-        than dropping the event.  Resolving is on the hot path of every
-        block, so we eat parse errors quietly here and surface them once
-        elsewhere if needed.
+        Soft-fail at every step — missing file, EACCES, malformed JSON,
+        non-object payload — drops back to the static floor rather
+        than dropping the event.
         """
         dossier = dict(self._static_dossier_floor)
         if self._meta_path is None:
             return dossier
         try:
-            text = self._meta_path.read_text(encoding="utf-8")
-        except OSError:
-            return dossier
-        try:
-            decoded = json.loads(text)
-        except ValueError:
+            decoded = json.loads(self._meta_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
             return dossier
         if not isinstance(decoded, dict):
             return dossier
-        dossier.update({str(k): str(v) for k, v in decoded.items()})
-        # Defensive drop: the meta-path file isn't supposed to redeclare
-        # ``meta_path``, but a confused orchestrator (or a hand-edited
-        # file) could.  We never want the on-disk path leaking onto the
-        # wire — it identifies a host-side file the operator UI has no
-        # business knowing about.
-        dossier.pop(_META_PATH_KEY, None)
+        for src_key, dst_key in _TASK_META_KEY_MAP.items():
+            value = decoded.get(src_key, "")
+            if value:
+                dossier[dst_key] = str(value)
         return dossier
 
     def _append_audit_block(self, event: _RawBlockEvent, domain: str, dossier: Dossier) -> bool:

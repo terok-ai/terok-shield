@@ -16,10 +16,10 @@ virtualenv, so a dependency on ``terok_shield`` would fail to import.
 
 Keep in sync with the package-side definitions:
 
-* ``BUNDLE_VERSION``    ↔ ``terok_shield.state.BUNDLE_VERSION``
-* ``ANN_STATE_DIR``     ↔ ``terok_shield.config.ANNOTATION_STATE_DIR_KEY``
-* ``ANN_VERSION``       ↔ ``terok_shield.config.ANNOTATION_VERSION_KEY``
-* ``DOSSIER_FILE_NAME`` ↔ ``terok_shield.state.DOSSIER_FILE_NAME``
+* ``BUNDLE_VERSION``     ↔ ``terok_shield.state.BUNDLE_VERSION``
+* ``ANN_STATE_DIR``      ↔ ``terok_shield.config.ANNOTATION_STATE_DIR_KEY``
+* ``ANN_VERSION``        ↔ ``terok_shield.config.ANNOTATION_VERSION_KEY``
+* ``META_PATH_FILE_NAME`` ↔ ``terok_shield.state.meta_path_file``
 """
 
 from __future__ import annotations
@@ -48,27 +48,43 @@ Bumped whenever the on-disk file layout, the hook → reader argv
 shape, or the wire payload changes incompatibly.  The nft hook hard-
 fails on a version mismatch — operator must re-run ``terok setup``.
 
-v12: the createRuntime bridge hook persists the OCI-extracted dossier
-to ``state_dir/dossier.json`` so host-side ``Shield.up()`` /
-``Shield.down()`` can include the same identity bundle in their hub
-events that the per-container reader emits on blocks.  Without it the
-``shield_{up,down}`` events lacked dossier and the clearance UI fell
-back to bare container names while block popups carried the full
-``project/task · name`` triple — visible inconsistency for one
-container in one session.  The file is a write-once label cache —
-annotations are immutable for the container's life, so it never
-goes stale and is swept along with the rest of ``state_dir`` on
-container teardown.
+v12: the createRuntime bridge hook persists the orchestrator's
+``dossier.meta_path`` annotation as ``state_dir/meta_path`` (a
+single-line pointer) so host-side ``Shield.up()`` / ``Shield.down()``
+can resolve dossiers from the same task-meta JSON the reader merges
+on every block emit.  Single source of truth: the orchestrator's
+meta JSON.  No snapshot file, no second copy of project/task IDs;
+all dossier consumers project the live JSON to ``{project, task,
+name}``.
 """
 
-DOSSIER_FILE_NAME = "dossier.json"
-"""Per-container persisted-dossier file under ``state_dir``.
+META_PATH_FILE_NAME = "meta_path"
+"""Per-container pointer to the orchestrator's task meta JSON.
 
-Written by the bridge ``createRuntime`` hook from the OCI-extracted
-``dossier.*`` annotations; read by ``Shield.up()`` / ``Shield.down()``
-on the host so their hub events carry the same identity bundle as the
-reader-emitted block events.
+A single-line text file.  The bridge ``createRuntime`` hook writes
+it from the ``dossier.meta_path`` OCI annotation; ``Shield.up()`` /
+``Shield.down()`` and the per-container reader both follow it to
+read the orchestrator's task meta and project the result onto the
+wire dossier.  Empty / absent file degrades gracefully to a bare
+container name on the wire — same shape as a standalone
+non-orchestrator container.
 """
+
+#: Keys the wire dossier carries — read off the orchestrator's meta JSON
+#: with ``_TASK_META_KEY_MAP`` translation.  Anything else in the meta
+#: file (lifecycle state, web ports, hooks_fired) is orchestrator
+#: bookkeeping and stays off the wire.
+_DOSSIER_KEYS = ("project", "task", "name")
+
+#: Translation from orchestrator-meta-JSON keys to wire-dossier keys.
+#: terok writes ``project_id`` / ``task_id`` / ``name``; the wire shape
+#: speaks ``project`` / ``task`` / ``name`` (the keys the clearance UI
+#: renders).  One mapping table, two consumers (reader + Shield CLI).
+_TASK_META_KEY_MAP = {
+    "project_id": "project",
+    "task_id": "task",
+    "name": "name",
+}
 
 #: System paths that must never appear as state_dir prefixes — even a
 #: well-formed OCI annotation pointing here means something is wrong
@@ -204,41 +220,66 @@ def _under_sensitive_prefix(path: Path) -> bool:
     return any(s == prefix or s.startswith(prefix + "/") for prefix in _SENSITIVE_PREFIXES)
 
 
-# ── Dossier persistence ──────────────────────────────────
+# ── Dossier resolution ──────────────────────────────────
 
 
-def persist_dossier(state_dir: Path, dossier: dict[str, str]) -> None:
-    """Write *dossier* to ``state_dir/dossier.json``, soft-fail.
+def persist_meta_path(state_dir: Path, meta_path: str) -> None:
+    """Write *meta_path* to ``state_dir/meta_path``, soft-fail.
 
-    Set-once-by-the-bridge-hook label cache — annotations are immutable
-    for the container's life, so the file never goes stale and is
-    swept along with the rest of ``state_dir`` when the container is
-    cleaned up.  No atomic-rename, no ``O_NOFOLLOW``: ``state_dir`` is
-    operator-owned (verified by [`state_dir_from_oci`][terok_shield.resources._oci_state.state_dir_from_oci]) and the
-    payload itself is non-secret (the orchestrator already broadcasts
-    the same fields as plaintext OCI annotations).
+    The bridge ``createRuntime`` hook calls this with the value of the
+    orchestrator's ``dossier.meta_path`` OCI annotation — a single-line
+    pointer is everything the host needs to resolve dossiers later
+    (the meta JSON itself is the single source of truth for ``project``,
+    ``task``, ``name``).  Empty *meta_path* is a no-op: standalone
+    containers without an orchestrator have nothing to point at, and a
+    missing file degrades downstream to a bare container name.
     """
+    if not meta_path:
+        return
     try:
-        (state_dir / DOSSIER_FILE_NAME).write_text(json.dumps(dossier))
+        (state_dir / META_PATH_FILE_NAME).write_text(meta_path)
     except OSError as exc:
-        log(f"terok-shield bridge hook: dossier persist failed: {exc}")
+        log(f"terok-shield bridge hook: meta_path persist failed: {exc}")
 
 
-def read_dossier(state_dir: Path) -> dict[str, str]:
-    """Read the persisted dossier; return ``{}`` on any failure.
-
-    Soft-fail: missing file (pre-v12 bundle, standalone container with
-    no orchestrator annotations) or unparseable content drops back to
-    a bare-container-name hub event — same shape every caller already
-    handled before this contract existed.
-    """
+def read_meta_path(state_dir: Path) -> str:
+    """Return the persisted ``meta_path`` for *state_dir*, or ``""`` if absent."""
     try:
-        decoded = json.loads((state_dir / DOSSIER_FILE_NAME).read_text())
+        return (state_dir / META_PATH_FILE_NAME).read_text().strip()
+    except OSError:
+        return ""
+
+
+def resolve_dossier_from_meta(meta_path: str | Path) -> dict[str, str]:
+    """Open the orchestrator's task-meta JSON and project it to a wire dossier.
+
+    Translates the orchestrator's storage keys (``project_id`` /
+    ``task_id`` / ``name``) to the wire-dossier keys the clearance UI
+    renders (``project`` / ``task`` / ``name``).  Anything else in the
+    meta file is orchestrator bookkeeping — lifecycle state, web ports,
+    hooks_fired — and stays off the wire.
+
+    Soft-fail by contract — both the per-block reader and the
+    host-side ``Shield.up()`` / ``Shield.down()`` call this on every
+    event; an unreadable or malformed meta JSON degrades to ``{}``,
+    which the renderer turns into a bare-container-name popup (same
+    as a non-orchestrator container).  Single resolution path → single
+    failure mode.
+    """
+    if not meta_path:
+        return {}
+    try:
+        decoded = json.loads(Path(meta_path).read_text())
     except (OSError, ValueError):
         return {}
     if not isinstance(decoded, dict):
         return {}
-    return {str(k): str(v) for k, v in decoded.items()}
+    out: dict[str, str] = {}
+    for src_key, dst_key in _TASK_META_KEY_MAP.items():
+        value = decoded.get(src_key, "")
+        if value:
+            out[dst_key] = str(value)
+    return out
 
 
 # ── Environment bootstrap ─────────────────────────────────

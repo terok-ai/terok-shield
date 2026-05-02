@@ -202,16 +202,16 @@ def audit_path(state_dir: Path) -> Path:
     return state_dir / "audit.jsonl"
 
 
-def dossier_path(state_dir: Path) -> Path:
-    """Return the persisted-dossier file path under *state_dir*.
+def meta_path_file(state_dir: Path) -> Path:
+    """Return the persisted-meta-path pointer file under *state_dir*.
 
-    Mirrors the resource-side ``DOSSIER_FILE_NAME`` constant — same
-    filename on both sides of the hook boundary, so package code that
-    reads the dossier (``Shield.up()``/``down()``) and resource code
-    that writes it (the bridge ``createRuntime`` hook) can never drift
-    apart on path conventions.
+    Mirrors the resource-side ``META_PATH_FILE_NAME`` constant — one
+    filename on both sides of the hook boundary so package code that
+    reads it (``Shield.up()``/``down()``) and resource code that
+    writes it (the bridge ``createRuntime`` hook) can never drift on
+    path convention.
     """
-    return state_dir / "dossier.json"
+    return state_dir / "meta_path"
 
 
 # ── State readers ───────────────────────────────────────

@@ -140,51 +140,46 @@ class TestBridgeDispatch:
             _run_bridge(oci, stage="createRuntime")
         spawn.assert_not_called()
 
-    def test_createruntime_persists_dossier_for_host_side_callers(self, tmp_path: Path) -> None:
-        """The OCI-extracted dossier is persisted before spawn so ``Shield.up()``/``down()`` can attach it to their hub events.
+    def test_createruntime_persists_meta_path_for_host_side_callers(self, tmp_path: Path) -> None:
+        """The orchestrator's ``dossier.meta_path`` annotation is persisted so ``Shield.up()``/``down()`` can resolve dossiers from the same meta JSON the reader uses.
 
-        The reader spawn path is mocked so the test is hermetic — what
-        we care about here is the durable side effect on ``state_dir``.
+        Single source of truth on the wire dossier — the meta JSON
+        itself — pointed to by a tiny on-disk file.  The reader spawn
+        path is mocked; what we assert is the durable side effect.
         """
         oci = _oci_json(
             str(tmp_path),
-            extra_annotations={
-                "dossier.project": "terok",
-                "dossier.task": "abc",
-                "dossier.name": "diligent-octopus",
-            },
+            extra_annotations={"dossier.meta_path": "/var/lib/terok/tasks/abc.json"},
         )
         with mock.patch.object(reader_hook, "_spawn_reader"):
             _run_bridge(oci, stage="createRuntime")
-        persisted = json.loads((tmp_path / "dossier.json").read_text())
-        assert persisted == {
-            "project": "terok",
-            "task": "abc",
-            "name": "diligent-octopus",
-        }
+        assert (tmp_path / "meta_path").read_text() == "/var/lib/terok/tasks/abc.json"
 
-    def test_createruntime_persists_empty_dossier_when_no_annotations(self, tmp_path: Path) -> None:
-        """A standalone container (no ``dossier.*`` annotations) still gets a ``{}`` dossier file.
+    def test_createruntime_skips_meta_path_file_for_standalone_container(
+        self, tmp_path: Path
+    ) -> None:
+        """Standalone containers (no ``dossier.meta_path``) get no pointer file.
 
-        Empty-dict-as-marker keeps the host-side reader's contract
-        boring — ``read_dossier`` returns ``{}`` whether the file is
-        missing *or* present-but-empty.
+        Missing pointer ⇒ host-side resolver returns ``{}`` ⇒ bare
+        container name on the wire.  Same shape every existing
+        non-orchestrator deployment already produces.
         """
         oci = _oci_json(str(tmp_path))
         with mock.patch.object(reader_hook, "_spawn_reader"):
             _run_bridge(oci, stage="createRuntime")
-        assert json.loads((tmp_path / "dossier.json").read_text()) == {}
+        assert not (tmp_path / "meta_path").exists()
 
-    def test_createruntime_persists_before_spawn(self, tmp_path: Path) -> None:
-        """Persistence runs before spawn so a Popen failure still leaves the dossier on disk.
+    def test_createruntime_persists_meta_path_before_spawn(self, tmp_path: Path) -> None:
+        """The pointer file lands before the reader Popen so a spawn failure still feeds shield up/down.
 
         Spawn is the costly step; a Popen-time crash (no D-Bus, no
-        reader script) must not deprive the host-side ``Shield`` of the
-        identity bundle it needs to render shield_up / shield_down.
+        reader script) must not deprive ``Shield.up()`` /
+        ``Shield.down()`` of the meta-path they need to resolve a
+        wire dossier.
         """
         oci = _oci_json(
             str(tmp_path),
-            extra_annotations={"dossier.project": "p", "dossier.task": "t"},
+            extra_annotations={"dossier.meta_path": "/var/lib/terok/tasks/p/t.json"},
         )
 
         def explode(*_args: object, **_kwargs: object) -> None:
@@ -192,11 +187,7 @@ class TestBridgeDispatch:
 
         with mock.patch.object(reader_hook, "_spawn_reader", side_effect=explode):
             _run_bridge(oci, stage="createRuntime")
-        # Persistence ran before the spawn raised.
-        assert json.loads((tmp_path / "dossier.json").read_text()) == {
-            "project": "p",
-            "task": "t",
-        }
+        assert (tmp_path / "meta_path").read_text() == "/var/lib/terok/tasks/p/t.json"
 
 
 class TestMainSoftFailBranches:
@@ -686,53 +677,94 @@ class TestReaderScriptPath:
         )
 
 
-class TestPersistDossier:
-    """``_oci_state.persist_dossier`` is the contract between the bridge hook and the host-side ``Shield`` facade."""
+class TestPersistMetaPath:
+    """``_oci_state.persist_meta_path`` records the orchestrator's task-meta JSON path under state_dir."""
 
     def test_round_trip(self, tmp_path: Path) -> None:
-        """Write then read recovers the identical dict (string-coerced)."""
-        payload = {"project": "terok", "task": "abc", "name": "diligent-octopus"}
-        _oci_state.persist_dossier(tmp_path, payload)
-        assert _oci_state.read_dossier(tmp_path) == payload
+        """Write then read recovers the identical path string."""
+        _oci_state.persist_meta_path(tmp_path, "/var/lib/terok/tasks/abc.json")
+        assert _oci_state.read_meta_path(tmp_path) == "/var/lib/terok/tasks/abc.json"
 
-    def test_overwrite_replaces_previous_payload(self, tmp_path: Path) -> None:
-        """Second persist call rewrites the file rather than merging."""
-        _oci_state.persist_dossier(tmp_path, {"a": "1", "b": "2"})
-        _oci_state.persist_dossier(tmp_path, {"c": "3"})
-        assert _oci_state.read_dossier(tmp_path) == {"c": "3"}
+    def test_empty_meta_path_is_a_no_op(self, tmp_path: Path) -> None:
+        """No annotation ⇒ no file ⇒ host-side resolver returns ``{}``."""
+        _oci_state.persist_meta_path(tmp_path, "")
+        assert not (tmp_path / "meta_path").exists()
 
-    def test_empty_dict_is_persisted_as_empty_object(self, tmp_path: Path) -> None:
-        """Standalone container path: write ``{}`` rather than skipping the file."""
-        _oci_state.persist_dossier(tmp_path, {})
-        assert (tmp_path / "dossier.json").read_text() == "{}"
+    def test_overwrite_replaces_previous_path(self, tmp_path: Path) -> None:
+        """A second persist (e.g. container recreate) rewrites the pointer."""
+        _oci_state.persist_meta_path(tmp_path, "/old/abc.json")
+        _oci_state.persist_meta_path(tmp_path, "/new/xyz.json")
+        assert _oci_state.read_meta_path(tmp_path) == "/new/xyz.json"
 
     def test_missing_state_dir_soft_fails(self, tmp_path: Path) -> None:
         """A vanished state_dir → log + return, no exception."""
         gone = tmp_path / "vanished"
         with mock.patch.object(_oci_state, "log") as logger:
-            _oci_state.persist_dossier(gone, {"k": "v"})
+            _oci_state.persist_meta_path(gone, "/var/lib/terok/x.json")
         logger.assert_called_once()
-        assert "persist failed" in logger.call_args.args[0]
+        assert "meta_path persist failed" in logger.call_args.args[0]
 
 
-class TestReadDossier:
-    """``_oci_state.read_dossier`` soft-fails into ``{}`` on every error path."""
+class TestReadMetaPath:
+    """``_oci_state.read_meta_path`` soft-fails into ``""`` when the pointer is absent."""
 
     def test_missing_file_returns_empty(self, tmp_path: Path) -> None:
-        """No ``dossier.json`` → empty dict, no exception."""
-        assert _oci_state.read_dossier(tmp_path) == {}
+        """No pointer ⇒ empty string ⇒ resolver returns ``{}``."""
+        assert _oci_state.read_meta_path(tmp_path) == ""
+
+
+class TestResolveDossierFromMeta:
+    """``_oci_state.resolve_dossier_from_meta`` projects the orchestrator's task-meta JSON to wire-dossier shape."""
+
+    def test_projects_orchestrator_keys_to_wire_keys(self, tmp_path: Path) -> None:
+        """``project_id`` / ``task_id`` / ``name`` → ``project`` / ``task`` / ``name``."""
+        meta = tmp_path / "task.json"
+        meta.write_text(
+            json.dumps(
+                {
+                    "project_id": "terok",
+                    "task_id": "abc",
+                    "name": "diligent-octopus",
+                    "mode": "cli",
+                    "web_port": 8080,
+                    "hooks_fired": ["pre_start", "post_start"],
+                }
+            )
+        )
+        assert _oci_state.resolve_dossier_from_meta(meta) == {
+            "project": "terok",
+            "task": "abc",
+            "name": "diligent-octopus",
+        }
+
+    def test_missing_keys_are_omitted(self, tmp_path: Path) -> None:
+        """Only the keys the orchestrator actually wrote land on the wire."""
+        meta = tmp_path / "task.json"
+        meta.write_text(json.dumps({"task_id": "abc"}))
+        assert _oci_state.resolve_dossier_from_meta(meta) == {"task": "abc"}
+
+    def test_empty_meta_path_returns_empty(self, _: Path | None = None) -> None:
+        """Standalone-container path: no orchestrator annotation, empty result."""
+        assert _oci_state.resolve_dossier_from_meta("") == {}
+
+    def test_missing_file_returns_empty(self, tmp_path: Path) -> None:
+        """A pointer to a deleted task → ``{}``, no exception."""
+        assert _oci_state.resolve_dossier_from_meta(tmp_path / "absent.json") == {}
 
     def test_malformed_json_returns_empty(self, tmp_path: Path) -> None:
-        """Truncated / corrupt write must not crash the host shield CLI."""
-        (tmp_path / "dossier.json").write_text("{not json")
-        assert _oci_state.read_dossier(tmp_path) == {}
+        """Torn / mid-write meta JSON soft-fails (next emit picks up the fixed file)."""
+        meta = tmp_path / "task.json"
+        meta.write_text("{not json")
+        assert _oci_state.resolve_dossier_from_meta(meta) == {}
 
     def test_non_object_payload_returns_empty(self, tmp_path: Path) -> None:
-        """A list / scalar at the top level is rejected — dossier is a dict."""
-        (tmp_path / "dossier.json").write_text("[1, 2, 3]")
-        assert _oci_state.read_dossier(tmp_path) == {}
+        """Top-level list / scalar isn't a meta dict — drop quietly."""
+        meta = tmp_path / "task.json"
+        meta.write_text("[1, 2, 3]")
+        assert _oci_state.resolve_dossier_from_meta(meta) == {}
 
     def test_non_string_values_are_coerced(self, tmp_path: Path) -> None:
-        """Numeric or bool values from a forward-compat dossier are stringified."""
-        (tmp_path / "dossier.json").write_text('{"project": "terok", "port": 8080}')
-        assert _oci_state.read_dossier(tmp_path) == {"project": "terok", "port": "8080"}
+        """A forward-compat field landing as int/bool still becomes a wire string."""
+        meta = tmp_path / "task.json"
+        meta.write_text(json.dumps({"task_id": 42, "name": True}))
+        assert _oci_state.resolve_dossier_from_meta(meta) == {"task": "42", "name": "True"}

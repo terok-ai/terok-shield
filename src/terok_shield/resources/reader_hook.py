@@ -86,10 +86,10 @@ def _bridge_main(oci: dict, sd: Path, stage: str, log_path: Path) -> None:
     annotations = oci.get("annotations") or {}
     dossier = _extract_dossier(annotations if isinstance(annotations, dict) else {})
     # Persist before spawn so a Popen failure still leaves the host-side
-    # ``Shield.up()`` / ``Shield.down()`` with the identity bundle they
-    # need for their hub events.  Spawn is the costly step; the JSON
-    # write is two syscalls and soft-fails on its own.
-    _oci_state.persist_dossier(sd, dossier)
+    # ``Shield.up()`` / ``Shield.down()`` with the meta-path pointer
+    # they need to resolve dossiers for their hub events.  Spawn is the
+    # costly step; the file write is one syscall and soft-fails on its own.
+    _oci_state.persist_meta_path(sd, dossier.get("meta_path", ""))
     _spawn_reader(sd, container_id, dossier)
 
 

@@ -383,21 +383,24 @@ class Shield:
         self.hub_events.shield_up(container, dossier=self._read_dossier())
 
     def _read_dossier(self) -> dict[str, str]:
-        """Return the persisted dossier for this state bundle, ``{}`` if absent.
+        """Resolve the wire dossier for this container by reading the orchestrator's task meta.
 
-        The bridge ``createRuntime`` hook writes ``state_dir/dossier.json``
-        from the OCI ``dossier.*`` annotations the orchestrator set on
-        ``podman run``.  Reading it here lets ``Shield.up()`` /
-        ``Shield.down()`` send hub events that carry the same identity
-        bundle as the per-container reader's block events — without
-        which the clearance UI would render shield state changes with a
-        bare container name and block popups with the full
-        ``project/task · name`` triple, splitting one container's
-        notifications across two visual identities in the same session.
+        The bridge ``createRuntime`` hook writes the ``dossier.meta_path``
+        OCI annotation to ``state_dir/meta_path``; ``Shield.up()`` /
+        ``Shield.down()`` follow that pointer, open the orchestrator's
+        live task-meta JSON, and project it to the wire-dossier shape
+        ``{project, task, name}`` — the same projection the per-container
+        reader applies to every block event, so every event for one
+        container renders identically in the clearance UI.
+
+        Empty meta_path (standalone container, no orchestrator) →
+        ``{}`` → bare-container-name popup.  No staleness window: the
+        meta JSON is the orchestrator's live state and is re-read on
+        every call.
         """
-        from .resources._oci_state import read_dossier
+        from .resources._oci_state import read_meta_path, resolve_dossier_from_meta
 
-        return read_dossier(self.config.state_dir)
+        return resolve_dossier_from_meta(read_meta_path(self.config.state_dir))
 
     def state(self, container: str) -> ShieldState:
         """Query the live nft ruleset to determine a container's shield state."""
