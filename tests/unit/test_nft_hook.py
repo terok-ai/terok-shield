@@ -80,18 +80,57 @@ def test_bootstrap_env_sets_missing_var(
             assert os.environ[expected_key] == expected_value
 
 
-def test_bootstrap_env_does_not_override_existing_vars() -> None:
-    """_bootstrap_env() leaves already-set environment variables unchanged."""
+def test_bootstrap_env_preserves_inherited_home_and_xdg() -> None:
+    """_bootstrap_env() leaves ``HOME`` and ``XDG_RUNTIME_DIR`` alone when inherited.
+
+    ``PATH`` is the exception — it is overridden unconditionally as a
+    defence against a poisoned inherited PATH (see
+    ``test_bootstrap_env_overrides_inherited_path``).
+    """
     env = {
         "HOME": "/custom/home",
         "XDG_RUNTIME_DIR": "/custom/xdg",
-        "PATH": "/custom/bin",
+        "PATH": "/usr/bin",
     }
     with mock.patch.dict("os.environ", env, clear=True):
         _oci_state.bootstrap_env()
         assert os.environ["HOME"] == "/custom/home"
         assert os.environ["XDG_RUNTIME_DIR"] == "/custom/xdg"
-        assert os.environ["PATH"] == "/custom/bin"
+
+
+def test_bootstrap_env_overrides_inherited_path() -> None:
+    """An attacker-controlled ``PATH`` is replaced with the trusted constant.
+
+    The OCI runtime may pass through whatever ``$PATH`` the operator
+    environment held; if that value puts an attacker-writable directory
+    ahead of the system locations, ``shutil.which("nft")`` would
+    resolve to a planted binary the hook then runs with
+    ``CAP_NET_ADMIN``.  ``bootstrap_env`` clamps the search path to the
+    trusted system directories and refuses to honour the inherited one.
+    """
+    poisoned = "/tmp/attacker:/usr/bin"
+    with mock.patch.dict("os.environ", {"HOME": "/h", "PATH": poisoned}, clear=True):
+        _oci_state.bootstrap_env()
+        assert os.environ["PATH"] == _oci_state._TRUSTED_PATH
+        assert "/tmp/attacker" not in os.environ["PATH"]
+
+
+@pytest.mark.parametrize(
+    "var",
+    ["LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT", "PYTHONPATH", "PYTHONHOME"],
+)
+def test_bootstrap_env_wipes_dynamic_linker_vars(var: str) -> None:
+    """Dynamic-linker / Python-import injection vectors are stripped.
+
+    Even with PATH clamped, an inherited ``LD_PRELOAD`` would let any
+    subprocess we spawn load attacker code at link time.  The set of
+    vars wiped here mirrors ``_DANGEROUS_ENV_VARS``.
+    """
+    with mock.patch.dict(
+        "os.environ", {"HOME": "/h", "PATH": "/usr/bin", var: "/evil"}, clear=True
+    ):
+        _oci_state.bootstrap_env()
+        assert var not in os.environ
 
 
 def test_bootstrap_env_falls_back_when_getpwuid_raises() -> None:
@@ -702,6 +741,163 @@ def test_main_returns_1_for_relative_state_dir() -> None:
         }
     )
     assert _run_main(oci) == 1
+
+
+# ── state_dir hardening (CWE-22 defence-in-depth) ────────────────────────────
+
+
+class TestStateDirHardening:
+    """``state_dir_from_oci`` rejects every shape that isn't a real bundle.
+
+    Treats the OCI annotation as adversarial input.  Each test pins one
+    rejection branch — together they keep the door shut against an
+    annotation pointing at ``/etc/...``, a non-existent path, a leaf
+    symlink, a foreign-uid directory, or a world-writable one.
+    """
+
+    def test_rejects_path_under_sensitive_prefix(self) -> None:
+        oci = {"annotations": {"terok.shield.state_dir": "/etc/terok-shield"}}
+        assert _oci_state.state_dir_from_oci(oci) is None
+
+    def test_rejects_path_resolving_under_sensitive_prefix(self, tmp_path: Path) -> None:
+        """A symlink that points into ``/etc`` is rejected after resolve()."""
+        link = tmp_path / "evil-link"
+        link.symlink_to("/etc")
+        oci = {"annotations": {"terok.shield.state_dir": str(link)}}
+        assert _oci_state.state_dir_from_oci(oci) is None
+
+    def test_rejects_nonexistent_state_dir(self, tmp_path: Path) -> None:
+        """The hook never creates state_dir; pre_start is the only writer."""
+        missing = tmp_path / "never-existed"
+        oci = {"annotations": {"terok.shield.state_dir": str(missing)}}
+        assert _oci_state.state_dir_from_oci(oci) is None
+
+    def test_rejects_state_dir_that_is_a_file(self, tmp_path: Path) -> None:
+        f = tmp_path / "not-a-dir"
+        f.write_text("")
+        oci = {"annotations": {"terok.shield.state_dir": str(f)}}
+        assert _oci_state.state_dir_from_oci(oci) is None
+
+    def test_rejects_leaf_symlink(self, tmp_path: Path) -> None:
+        """Even a symlink to a valid directory is refused — TOCTOU surface."""
+        real = tmp_path / "real"
+        real.mkdir()
+        link = tmp_path / "link"
+        link.symlink_to(real)
+        oci = {"annotations": {"terok.shield.state_dir": str(link)}}
+        assert _oci_state.state_dir_from_oci(oci) is None
+
+    def test_rejects_world_writable_dir(self, tmp_path: Path) -> None:
+        """A directory with mode 0o777 is refused — peer-writable bundle."""
+        sd = tmp_path / "sd"
+        sd.mkdir(mode=0o777)
+        sd.chmod(0o777)  # mkdir mode is masked by umask; chmod is exact
+        oci = {"annotations": {"terok.shield.state_dir": str(sd)}}
+        assert _oci_state.state_dir_from_oci(oci) is None
+
+    def test_rejects_dir_owned_by_other_uid(self, tmp_path: Path) -> None:
+        """Directory owned by a different uid is refused.
+
+        We can't actually chown(2) without root, so simulate the mismatch
+        by patching ``os.geteuid`` to a value the dir isn't owned by.
+        """
+        sd = tmp_path / "sd"
+        sd.mkdir()
+        actual_uid = sd.stat().st_uid
+        oci = {"annotations": {"terok.shield.state_dir": str(sd)}}
+        with mock.patch.object(_oci_state.os, "geteuid", return_value=actual_uid + 1):
+            assert _oci_state.state_dir_from_oci(oci) is None
+
+    def test_accepts_well_formed_state_dir(self, tmp_path: Path) -> None:
+        """The happy path still works — owned, mode 0o700, non-symlink."""
+        sd = tmp_path / "sd"
+        sd.mkdir(mode=0o700)
+        sd.chmod(0o700)
+        oci = {"annotations": {"terok.shield.state_dir": str(sd)}}
+        assert _oci_state.state_dir_from_oci(oci) == sd.resolve()
+
+    def test_rejects_non_string_annotation(self) -> None:
+        oci = {"annotations": {"terok.shield.state_dir": 12345}}
+        # ``Path(12345)`` raises TypeError; the wrapper catches it.
+        assert _oci_state.state_dir_from_oci(oci) is None
+
+
+# ── log() hardening (CWE-377 symlink-attack defence) ─────────────────────────
+
+
+class TestLogHardening:
+    """``log`` writes safely or not at all — no predictable ``/tmp`` fallback."""
+
+    def test_no_log_path_means_stderr_only(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Errors before state_dir resolution log to stderr, never to disk.
+
+        The pre-fix code wrote to ``/tmp/terok-hook-error.log`` whenever
+        ``log_path`` was absent — a predictable name in a world-writable
+        directory.  An attacker could pre-create the path as a symlink
+        to a sensitive file and have the hook follow it.  We now skip
+        the file write entirely when no state-dir-local path is known.
+        """
+        # ``/tmp/terok-hook-error.log`` must not exist (clean slate)
+        # and must not be created by the call.
+        sentinel = Path("/tmp/terok-hook-error.log")  # nosec B108 — assertion-only
+        existed_before = sentinel.exists()
+        _oci_state.log("something failed")
+        captured = capsys.readouterr()
+        assert "something failed" in captured.err
+        assert sentinel.exists() == existed_before, "log() must not write to /tmp"
+
+    def test_appends_to_explicit_log_path(self, tmp_path: Path) -> None:
+        log_path = tmp_path / "hook-error.log"
+        _oci_state.log("first", log_path)
+        _oci_state.log("second", log_path)
+        body = log_path.read_text()
+        assert "first" in body
+        assert "second" in body
+        # 0o600 — owner read/write only.
+        assert log_path.stat().st_mode & 0o777 == 0o600
+
+    def test_refuses_to_write_through_symlink(self, tmp_path: Path) -> None:
+        """``O_NOFOLLOW`` blocks the classic symlink-attack write.
+
+        Mimics the historical ``/tmp`` exploit: a peer pre-creates the
+        log path as a symlink to ``/etc/passwd``-equivalent target and
+        waits for the hook to follow it.
+        """
+        target = tmp_path / "sensitive"
+        target.write_text("untouched\n")
+        link = tmp_path / "log-symlink"
+        link.symlink_to(target)
+        _oci_state.log("attacker tried to write", link)
+        # Target unchanged — O_NOFOLLOW failed the open().
+        assert target.read_text() == "untouched\n"
+
+    def test_swallows_fdopen_write_error(self, tmp_path: Path) -> None:
+        """A failed write after a successful open() must not propagate."""
+        log_path = tmp_path / "hook-error.log"
+        with mock.patch.object(_oci_state.os, "fdopen", side_effect=OSError("disk full")):
+            _oci_state.log("some failure", log_path)  # must not raise
+
+
+# ── state_dir hardening — rare error-path coverage ────────────────────────────
+
+
+class TestStateDirRareErrors:
+    """``lstat`` raising OSError on a path that ``resolve()`` accepted is logged + absorbed."""
+
+    def test_lstat_failure_returns_none(self, tmp_path: Path) -> None:
+        """A TOCTOU race where the directory vanishes between ``resolve`` and ``lstat``.
+
+        Unlikely but possible: the operator could ``rm -rf`` the state
+        bundle between pre_start and the hook firing.  The lstat OSError
+        path catches it and bails out without crashing the hook.
+        """
+        sd = tmp_path / "sd"
+        sd.mkdir()
+        oci = {"annotations": {"terok.shield.state_dir": str(sd)}}
+        with mock.patch.object(_oci_state.Path, "lstat", side_effect=OSError("EIO")):
+            assert _oci_state.state_dir_from_oci(oci) is None
 
 
 def test_main_returns_1_for_unknown_stage(tmp_path: Path) -> None:

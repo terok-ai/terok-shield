@@ -26,6 +26,7 @@ from __future__ import annotations
 import os
 import pwd
 import shutil
+import stat
 import subprocess  # nosec B404
 import sys
 from pathlib import Path
@@ -46,15 +47,52 @@ shape, or the wire payload changes incompatibly.  The nft hook hard-
 fails on a version mismatch — operator must re-run ``terok setup``.
 """
 
+#: System paths that must never appear as state_dir prefixes — even a
+#: well-formed OCI annotation pointing here means something is wrong
+#: upstream and we'd rather hard-fail the container start.  These are
+#: root-owned on the host; in NS_ROOTLESS the per-uid mapping makes
+#: them appear as overflow uid (typically 65534), so the ownership
+#: check downstream catches them too — but failing fast on the prefix
+#: alone gives a cleaner error message and saves a stat.
+#:
+#: ``/tmp`` and ``/var/tmp`` are intentionally **not** on this list:
+#: they're world-writable but sticky-bit, so attacker-planted entries
+#: below them are owned by the attacker and the ownership check
+#: rejects them.  Excluding them here keeps pytest's ``tmp_path``
+#: usable in tests.
+_SENSITIVE_PREFIXES = (
+    "/etc",
+    "/proc",
+    "/sys",
+    "/dev",
+    "/usr",
+    "/bin",
+    "/sbin",
+    "/lib",
+    "/lib64",
+    "/boot",
+    "/root",
+)
+
 
 # ── OCI state parsing ────────────────────────────────────
 
 
 def state_dir_from_oci(oci: object) -> Path | None:
-    """Extract the ``terok.shield.state_dir`` annotation as an absolute Path.
+    """Extract and validate the ``terok.shield.state_dir`` annotation.
 
-    Returns ``None`` (and logs) on any validation failure so the caller
-    can early-exit without hand-written boilerplate.
+    Returns the resolved Path on success, ``None`` (and logs) on any
+    validation failure so callers can early-exit without hand-written
+    boilerplate.
+
+    The OCI annotation is treated as adversarial input: even when the
+    orchestrator we expect (terok) is the one that wrote it, a defence-
+    in-depth shape lets us reject paths that look nothing like a real
+    state bundle — sensitive system directories, world-writable
+    locations, leaf symlinks (TOCTOU rotation surface), or paths the
+    current user doesn't actually own.  Any of these would let a
+    crafted annotation steer the hook into reading / writing files
+    outside its intended bundle.
     """
     if not isinstance(oci, dict):
         log("terok-shield hook: OCI state must be a JSON object")
@@ -69,26 +107,120 @@ def state_dir_from_oci(oci: object) -> Path | None:
         return None
     try:
         path = Path(sd_str)
-        if not path.is_absolute():
-            raise ValueError(f"state_dir must be absolute: {sd_str!r}")
-        return path.resolve()
-    except (TypeError, ValueError, OSError) as exc:
+    except (TypeError, ValueError) as exc:
         log(f"terok-shield hook: invalid state_dir: {exc}")
         return None
+    if not path.is_absolute():
+        log(f"terok-shield hook: state_dir must be absolute: {sd_str!r}")
+        return None
+
+    # Reject obvious sensitive prefixes before resolve() — this catches
+    # the easy case where the raw annotation already names ``/etc/...``
+    # and saves an unnecessary stat.  ``resolve()`` later catches the
+    # symlinked variants.
+    if _under_sensitive_prefix(path):
+        log(f"terok-shield hook: state_dir refuses sensitive location: {path}")
+        return None
+
+    # ``resolve(strict=True)`` requires the directory already exists —
+    # the hook never creates state_dir; pre_start is the only writer.
+    try:
+        resolved = path.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        log(f"terok-shield hook: state_dir does not exist or unreadable: {exc}")
+        return None
+
+    if _under_sensitive_prefix(resolved):
+        log(f"terok-shield hook: resolved state_dir under sensitive location: {resolved}")
+        return None
+
+    # The annotation pointing at a leaf symlink is a TOCTOU red flag —
+    # the symlink could rotate between resolve() and the hook's
+    # subsequent open() / write_text() calls.  pre_start always writes
+    # a real directory; refuse the indirection.  ``resolve(strict=True)``
+    # already followed any symlink at the leaf, so we lstat the original
+    # un-resolved annotation path here — that's where a symlink would
+    # actually appear on disk.
+    try:
+        st = path.lstat()
+    except OSError as exc:
+        log(f"terok-shield hook: state_dir lstat failed: {exc}")
+        return None
+
+    if stat.S_ISLNK(st.st_mode):
+        log(f"terok-shield hook: state_dir must not be a symlink: {sd_str!r}")
+        return None
+    if not stat.S_ISDIR(st.st_mode):
+        log(f"terok-shield hook: state_dir is not a directory: {resolved}")
+        return None
+
+    # Ownership check: in NS_ROOTLESS the operator's host UID maps to
+    # in-namespace UID 0; files outside the user's uid_map range
+    # (e.g. host-root-owned files) appear as overflow uid (typically
+    # 65534) and are rejected here.  In init userns, ``geteuid()`` is
+    # the actual operator UID and the same equality check applies.
+    if st.st_uid != os.geteuid():
+        log(
+            f"terok-shield hook: state_dir not owned by current uid "
+            f"(uid={st.st_uid} != euid={os.geteuid()}): {resolved}"
+        )
+        return None
+
+    # Group- or world-writable directories let any local peer drop a
+    # ``ruleset.nft`` for the hook to apply with CAP_NET_ADMIN.
+    if st.st_mode & 0o022:
+        log(f"terok-shield hook: state_dir must not be group/world-writable: {resolved}")
+        return None
+
+    return resolved
+
+
+def _under_sensitive_prefix(path: Path) -> bool:
+    """``True`` if *path* lives under one of ``_SENSITIVE_PREFIXES``."""
+    s = str(path)
+    return any(s == prefix or s.startswith(prefix + "/") for prefix in _SENSITIVE_PREFIXES)
 
 
 # ── Environment bootstrap ─────────────────────────────────
 
+#: Trusted ``$PATH`` for hook subprocess execution.  Set unconditionally
+#: in ``bootstrap_env()`` so an attacker who can influence the OCI
+#: runtime's environment cannot point ``shutil.which`` at a planted
+#: binary.  Order mirrors the typical sysadmin precedence (system
+#: locations before user locations, sbin before bin) without including
+#: any of the user-writable directories that ``$PATH``-injection
+#: attacks rely on.
+_TRUSTED_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+#: Environment variables that influence the dynamic linker or Python
+#: import resolution and that an attacker could use to hijack
+#: subprocess execution from the hook.  Wiped unconditionally in
+#: ``bootstrap_env()`` so the ``nsenter`` / ``podman unshare`` /
+#: ``nft`` / ``dnsmasq`` calls below run under a clean environment.
+_DANGEROUS_ENV_VARS = (
+    "LD_PRELOAD",
+    "LD_LIBRARY_PATH",
+    "LD_AUDIT",
+    "PYTHONPATH",
+    "PYTHONHOME",
+)
+
 
 def bootstrap_env() -> None:
-    """Ensure critical environment variables are set before running ``podman unshare``.
+    """Sanitise the inherited environment before the hook does any subprocess work.
 
-    OCI hooks (crun/runc) may be invoked with a stripped environment — no
-    ``HOME``, no ``XDG_RUNTIME_DIR``, sometimes no ``PATH``.  Inside
-    ``NS_ROOTLESS`` ``os.getuid()`` is the mapped 0; resolving resources
-    naively would point at ``/root`` instead of the operator's real
-    home.  ``outer_host_uid()`` parses ``/proc/self/uid_map`` to recover
-    the host UID and we use that throughout.
+    OCI hooks (crun/runc) may be invoked with a stripped environment —
+    no ``HOME``, no ``XDG_RUNTIME_DIR``, sometimes no ``PATH`` — *or*
+    with an attacker-influenced one.  Inside ``NS_ROOTLESS``
+    ``os.getuid()`` is the mapped 0; resolving resources naively would
+    point at ``/root`` instead of the operator's real home.
+    ``outer_host_uid()`` parses ``/proc/self/uid_map`` to recover the
+    host UID and we use that throughout.
+
+    Hardened against ``$PATH`` / ``LD_PRELOAD`` injection: we
+    unconditionally pin ``$PATH`` to a trusted constant and wipe the
+    dynamic-linker variables that would let a poisoned environment
+    hijack the binaries we ``shutil.which()`` and exec below.
     """
     uid = outer_host_uid()
 
@@ -102,8 +234,18 @@ def bootstrap_env() -> None:
     if not os.environ.get("XDG_RUNTIME_DIR"):
         os.environ["XDG_RUNTIME_DIR"] = f"/run/user/{uid}"
 
-    if not os.environ.get("PATH"):
-        os.environ["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    # Trusted ``$PATH`` is set unconditionally — an inherited PATH that
+    # prepends an attacker-controlled directory would otherwise let
+    # ``shutil.which`` resolve ``nsenter`` / ``podman`` / ``nft`` /
+    # ``dnsmasq`` to a planted binary, and the hook executes those with
+    # CAP_NET_ADMIN inside the container netns.
+    os.environ["PATH"] = _TRUSTED_PATH
+
+    # Wipe dynamic-linker / Python-import injection vectors before any
+    # subprocess call.  These would otherwise propagate via ``os.environ``
+    # to the children spawned by ``nsenter()``.
+    for var in _DANGEROUS_ENV_VARS:
+        os.environ.pop(var, None)
 
 
 def outer_host_uid() -> int:
@@ -224,16 +366,35 @@ def find_dnsmasq() -> str:
 
 
 def log(msg: str, log_path: Path | None = None) -> None:
-    """Write *msg* to stderr and to a persistent log file (best-effort).
+    """Write *msg* to stderr, plus a per-container log file when available.
 
-    The OCI runtime (crun/runc) typically swallows hook stderr.  Writing
-    to a file in the state directory (or ``/tmp`` as fallback) makes
-    errors visible.
+    The OCI runtime (crun/runc) typically swallows hook stderr; the
+    persistent file is what the operator inspects after a failed
+    container start.  *log_path* should always be the state-dir-local
+    ``hook-error.log`` once ``state_dir_from_oci()`` has resolved the
+    bundle.  Errors that occur before that resolution (malformed OCI
+    state, missing annotation) get stderr only — we deliberately avoid
+    a predictable ``/tmp`` fallback because another local user could
+    pre-create it as a symlink to a sensitive file and have the hook
+    follow the link with the operator's UID.
+
+    The on-disk write uses ``O_NOFOLLOW`` so even a TOCTOU race that
+    swaps ``log_path`` for a symlink between resolution and open fails
+    closed instead of writing through the symlink.
     """
     print(msg, file=sys.stderr)
-    path = log_path or Path("/tmp/terok-hook-error.log")  # nosec B108
+    if log_path is None:
+        return
     try:
-        with path.open("a") as f:
+        fd = os.open(
+            log_path,
+            os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_CLOEXEC | os.O_NOFOLLOW,
+            0o600,
+        )
+    except OSError:
+        return
+    try:
+        with os.fdopen(fd, "a", encoding="utf-8") as f:
             f.write(f"{msg}\n")
     except OSError:
         pass

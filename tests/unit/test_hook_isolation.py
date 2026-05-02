@@ -29,6 +29,7 @@ _STDLIB = {
     "pwd",
     "shutil",
     "signal",
+    "stat",
     "subprocess",
     "sys",
     "time",
