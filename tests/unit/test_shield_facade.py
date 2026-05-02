@@ -255,7 +255,9 @@ def test_down_delegates_and_logs(
     harness.audit.log_event.assert_called_once_with(
         "test-ctr", "shield_down", detail=expected_detail
     )
-    harness.hub_events.shield_down.assert_called_once_with("test-ctr", allow_all=allow_all)
+    harness.hub_events.shield_down.assert_called_once_with(
+        "test-ctr", allow_all=allow_all, dossier={}
+    )
 
 
 def test_up_delegates_and_logs(make_shield: ShieldHarnessFactory) -> None:
@@ -264,7 +266,45 @@ def test_up_delegates_and_logs(make_shield: ShieldHarnessFactory) -> None:
     harness.shield.up("test-ctr")
     harness.mode.shield_up.assert_called_once_with("test-ctr")
     harness.audit.log_event.assert_called_once_with("test-ctr", "shield_up")
-    harness.hub_events.shield_up.assert_called_once_with("test-ctr")
+    harness.hub_events.shield_up.assert_called_once_with("test-ctr", dossier={})
+
+
+def test_up_resolves_dossier_via_meta_path(
+    make_shield: ShieldHarnessFactory, state_dir: Path, tmp_path: Path
+) -> None:
+    """``Shield.up()`` resolves its hub-event dossier by following ``state_dir/meta_path`` into the orchestrator's wire-dossier file.
+
+    Single source of truth: the wire-dossier JSON file the orchestrator
+    maintains.  Without this the clearance UI rendered shield state
+    changes with a bare container slug while block popups carried the
+    full ``project/task · name`` triple — the same container, two
+    visual identities in one session.
+    """
+    meta = tmp_path / "abc.json"
+    meta.write_text(json.dumps({"project": "terok", "task": "abc", "name": "diligent-octopus"}))
+    state.meta_path_file(state_dir).write_text(str(meta))
+    harness = make_shield()
+    harness.shield.up("test-ctr")
+    harness.hub_events.shield_up.assert_called_once_with(
+        "test-ctr",
+        dossier={"project": "terok", "task": "abc", "name": "diligent-octopus"},
+    )
+
+
+def test_down_resolves_dossier_via_meta_path(
+    make_shield: ShieldHarnessFactory, state_dir: Path, tmp_path: Path
+) -> None:
+    """``Shield.down()`` carries the same identity bundle as ``up()`` (resolved live each call)."""
+    meta = tmp_path / "xyz.json"
+    meta.write_text(json.dumps({"project": "terok", "task": "xyz"}))
+    state.meta_path_file(state_dir).write_text(str(meta))
+    harness = make_shield()
+    harness.shield.down("test-ctr", allow_all=True)
+    harness.hub_events.shield_down.assert_called_once_with(
+        "test-ctr",
+        allow_all=True,
+        dossier={"project": "terok", "task": "xyz"},
+    )
 
 
 def test_block_delegates_and_logs(make_shield: ShieldHarnessFactory) -> None:
@@ -524,10 +564,10 @@ class TestCheckEnvironment:
         make_shield: ShieldHarnessFactory,
         tmp_path: Path,
     ) -> None:
-        """Mismatched hook version → stale-hooks health status."""
+        """Mismatched ballast version → stale-hooks health status."""
         hooks_dir = tmp_path / "hooks.d"
         hooks_dir.mkdir()
-        (hooks_dir / "terok-shield-hook").write_text("_BUNDLE_VERSION = 1\n")
+        (hooks_dir / "_oci_state.py").write_text("BUNDLE_VERSION = 1\n")
         _find_dirs.return_value = [hooks_dir]
 
         harness = make_shield()
@@ -547,10 +587,10 @@ class TestCheckEnvironment:
         make_shield: ShieldHarnessFactory,
         tmp_path: Path,
     ) -> None:
-        """Hook file without _BUNDLE_VERSION line → stale-hooks (not silently ok)."""
+        """Ballast file without ``BUNDLE_VERSION`` line → stale-hooks (not silently ok)."""
         hooks_dir = tmp_path / "hooks.d"
         hooks_dir.mkdir()
-        (hooks_dir / "terok-shield-hook").write_text("#!/bin/sh\necho old hook\n")
+        (hooks_dir / "_oci_state.py").write_text("# no version here\n")
         _find_dirs.return_value = [hooks_dir]
 
         harness = make_shield()
@@ -567,12 +607,14 @@ class TestReadInstalledHookVersion:
     """Tests for the _read_installed_hook_version helper."""
 
     def test_reads_version_from_hook(self, tmp_path: Path) -> None:
-        """Extracts _BUNDLE_VERSION from the entrypoint script."""
+        """Extracts ``BUNDLE_VERSION`` from the installed ballast module."""
         from terok_shield import _read_installed_hook_version
 
         hooks_dir = tmp_path / "hooks.d"
         hooks_dir.mkdir()
-        (hooks_dir / "terok-shield-hook").write_text("_BUNDLE_VERSION = 42\n")
+        # The version lives in the shared ``_oci_state.py`` ballast that
+        # the role scripts import from at runtime.
+        (hooks_dir / "_oci_state.py").write_text("BUNDLE_VERSION = 42\n")
         assert _read_installed_hook_version([hooks_dir]) == 42
 
     def test_returns_none_when_no_hook(self, tmp_path: Path) -> None:
@@ -582,21 +624,21 @@ class TestReadInstalledHookVersion:
         assert _read_installed_hook_version([tmp_path]) is None
 
     def test_returns_none_on_oserror(self, tmp_path: Path) -> None:
-        """Returns None when the hook file cannot be read."""
+        """Returns None when the ballast file cannot be read."""
         from terok_shield import _read_installed_hook_version
 
         hooks_dir = tmp_path / "hooks.d"
         hooks_dir.mkdir()
-        hook = hooks_dir / "terok-shield-hook"
-        hook.write_text("_BUNDLE_VERSION = 5\n")
+        ballast = hooks_dir / "_oci_state.py"
+        ballast.write_text("BUNDLE_VERSION = 5\n")
         with mock.patch.object(Path, "read_text", side_effect=OSError("boom")):
             assert _read_installed_hook_version([hooks_dir]) is None
 
     def test_returns_none_on_no_match(self, tmp_path: Path) -> None:
-        """Returns None when the hook file has no _BUNDLE_VERSION line."""
+        """Returns None when the ballast file has no ``BUNDLE_VERSION`` line."""
         from terok_shield import _read_installed_hook_version
 
         hooks_dir = tmp_path / "hooks.d"
         hooks_dir.mkdir()
-        (hooks_dir / "terok-shield-hook").write_text("#!/usr/bin/env python3\nprint('hello')\n")
+        (hooks_dir / "_oci_state.py").write_text("# no version here\n")
         assert _read_installed_hook_version([hooks_dir]) is None

@@ -129,11 +129,13 @@ path = "terok_shield.hooks"
 layer = "core"
 depends_on = []
 
-# Hook file generation and installation — no same-layer deps
+# Hook file generation and installation — also installs the reader
+# resource so a single ``setup_global_hooks`` call lands every artefact
+# the OCI hook needs (entrypoint, both hook-JSON pairs, reader script).
 [[modules]]
 path = "terok_shield.hooks.install"
 layer = "core"
-depends_on = []
+depends_on = ["terok_shield.hooks.reader_install"]
 
 # NFLOG reader resource installer
 [[modules]]

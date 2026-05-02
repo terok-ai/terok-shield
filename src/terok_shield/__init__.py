@@ -130,20 +130,22 @@ class EnvironmentCheck:
 
 
 def _read_installed_hook_version(hooks_dirs: list[Path]) -> int | None:
-    """Read ``_BUNDLE_VERSION`` from the installed hook entrypoint, or ``None``.
+    """Read ``BUNDLE_VERSION`` from the installed ballast module, or ``None``.
 
-    Scans each hooks directory for the entrypoint script and extracts the
-    version from the ``_BUNDLE_VERSION = N`` line.  Returns ``None`` if
-    not found or unparseable.
+    The hooks directory contains the shared ``_oci_state.py`` ballast
+    that both role scripts import from at runtime.  ``BUNDLE_VERSION``
+    lives there as the canonical definition; reading it from a role
+    script would only see a re-import.  Returns ``None`` if the
+    ballast file is absent or unparseable.
     """
     import re
 
-    pattern = re.compile(r"^_BUNDLE_VERSION\s*=\s*(\d+)", re.MULTILINE)
+    pattern = re.compile(r"^BUNDLE_VERSION\s*=\s*(\d+)", re.MULTILINE)
     for d in hooks_dirs:
-        hook = d / "terok-shield-hook"
-        if hook.is_file():
+        ballast = d / "_oci_state.py"
+        if ballast.is_file():
             try:
-                m = pattern.search(hook.read_text())
+                m = pattern.search(ballast.read_text())
                 if m:
                     return int(m.group(1))
             except (OSError, ValueError):
@@ -367,7 +369,7 @@ class Shield:
             "shield_down",
             detail="allow_all=True" if allow_all else None,
         )
-        self.hub_events.shield_down(container, allow_all=allow_all)
+        self.hub_events.shield_down(container, allow_all=allow_all, dossier=self._read_dossier())
 
     def block(self, container: str) -> None:
         """Total network blackout — drop all traffic, log for forensics."""
@@ -378,7 +380,27 @@ class Shield:
         """Restore normal deny-all mode for a running container."""
         self._mode.shield_up(container)
         self.audit.log_event(container, "shield_up")
-        self.hub_events.shield_up(container)
+        self.hub_events.shield_up(container, dossier=self._read_dossier())
+
+    def _read_dossier(self) -> dict[str, str]:
+        """Resolve the wire dossier for this container by reading the orchestrator's task meta.
+
+        The bridge ``createRuntime`` hook writes the ``dossier.meta_path``
+        OCI annotation to ``state_dir/meta_path``; ``Shield.up()`` /
+        ``Shield.down()`` follow that pointer, open the orchestrator's
+        live task-meta JSON, and project it to the wire-dossier shape
+        ``{project, task, name}`` — the same projection the per-container
+        reader applies to every block event, so every event for one
+        container renders identically in the clearance UI.
+
+        Empty meta_path (standalone container, no orchestrator) →
+        ``{}`` → bare-container-name popup.  No staleness window: the
+        meta JSON is the orchestrator's live state and is re-read on
+        every call.
+        """
+        from .resources._oci_state import read_meta_path, resolve_dossier_from_meta
+
+        return resolve_dossier_from_meta(read_meta_path(self.config.state_dir))
 
     def state(self, container: str) -> ShieldState:
         """Query the live nft ruleset to determine a container's shield state."""

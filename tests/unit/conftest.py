@@ -3,6 +3,7 @@
 
 """Shared fixtures for unit tests."""
 
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import TypedDict, Unpack
@@ -10,6 +11,17 @@ from typing import TypedDict, Unpack
 import pytest
 
 from terok_shield.config import ShieldConfig, ShieldMode
+from terok_shield.resources import _oci_state as _oci_state_pkg
+
+# At runtime the role hook scripts run with their install directory on
+# ``sys.path[0]`` and ``import _oci_state`` resolves to the sibling
+# stdlib-only module copy.  Inside pytest the package version
+# (``terok_shield.resources._oci_state``) is imported through the
+# normal package path, so ``mock.patch`` against either the top-level
+# or package-qualified name should hit the same module object — alias
+# them in ``sys.modules`` so the role scripts' bare ``import
+# _oci_state`` reuses the module the test already has a handle on.
+sys.modules.setdefault("_oci_state", _oci_state_pkg)
 
 from ..testfs import CONFIG_FILENAME, CONFIG_ROOT_NAME, STATE_ROOT_NAME
 

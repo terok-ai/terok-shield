@@ -37,7 +37,7 @@ from pathlib import Path
 
 from .paths import HOOK_ENTRYPOINT_NAME
 
-BUNDLE_VERSION = 10
+BUNDLE_VERSION = 12
 """Integer version of the state bundle layout.
 
 Bumped whenever the file layout changes in a backwards-incompatible way.
@@ -48,6 +48,20 @@ changes even if the file layout itself is unchanged, so that
 ``terok setup`` rewrites the script instead of short-circuiting.
 
 Version history:
+    12 — bridge ``createRuntime`` hook persists the OCI-extracted
+        dossier under ``state_dir/dossier.json`` so host-side
+        ``Shield.up()`` / ``Shield.down()`` can attach the same
+        identity bundle to their hub events that block events already
+        carry.  Pre-v12 state bundles work fine on a v12 reader; v12
+        bundles need a v12 reader (the JSON file is the only new
+        file).
+    11 — bridge hook extracts ``dossier.*`` OCI annotations and
+        forwards them to the reader as a JSON-encoded
+        ``--annotations=…`` argv element; reader resolves a per-emit
+        dossier (static annotations merged with optional meta-path
+        JSON) and ships it on the wire and in the audit log.  Old
+        readers reject the new flag; bumping forces ``terok setup``
+        to rewrite the on-disk reader script.
     10 — reader appends ``"action": "blocked"`` entries to
         ``audit.jsonl`` before each wire emit, closing the
         block→verdict timeline gap (verdicts were already audited
@@ -186,6 +200,18 @@ def reader_pid_path(state_dir: Path) -> Path:
 def audit_path(state_dir: Path) -> Path:
     """Return the path to the per-container audit log."""
     return state_dir / "audit.jsonl"
+
+
+def meta_path_file(state_dir: Path) -> Path:
+    """Return the persisted-meta-path pointer file under *state_dir*.
+
+    Mirrors the resource-side ``META_PATH_FILE_NAME`` constant — one
+    filename on both sides of the hook boundary so package code that
+    reads it (``Shield.up()``/``down()``) and resource code that
+    writes it (the bridge ``createRuntime`` hook) can never drift on
+    path convention.
+    """
+    return state_dir / "meta_path"
 
 
 # ── State readers ───────────────────────────────────────

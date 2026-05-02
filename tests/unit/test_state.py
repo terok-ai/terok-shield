@@ -149,36 +149,37 @@ def test_read_effective_ips_ignores_denied_entries_not_in_allowed_set(tmp_path: 
     assert read_effective_ips(tmp_path) == [TEST_IP1]
 
 
-# ── hook_entrypoint sync contract ────────────────────────────────────────────
+# ── ballast sync contract ────────────────────────────────────────────────────
 
 
-def test_hook_entrypoint_bundle_version_matches_state() -> None:
-    """hook_entrypoint._BUNDLE_VERSION must equal state.BUNDLE_VERSION.
+def test_oci_state_bundle_version_matches_state() -> None:
+    """``_oci_state.BUNDLE_VERSION`` must equal ``state.BUNDLE_VERSION``.
 
-    The stdlib-only script cannot import state.py, so it duplicates the
-    constant.  This test is the enforcement mechanism.
+    The stdlib-only ballast can't import state.py, so it duplicates the
+    constant.  This test is the enforcement mechanism — both role
+    scripts read ``BUNDLE_VERSION`` from the same ballast.
     """
-    from terok_shield.resources import hook_entrypoint as _ep
+    from terok_shield.resources import _oci_state as _ep
 
-    assert _ep._BUNDLE_VERSION == BUNDLE_VERSION, (
-        f"hook_entrypoint._BUNDLE_VERSION={_ep._BUNDLE_VERSION!r} "
+    assert _ep.BUNDLE_VERSION == BUNDLE_VERSION, (
+        f"_oci_state.BUNDLE_VERSION={_ep.BUNDLE_VERSION!r} "
         f"!= state.BUNDLE_VERSION={BUNDLE_VERSION!r}. "
-        "Update the duplicate in hook_entrypoint.py."
+        "Update the duplicate in _oci_state.py."
     )
 
 
-def test_hook_entrypoint_path_strings_match_state_functions() -> None:
-    """Path-name literals in hook_entrypoint.py must match state path helpers.
+def test_nft_hook_path_strings_match_state_functions() -> None:
+    """Path-name literals in ``nft_hook.py`` must match state path helpers.
 
-    The stdlib-only script uses inline string literals for filenames that
-    state.py derives via path functions.  This test parses the script with
-    ``ast`` to collect only *code* string constants (not comment text), so
-    a rename in state.py triggers a failure here rather than a silent
-    mismatch at runtime.
+    The stdlib-only script uses inline string literals for filenames
+    that state.py derives via path functions.  This test parses the
+    script with ``ast`` to collect only *code* string constants (not
+    comment text), so a rename in state.py triggers a failure here
+    rather than a silent mismatch at runtime.
     """
     import ast
 
-    from terok_shield.resources import hook_entrypoint as _ep
+    from terok_shield.resources import nft_hook as _ep
     from terok_shield.state import (
         dnsmasq_conf_path,
         dnsmasq_pid_path,

@@ -50,17 +50,42 @@ class HubEventEmitter:
         """Remember the target socket; defaults to `hub_socket_path`."""
         self._path = socket_path or hub_socket_path()
 
-    def shield_up(self, container: str) -> None:
-        """Emit a ``shield_up`` event for *container*."""
-        self._send({"type": "shield_up", "container": container})
+    def shield_up(self, container: str, *, dossier: dict[str, str] | None = None) -> None:
+        """Emit a ``shield_up`` event for *container* (optional *dossier*).
 
-    def shield_down(self, container: str, *, allow_all: bool = False) -> None:
-        """Emit a ``shield_down`` (or ``shield_down_all``) event for *container*."""
+        *dossier* mirrors the orchestrator-supplied identity bundle the
+        per-container reader already attaches to ``connection_blocked``
+        events; passing it through here keeps the clearance UI's
+        rendering of every event for the same container consistent
+        (``project/task · name`` rather than the bare container slug).
+        Empty / omitted dossier degrades to the pre-v12 wire shape.
+        """
+        self._send({"type": "shield_up", "container": container}, dossier)
+
+    def shield_down(
+        self,
+        container: str,
+        *,
+        allow_all: bool = False,
+        dossier: dict[str, str] | None = None,
+    ) -> None:
+        """Emit a ``shield_down`` (or ``shield_down_all``) event for *container*.
+
+        *dossier* — see :py:meth:`shield_up`.
+        """
         event_type = "shield_down_all" if allow_all else "shield_down"
-        self._send({"type": event_type, "container": container})
+        self._send({"type": event_type, "container": container}, dossier)
 
-    def _send(self, payload: dict) -> None:
-        """Write one JSON line to the hub socket, swallowing all I/O errors."""
+    def _send(self, payload: dict, dossier: dict[str, str] | None = None) -> None:
+        """Write one JSON line to the hub socket, swallowing all I/O errors.
+
+        *dossier* is folded into the payload only when non-empty —
+        keeps the wire identical to the pre-v12 shape on standalone
+        containers (``podman run`` without orchestrator annotations),
+        so old ingesters never see a key they don't understand.
+        """
+        if dossier:
+            payload = {**payload, "dossier": dossier}
         line = (json.dumps(payload, separators=(",", ":")) + "\n").encode()
         try:
             sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)

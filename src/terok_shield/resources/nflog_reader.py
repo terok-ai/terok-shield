@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
@@ -44,7 +45,7 @@ import socket
 import struct
 import subprocess  # nosec B404 — podman/nsenter re-exec for container netns
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
@@ -59,6 +60,11 @@ _log = logging.getLogger("terok-shield.nflog-reader")
 #                           interactive deny rule
 NFLOG_GROUP = 100
 _BLOCKED_PREFIX_TAG = "BLOCKED"
+
+#: Reserved dossier key — the *orchestrator-side* path to the per-container
+#: meta JSON.  Read by the reader as plumbing; never appears on the wire or
+#: in the audit log.  ``_resolve_dossier`` strips it from any dict it merges.
+_META_PATH_KEY = "meta_path"
 
 # ── nsenter handshake ─────────────────────────────────────────────────
 # Re-exec sets this so the second invocation knows it's already inside
@@ -91,6 +97,18 @@ _NFULNL_CFG_CMD = struct.Struct("=BBH")
 _NFA_HDR = struct.Struct("=HH")
 
 
+Dossier = dict[str, str]
+"""Orchestrator-supplied identity bundle resolved at emit time.
+
+Keys are the orchestrator's contract — terok publishes ``project``,
+``task``, ``name``, etc. under the ``dossier.*`` OCI annotation
+namespace, but the reader treats the dict as opaque payload and
+forwards whatever keys it sees.  An empty dossier is the
+shield-only-deployment shape; the consumer renders the bare
+container short-id in that case.
+"""
+
+
 @dataclass(frozen=True)
 class BlockedEvent:
     """A packet the kernel dropped at the interactive-deny rule — one per unique dest IP."""
@@ -101,6 +119,7 @@ class BlockedEvent:
     port: int
     proto: int
     domain: str
+    dossier: Dossier = field(default_factory=dict)
 
 
 # ── Entry point ───────────────────────────────────────────────────────
@@ -112,14 +131,17 @@ def main() -> None:  # pragma: no cover — real argparse + subprocess re-exec
     On first entry (``_TEROK_SHIELD_NFLOG_NSENTER`` unset) this process re-execs
     itself under ``nsenter`` — with ``podman unshare`` prepended when we're not
     already in ``NS_ROOTLESS`` — so the NFLOG bind happens in the container's
-    netns.  The re-exec carries the same ``--emit`` choice forward, so the
-    destination (unix socket or stdout JSON) stays whatever the caller picked.
+    netns.  The re-exec carries the same ``--emit`` and ``--annotations`` choice
+    forward, so the destination (unix socket or stdout JSON) and the orchestrator
+    dossier stay whatever the caller picked.
     """
     args = _parse_args()
     logging.basicConfig(level=logging.INFO, format="nflog-reader: %(message)s")
 
     if os.environ.get(_NSENTER_ENV) != "1":
-        _reexec_inside_container_netns(args.state_dir, args.container, args.emit)
+        _reexec_inside_container_netns(
+            args.state_dir, args.container, args.emit, args.annotations_raw
+        )
         return
 
     emitter = _select_emitter(args.emit)
@@ -127,6 +149,7 @@ def main() -> None:  # pragma: no cover — real argparse + subprocess re-exec
         state_dir=args.state_dir,
         container=args.container,
         emitter=emitter,
+        static_dossier=args.annotations,
     )
     try:
         session.run()
@@ -155,7 +178,7 @@ def _events_socket_path() -> Path:
 
 
 def _reexec_inside_container_netns(
-    state_dir: Path, container: str, emit: str
+    state_dir: Path, container: str, emit: str, annotations_raw: str
 ) -> None:  # pragma: no cover — real subprocess re-exec
     """Re-enter this script inside the container's netns so NFLOG is reachable.
 
@@ -164,6 +187,11 @@ def _reexec_inside_container_netns(
     When we're in the initial userns (a manual CLI run), prepend
     ``podman unshare`` to cross into ``NS_ROOTLESS`` first and pick up
     ``CAP_SYS_ADMIN`` over the container-owning userns.
+
+    ``annotations_raw`` is forwarded verbatim — keeping the JSON exactly as it
+    arrived avoids one round of dict→JSON re-encoding (and the dict-key-order
+    drift it would inflict on the cmdline that ``_is_our_reader`` later compares
+    against).
     """
     pid = _podman_container_pid(container)
     script = Path(__file__).resolve()
@@ -176,6 +204,7 @@ def _reexec_inside_container_netns(
         str(state_dir),
         container,
         f"--emit={emit}",
+        f"--annotations={annotations_raw}",
     ]
     cmd = (
         [nsenter, "-t", pid, "-n", *tail]
@@ -264,11 +293,36 @@ class ReaderSession:
     #: single wget retry burst doesn't produce a pile of duplicate signals.
     _DEDUP_WINDOW_S = 30.0
 
-    def __init__(self, *, state_dir: Path, container: str, emitter: EventEmitter) -> None:
-        """Prepare the session; the socket is opened in [`run`][terok_shield.resources.nflog_reader.ReaderSession.run]."""
+    def __init__(
+        self,
+        *,
+        state_dir: Path,
+        container: str,
+        emitter: EventEmitter,
+        static_dossier: Dossier | None = None,
+    ) -> None:
+        """Prepare the session; the socket is opened in [`run`][terok_shield.resources.nflog_reader.ReaderSession.run].
+
+        ``static_dossier`` is the orchestrator-supplied identity bundle pulled
+        out of the container's ``dossier.*`` annotations at hook spawn time —
+        ``container_name``, ``project``, ``task``, and ``meta_path`` are the
+        keys terok itself uses, but the reader treats the dict as opaque.  A
+        ``meta_path`` entry, when present, points at a JSON file the reader
+        will re-read at every emit so name-changes (e.g. podman rename) and
+        late-bound metadata land on the wire without restarting the reader.
+        """
         self._state_dir = state_dir
         self._container = container
         self._emitter = emitter
+        self._static_dossier = dict(static_dossier or {})
+        meta_path = self._static_dossier.get(_META_PATH_KEY)
+        self._meta_path: Path | None = Path(meta_path) if meta_path else None
+        # Precomputed static floor — meta_path stripped, since it never
+        # leaks onto the wire.  Recomputing the comprehension on every
+        # emit would be tiny but is on the per-NFLOG-packet hot path.
+        self._static_dossier_floor: Dossier = {
+            k: v for k, v in self._static_dossier.items() if k != _META_PATH_KEY
+        }
         self._domain_cache = _DomainCache(state_dir)
         # Two independent dedup windows, both keyed on (domain or dest):
         #
@@ -333,6 +387,11 @@ class ReaderSession:
         retries would currently re-write the same ``"blocked"`` line
         to ``audit.jsonl`` — flooding the forensic log during the
         very window where it's least helpful.
+
+        Dossier resolution happens once per fresh tick; both the audit
+        line and the wire payload see the same snapshot, and a renamed
+        container won't appear differently on either side of the same
+        block.
         """
         if _is_noise_dest(event.dest):
             return
@@ -344,12 +403,13 @@ class ReaderSession:
         audit_fresh = last_audit is None or (now - last_audit) >= self._DEDUP_WINDOW_S
         if not emit_fresh and not audit_fresh:
             return
-        if audit_fresh and self._append_audit_block(event, domain):
+        dossier = self._resolve_dossier()
+        if audit_fresh and self._append_audit_block(event, domain, dossier):
             self._last_audit[dedup_key] = now
         if emit_fresh:
             request_id = f"{self._container}:{self._next_id}"
             self._next_id += 1
-            if self._emit_connection_blocked(event, domain, request_id):
+            if self._emit_connection_blocked(event, domain, request_id, dossier):
                 self._last_emit[dedup_key] = now
 
     def _resolve_domain(self, dest: str) -> str:
@@ -360,7 +420,13 @@ class ReaderSession:
             domain = self._domain_cache.lookup(dest)
         return domain
 
-    def _emit_connection_blocked(self, event: _RawBlockEvent, domain: str, request_id: str) -> bool:
+    def _emit_connection_blocked(
+        self,
+        event: _RawBlockEvent,
+        domain: str,
+        request_id: str,
+        dossier: Dossier,
+    ) -> bool:
         """Publish one ``ConnectionBlocked`` for *event* — caller supplies the domain.
 
         Audit-vs-wire dedup is split: ``_maybe_emit`` decides
@@ -380,10 +446,40 @@ class ReaderSession:
                 port=event.port,
                 proto=event.proto,
                 domain=domain,
+                dossier=dossier,
             )
         )
 
-    def _append_audit_block(self, event: _RawBlockEvent, domain: str) -> bool:
+    def _resolve_dossier(self) -> Dossier:
+        """Merge the orchestrator's wire-dossier JSON file into the static floor.
+
+        Static ``dossier.*`` annotations from the OCI state form a
+        floor (mostly relevant for standalone containers without a
+        meta-file orchestrator).  When ``dossier.meta_path`` was
+        supplied, the file at that path *is* the wire dossier — same
+        keys the clearance UI renders, JSON dict-of-strings, no
+        projection — re-read on every emit so podman rename /
+        late-bound naming propagate without a reader restart.
+
+        Soft-fail at every step — missing file, EACCES, malformed JSON,
+        non-object payload — drops back to the static floor rather
+        than dropping the event.
+        """
+        dossier = dict(self._static_dossier_floor)
+        if self._meta_path is None:
+            return dossier
+        try:
+            decoded = json.loads(self._meta_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return dossier
+        if not isinstance(decoded, dict):
+            return dossier
+        for key, value in decoded.items():
+            if value:
+                dossier[str(key)] = str(value)
+        return dossier
+
+    def _append_audit_block(self, event: _RawBlockEvent, domain: str, dossier: Dossier) -> bool:
         """Write one ``"action": "blocked"`` entry to ``state_dir/audit.jsonl``.
 
         Inlined (rather than importing ``terok_shield.audit.AuditLogger``)
@@ -401,6 +497,10 @@ class ReaderSession:
         disappear into DEBUG noise on a host where the default log
         level is INFO — see ``terok_shield.audit.AuditLogger``'s
         host-side path for the same posture.
+
+        The optional ``dossier`` field carries whatever orchestrator
+        identity the wire event also got — present only when non-empty
+        so shield-only deployments don't pad audit rows with ``{}``.
         """
         entry = {
             "ts": datetime.now(UTC).isoformat(timespec="seconds"),
@@ -412,6 +512,8 @@ class ReaderSession:
         }
         if domain:
             entry["domain"] = domain
+        if dossier:
+            entry["dossier"] = dossier
         line = json.dumps(entry, separators=(",", ":")) + "\n"
         path = self._state_dir / "audit.jsonl"
         try:
@@ -434,6 +536,37 @@ class ReaderSession:
     def _exit_reason(self) -> str:
         """Describe why the loop left: intentional stop, or something else."""
         return "poststop" if self._stop_requested else "eof"
+
+
+# ── Wire-payload builders ─────────────────────────────────────────────
+#
+# One canonical place for the JSON shape so the two emitters can't
+# silently drift on a future field addition.
+
+
+def _started_payload(container: str) -> dict:
+    """Build the wire payload for a ``container_started`` lifecycle event."""
+    return {"type": "container_started", "container": container}
+
+
+def _exited_payload(container: str, reason: str) -> dict:
+    """Build the wire payload for a ``container_exited`` lifecycle event."""
+    return {"type": "container_exited", "container": container, "reason": reason}
+
+
+def _pending_payload(event: BlockedEvent) -> dict:
+    """Build the wire payload for a blocked-connection (``pending``) event."""
+    return {
+        "type": "pending",
+        "container": event.container,
+        "id": event.request_id,
+        "dest": event.dest,
+        "port": event.port,
+        "proto": event.proto,
+        "domain": event.domain,
+        "dossier": event.dossier,
+        "ts": datetime.now(UTC).isoformat(),
+    }
 
 
 # ── Emission strategies ───────────────────────────────────────────────
@@ -486,26 +619,15 @@ class SocketEmitter:
 
     def container_started(self, container: str) -> None:
         """Queue a ``container_started`` JSON event onto the hub socket."""
-        self._send({"type": "container_started", "container": container})
+        self._send(_started_payload(container))
 
     def container_exited(self, container: str, *, reason: str) -> None:
         """Queue a ``container_exited`` JSON event onto the hub socket."""
-        self._send({"type": "container_exited", "container": container, "reason": reason})
+        self._send(_exited_payload(container, reason))
 
     def connection_blocked(self, event: BlockedEvent) -> bool:
         """Queue a ``pending`` JSON event (block) onto the hub socket."""
-        return self._send(
-            {
-                "type": "pending",
-                "container": event.container,
-                "id": event.request_id,
-                "dest": event.dest,
-                "port": event.port,
-                "proto": event.proto,
-                "domain": event.domain,
-                "ts": datetime.now(UTC).isoformat(),
-            }
-        )
+        return self._send(_pending_payload(event))
 
     def close(self) -> None:
         """Disconnect from the hub socket if we're currently connected."""
@@ -565,26 +687,15 @@ class JsonEmitter:
 
     def container_started(self, container: str) -> None:
         """Emit a ``container_started`` JSON line."""
-        _print_json({"type": "container_started", "container": container})
+        _print_json(_started_payload(container))
 
     def container_exited(self, container: str, *, reason: str) -> None:
         """Emit a ``container_exited`` JSON line."""
-        _print_json({"type": "container_exited", "container": container, "reason": reason})
+        _print_json(_exited_payload(container, reason))
 
     def connection_blocked(self, event: BlockedEvent) -> bool:
         """Emit a ``pending`` JSON line carrying the full event payload."""
-        _print_json(
-            {
-                "type": "pending",
-                "container": event.container,
-                "id": event.request_id,
-                "dest": event.dest,
-                "port": event.port,
-                "proto": event.proto,
-                "domain": event.domain,
-                "ts": datetime.now(UTC).isoformat(),
-            }
-        )
+        _print_json(_pending_payload(event))
         # Stdout writes are effectively unfailable here; the fallback
         # CLI treats every emit as delivered.
         return True
@@ -772,7 +883,7 @@ class _DomainCache:
 
 
 def _parse_args() -> argparse.Namespace:  # pragma: no cover — thin argparse wrapper
-    """Define the CLI surface — positional state_dir + container, ``--emit`` channel."""
+    """Define the CLI surface — positional state_dir + container, ``--emit``, dossier."""
     parser = argparse.ArgumentParser(
         prog="nflog-reader",
         description="Stream one container's blocked-connection events to the clearance flow.",
@@ -788,7 +899,40 @@ def _parse_args() -> argparse.Namespace:  # pragma: no cover — thin argparse w
             "or JSON lines on stdout for the terminal fallback CLI."
         ),
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--annotations",
+        default="{}",
+        help=(
+            "JSON object of orchestrator-supplied dossier fields (project, task, "
+            "container_name, meta_path, …) extracted from the container's "
+            "``dossier.*`` OCI annotations.  Forwarded verbatim through the "
+            "nsenter re-exec; defaults to ``{}`` for orchestrator-less use."
+        ),
+    )
+    args = parser.parse_args()
+    args.annotations_raw = args.annotations
+    args.annotations = _parse_annotations(args.annotations)
+    return args
+
+
+def _parse_annotations(raw: str) -> Dossier:
+    """Parse a JSON-encoded ``--annotations`` argument into a ``Dossier`` — soft-fail to empty.
+
+    Malformed input or a non-object payload lands at ``{}`` rather than
+    crashing the reader: the bridge hook is opt-in and a corrupt
+    annotation block must not block container start.  Non-string values
+    are coerced via ``str()`` so a numeric annotation (rare but legal
+    in the OCI spec) still surfaces.
+    """
+    try:
+        decoded = json.loads(raw) if raw else {}
+    except ValueError:
+        _log.warning("ignoring malformed --annotations payload: %r", raw)
+        return {}
+    if not isinstance(decoded, dict):
+        _log.warning("ignoring non-object --annotations payload: %r", raw)
+        return {}
+    return {str(k): str(v) for k, v in decoded.items()}
 
 
 def _print_json(payload: dict) -> None:

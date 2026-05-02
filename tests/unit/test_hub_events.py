@@ -114,6 +114,36 @@ class TestHubEventEmitter:
         emitter.shield_up(_CONTAINER)  # must not raise
         emitter.shield_down(_CONTAINER, allow_all=True)  # must not raise
 
+    def test_dossier_is_attached_when_present(self, hub_socket: _SocketRecorder) -> None:
+        """A non-empty dossier rides under the ``dossier`` key on the wire.
+
+        Mirrors the per-emit dossier the reader already attaches to
+        ``connection_blocked`` events — keeps every event for one
+        container rendering with the same identity bundle.
+        """
+        HubEventEmitter(hub_socket.path).shield_up(
+            _CONTAINER,
+            dossier={"project": "terok", "task": "abc", "name": "diligent-octopus"},
+        )
+        assert json.loads(_received_one_line(hub_socket)) == {
+            "type": "shield_up",
+            "container": _CONTAINER,
+            "dossier": {"project": "terok", "task": "abc", "name": "diligent-octopus"},
+        }
+
+    def test_empty_dossier_omits_the_key(self, hub_socket: _SocketRecorder) -> None:
+        """Empty / missing dossier preserves the pre-v12 wire shape — no ``dossier`` key.
+
+        Old hub ingesters that don't know about ``dossier`` will keep
+        round-tripping standalone-container events without seeing an
+        unknown key during the rollout window.
+        """
+        HubEventEmitter(hub_socket.path).shield_down(_CONTAINER, dossier={})
+        assert json.loads(_received_one_line(hub_socket)) == {
+            "type": "shield_down",
+            "container": _CONTAINER,
+        }
+
 
 def _received_one_line(recorder: _SocketRecorder) -> str:
     """Drain the recorder and return the single newline-terminated payload."""
