@@ -70,8 +70,8 @@ Environment requirements are expressed via pytest markers:
 
 Directories group tests by what they test: `setup/`, `launch/`, `blocking/`,
 `allow_deny/`, `dns/`, `bypass/`, `observability/`, `safety/`, `cli/`. See
-the [Integration Test Map](test_map.md) for a full listing. See the
-[CI Workflow Map](ci_map.md) for the generated workflow/job inventory.
+the [Integration Test Map](test-map.md) for a full listing. See the
+[CI Workflow Map](ci-map.md) for the generated workflow/job inventory.
 
 Skip guards (`podman_missing`, `nft_missing`, `dig_missing`) handle
 graceful degradation when binaries are absent.

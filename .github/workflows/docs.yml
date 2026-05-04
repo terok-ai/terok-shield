@@ -60,9 +60,7 @@ jobs:
           [ -s docs/assets/coverage_treemap.svg ] || rm -f docs/assets/coverage_treemap.svg
 
       - name: Build documentation
-        run: poetry run mkdocs build --strict
-        env:
-          NO_MKDOCS_2_WARNING: "1"
+        run: poetry run properdocs build --strict
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v5

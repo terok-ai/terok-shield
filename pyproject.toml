@@ -46,13 +46,13 @@ pytest = ">=9.0.3"
 pytest-cov = ">=4.0"
 
 [tool.poetry.group.docs.dependencies]
-mkdocs = ">=1.5,<2"
+properdocs = ">=1.6.7"
 mkdocs-material = ">=9.0"
 mkdocstrings = {extras = ["python"], version = ">=0.24"}
 mkdocs-literate-nav = ">=0.6"
 mkdocs-section-index = ">=0.3"
 mkdocs-gen-files = ">=0.5"
-mkdocs-terok = {url = "https://github.com/terok-ai/mkdocs-terok/releases/download/v0.4.1/mkdocs_terok-0.4.1-py3-none-any.whl"}
+mkdocs-terok = {url = "https://github.com/terok-ai/mkdocs-terok/releases/download/v0.5.0/mkdocs_terok-0.5.0-py3-none-any.whl"}
 
 [tool.poetry.scripts]
 terok-shield = "terok_shield.cli.main:main"
