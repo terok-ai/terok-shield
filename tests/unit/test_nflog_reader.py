@@ -1033,6 +1033,65 @@ class TestAuditBlockAppend:
         )
 
 
+class TestPayloadSanitisation:
+    """``WIRE_SPEC(safe-string)``: every wire payload field is printable-ASCII clean."""
+
+    def test_pending_payload_sanitises_attacker_controlled_domain(self) -> None:
+        """A crafted DNS name leaves no control bytes in the wire JSON."""
+        payload = reader._pending_payload(
+            reader.BlockedEvent(
+                container="c1",
+                request_id="c1:1",
+                dest="192.0.2.1",
+                port=443,
+                proto=6,
+                domain="evil\x1b[31mfake\x00.example.com",
+                dossier={},
+            )
+        )
+        assert "\x1b" not in payload["domain"]
+        assert "\x00" not in payload["domain"]
+
+    def test_pending_payload_sanitises_dossier_values(self) -> None:
+        """Non-ASCII / control bytes in dossier values collapse to spaces."""
+        payload = reader._pending_payload(
+            reader.BlockedEvent(
+                container="c1",
+                request_id="c1:1",
+                dest="192.0.2.1",
+                port=443,
+                proto=6,
+                domain="example.com",
+                dossier={"name": "p\nspoof", "task": "café"},
+            )
+        )
+        assert payload["dossier"]["name"] == "p spoof"
+        assert payload["dossier"]["task"] == "caf "
+
+    def test_pending_payload_keeps_pango_chars_intact(self) -> None:
+        """``& < >`` are printable ASCII — wire layer leaves them alone."""
+        payload = reader._pending_payload(
+            reader.BlockedEvent(
+                container="c1",
+                request_id="c1:1",
+                dest="192.0.2.1",
+                port=443,
+                proto=6,
+                domain="<a&b>.example.com",
+                dossier={},
+            )
+        )
+        assert payload["domain"] == "<a&b>.example.com"
+
+    def test_started_payload_sanitises_container_id(self) -> None:
+        payload = reader._started_payload("evil\x00\x1bfoo")
+        assert payload["container"] == "evil  foo"
+
+    def test_exited_payload_sanitises_reason(self) -> None:
+        payload = reader._exited_payload("c1", "reason\nwith\tcontrol")
+        assert payload["reason"] == "reason with control"
+
+
 class _FakeSocket:
     """Minimal file-like stand-in for the NFLOG netlink socket."""
 

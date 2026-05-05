@@ -61,6 +61,38 @@ _log = logging.getLogger("terok-shield.nflog-reader")
 NFLOG_GROUP = 100
 _BLOCKED_PREFIX_TAG = "BLOCKED"
 
+
+# ── Wire-format sanitiser (producer side, container-out) ──────────────
+# WIRE_SPEC(safe-string): mirrored inline because this resource ships
+# stdlib-only and bypasses the terok-shield package.  Keep in sync with
+# terok_shield/_wire_sanitize.py and the canonical version at
+# terok_clearance/src/terok_clearance/wire/sanitize.py.  Same rule
+# everywhere: printable ASCII (``[\x20, \x7E]``) passes through, anything
+# else collapses to a space, length cap with a three-dot ASCII marker.
+
+_SANITIZE_DEFAULT_MAX_LEN = 256
+_SANITIZE_PRINTABLE_LO = 0x20
+_SANITIZE_PRINTABLE_HI = 0x7E
+_SANITIZE_TRUNCATION = "..."
+
+
+def _sanitize_str(value: str, max_len: int = _SANITIZE_DEFAULT_MAX_LEN) -> str:
+    """Coerce *value* to printable ASCII, capped at *max_len* characters."""
+    if not value:
+        return ""
+    cleaned = "".join(
+        ch if _SANITIZE_PRINTABLE_LO <= ord(ch) <= _SANITIZE_PRINTABLE_HI else " " for ch in value
+    )
+    if len(cleaned) <= max_len:
+        return cleaned
+    return cleaned[: max_len - len(_SANITIZE_TRUNCATION)] + _SANITIZE_TRUNCATION
+
+
+def _sanitize_dict(mapping: dict) -> dict:
+    """Apply `_sanitize_str` to every string value in *mapping*; pass others through."""
+    return {k: _sanitize_str(v) if isinstance(v, str) else v for k, v in mapping.items()}
+
+
 #: Reserved dossier key — the *orchestrator-side* path to the per-container
 #: meta JSON.  Read by the reader as plumbing; never appears on the wire or
 #: in the audit log.  ``_resolve_dossier`` strips it from any dict it merges.
@@ -504,16 +536,16 @@ class ReaderSession:
         """
         entry = {
             "ts": datetime.now(UTC).isoformat(timespec="seconds"),
-            "container": self._container,
+            "container": _sanitize_str(self._container),
             "action": "blocked",
-            "dest": event.dest,
+            "dest": _sanitize_str(event.dest),
             "port": event.port,
             "proto": _PROTO_NAMES.get(event.proto, str(event.proto)),
         }
         if domain:
-            entry["domain"] = domain
+            entry["domain"] = _sanitize_str(domain)
         if dossier:
-            entry["dossier"] = dossier
+            entry["dossier"] = _sanitize_dict(dossier)
         line = json.dumps(entry, separators=(",", ":")) + "\n"
         path = self._state_dir / "audit.jsonl"
         try:
@@ -546,25 +578,35 @@ class ReaderSession:
 
 def _started_payload(container: str) -> dict:
     """Build the wire payload for a ``container_started`` lifecycle event."""
-    return {"type": "container_started", "container": container}
+    return {"type": "container_started", "container": _sanitize_str(container)}
 
 
 def _exited_payload(container: str, reason: str) -> dict:
     """Build the wire payload for a ``container_exited`` lifecycle event."""
-    return {"type": "container_exited", "container": container, "reason": reason}
+    return {
+        "type": "container_exited",
+        "container": _sanitize_str(container),
+        "reason": _sanitize_str(reason),
+    }
 
 
 def _pending_payload(event: BlockedEvent) -> dict:
-    """Build the wire payload for a blocked-connection (``pending``) event."""
+    """Build the wire payload for a blocked-connection (``pending``) event.
+
+    Container-controlled bytes (``dest``, ``domain``) and orchestrator-supplied
+    dossier strings pass through ``_sanitize_*`` here — this is the producer
+    chokepoint for every reader-emitted event.  See ``WIRE_SPEC(safe-string)``
+    above the sanitiser block for the contract.
+    """
     return {
         "type": "pending",
-        "container": event.container,
-        "id": event.request_id,
-        "dest": event.dest,
+        "container": _sanitize_str(event.container),
+        "id": _sanitize_str(event.request_id),
+        "dest": _sanitize_str(event.dest),
         "port": event.port,
         "proto": event.proto,
-        "domain": event.domain,
-        "dossier": event.dossier,
+        "domain": _sanitize_str(event.domain),
+        "dossier": _sanitize_dict(event.dossier),
         "ts": datetime.now(UTC).isoformat(),
     }
 

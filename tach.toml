@@ -78,6 +78,15 @@ depends_on = []
 [[modules]]
 path = "terok_shield._hub_events"
 layer = "foundation"
+depends_on = ["terok_shield._wire_sanitize"]
+
+# Producer-side wire-format sanitiser.  WIRE_SPEC(safe-string): the
+# canonical version lives in terok_clearance.wire.sanitize; keep both
+# in sync.  Stdlib-only by design so the reader-script resource (which
+# bypasses the package) can mirror the function inline.
+[[modules]]
+path = "terok_shield._wire_sanitize"
+layer = "foundation"
 depends_on = []
 
 # ── Core ───────────────────────────────────────────────────

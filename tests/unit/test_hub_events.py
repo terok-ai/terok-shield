@@ -144,6 +144,24 @@ class TestHubEventEmitter:
             "container": _CONTAINER,
         }
 
+    def test_attacker_bytes_in_container_id_are_sanitised(
+        self, hub_socket: _SocketRecorder
+    ) -> None:
+        """A crafted container name can't smuggle control chars onto the wire."""
+        HubEventEmitter(hub_socket.path).shield_up("evil\x00\x1bfoo")
+        parsed = json.loads(_received_one_line(hub_socket))
+        assert parsed["container"] == "evil  foo"
+
+    def test_dossier_values_are_sanitised(self, hub_socket: _SocketRecorder) -> None:
+        """Producer-side belt-and-braces: dossier strings hit the wire as printable ASCII."""
+        HubEventEmitter(hub_socket.path).shield_up(
+            _CONTAINER,
+            dossier={"name": "p1\nProtocol: spoof", "task": "café"},
+        )
+        parsed = json.loads(_received_one_line(hub_socket))
+        assert parsed["dossier"]["name"] == "p1 Protocol: spoof"
+        assert parsed["dossier"]["task"] == "caf "
+
 
 def _received_one_line(recorder: _SocketRecorder) -> str:
     """Drain the recorder and return the single newline-terminated payload."""

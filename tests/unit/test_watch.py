@@ -161,6 +161,43 @@ class TestWatchEvent:
         assert "action" in parsed
         assert "container" in parsed
 
+    def test_to_json_sanitises_attacker_controlled_domain(self) -> None:
+        """Crafted DNS-name bytes can't reach the JSON line — control chars squashed."""
+        event = WatchEvent(
+            ts="2026-01-01T00:00:00+00:00",
+            source="dns",
+            action="blocked_query",
+            domain="evil\x1b[31mfake\x00.example.com",
+            container=_CONTAINER,
+        )
+        parsed = json.loads(event.to_json())
+        assert "\x1b" not in parsed["domain"]
+        assert "\x00" not in parsed["domain"]
+
+    def test_to_json_sanitises_extra_dict_values(self) -> None:
+        """Sanitiser walks ``extra`` too — values from the kernel can carry bytes."""
+        event = WatchEvent(
+            ts="2026-01-01T00:00:00+00:00",
+            source="nflog",
+            action="blocked_connection",
+            container=_CONTAINER,
+            extra={"reason": "weird\nbytes\tfound"},
+        )
+        parsed = json.loads(event.to_json())
+        assert parsed["extra"]["reason"] == "weird bytes found"
+
+    def test_to_json_keeps_pango_markup_chars_intact(self) -> None:
+        """``& < >`` are printable ASCII; renderer-side handles markup escaping."""
+        event = WatchEvent(
+            ts="2026-01-01T00:00:00+00:00",
+            source="dns",
+            action="blocked_query",
+            domain="<a&b>.example.com",
+            container=_CONTAINER,
+        )
+        parsed = json.loads(event.to_json())
+        assert parsed["domain"] == "<a&b>.example.com"
+
 
 # ── Query regex ─────────────────────────────────────────
 
