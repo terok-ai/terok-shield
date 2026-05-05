@@ -22,6 +22,8 @@ import os
 import socket
 from pathlib import Path
 
+from terok_shield._wire_sanitize import sanitize, sanitize_mapping
+
 _log = logging.getLogger(__name__)
 
 _SOCKET_BASENAME = "terok-shield-events.sock"
@@ -83,10 +85,19 @@ class HubEventEmitter:
         keeps the wire identical to the pre-v12 shape on standalone
         containers (``podman run`` without orchestrator annotations),
         so old ingesters never see a key they don't understand.
+
+        Every string value is run through the producer-side sanitiser
+        (``WIRE_SPEC(safe-string)``) before serialisation so the wire
+        format invariant — printable ASCII, length-capped — holds at
+        the boundary the container actually crosses.  The clearance
+        hub re-applies the same rule on receive as belt-and-braces.
         """
+        sanitised: dict[str, object] = {
+            k: sanitize(v) if isinstance(v, str) else v for k, v in payload.items()
+        }
         if dossier:
-            payload = {**payload, "dossier": dossier}
-        line = (json.dumps(payload, separators=(",", ":")) + "\n").encode()
+            sanitised["dossier"] = sanitize_mapping(dossier)
+        line = (json.dumps(sanitised, separators=(",", ":")) + "\n").encode()
         try:
             sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             sock.settimeout(_IO_TIMEOUT_S)
