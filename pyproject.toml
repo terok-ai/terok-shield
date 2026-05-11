@@ -8,14 +8,19 @@ version = "0.6.38"
 description = "nftables-based egress firewalling for Podman containers"
 readme = "README.md"
 license = "Apache-2.0"
-authors = ["terok maintainers"]
+authors = ["Jiri Vyskocil <jiri@vyskocil.com>"]
 keywords = ["podman", "containers", "firewall", "nftables", "security"]
 classifiers = [
-  "Programming Language :: Python :: 3",
-  "License :: OSI Approved :: Apache Software License",
-  "Environment :: Console",
-  "Operating System :: POSIX :: Linux",
-  "Topic :: System :: Networking :: Firewalls",
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python",
+    "Topic :: Security",
+    "Topic :: System :: Networking :: Firewalls",
+    "Typing :: Typed",
 ]
 
 packages = [
@@ -25,6 +30,10 @@ packages = [
 include = [
   { path = "src/terok_shield/resources/nflog_reader.py", format = ["sdist", "wheel"] },
 ]
+maintainers = ["Jiri Vyskocil <jiri@vyskocil.com>"]
+homepage = "https://terok.ai/"
+repository = "https://github.com/terok-ai/terok-shield"
+documentation = "https://terok-ai.github.io/terok-shield/"
 
 [tool.poetry.dependencies]
 python = ">=3.12,<4.0"
@@ -56,6 +65,11 @@ mkdocs-terok = {url = "https://github.com/terok-ai/mkdocs-terok/releases/downloa
 
 [tool.poetry.scripts]
 terok-shield = "terok_shield.cli.main:main"
+
+[tool.poetry.urls]
+Issues = "https://github.com/terok-ai/terok-shield/issues"
+Changelog = "https://github.com/terok-ai/terok-shield/releases"
+Security = "https://github.com/terok-ai/terok-shield/security/policy"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
