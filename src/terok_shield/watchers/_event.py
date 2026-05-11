@@ -5,6 +5,7 @@
 
 import json
 from dataclasses import asdict, dataclass, field
+from typing import Any
 
 from terok_shield._wire_sanitize import sanitize, sanitize_mapping
 
@@ -39,7 +40,7 @@ class WatchEvent:
         method straight from kernel logs / dnsmasq output, so the
         boundary lives here, not in any caller.
         """
-        d = {}
+        d: dict[str, Any] = {}
         for k, v in asdict(self).items():
             if not v and k not in ("ts", "source", "action", "container"):
                 continue

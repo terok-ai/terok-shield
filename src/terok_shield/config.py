@@ -227,6 +227,10 @@ class ShieldModeBackend(Protocol):
         """Switch a container to bypass mode."""
         ...
 
+    def shield_block(self, container: str) -> None:
+        """Total network blackout — drop all traffic."""
+        ...
+
     def shield_up(self, container: str) -> None:
         """Restore normal deny-all mode for a container."""
         ...

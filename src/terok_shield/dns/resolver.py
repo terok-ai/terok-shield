@@ -105,7 +105,8 @@ class DnsResolver:
     @staticmethod
     def _split_entries(entries: list[str]) -> tuple[list[str], list[str]]:
         """Separate entries into (domains, raw_ips)."""
-        domains, ips = [], []
+        domains: list[str] = []
+        ips: list[str] = []
         for entry in entries:
             (_ips := ips if _is_ip(entry) else domains).append(entry)
         return domains, ips

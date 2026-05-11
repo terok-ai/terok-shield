@@ -21,9 +21,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .. import ExecError, Shield, ShieldConfig, ShieldMode
+from .. import Shield, ShieldConfig, ShieldMode
 from ..config import ShieldFileConfig
 from ..container import resolve_state_dir as resolve_container_state_dir
+from ..run import ExecError
 from ..validation import validate_container_name
 from .registry import COMMANDS, ArgDef, CommandDef
 
@@ -198,7 +199,7 @@ def _build_parser() -> argparse.ArgumentParser:
         hint = "\n    status CONTAINER    Query container firewall state (up/down/down_all/inactive/error)"
         return text[:eol] + hint + text[eol:]
 
-    parser.format_help = _format_help  # type: ignore[assignment]
+    parser.format_help = _format_help  # type: ignore[method-assign]
     return parser
 
 

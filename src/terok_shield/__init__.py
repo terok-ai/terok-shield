@@ -32,6 +32,7 @@ from .config import (
     ShieldConfig,
     ShieldFileConfig,
     ShieldMode,
+    ShieldModeBackend,
     ShieldState,
     detect_dns_tier,
 )
@@ -212,7 +213,7 @@ class Shield:
         self.hub_events = hub_events or HubEventEmitter()
         self._mode = self._create_mode(config.mode)
 
-    def _create_mode(self, mode: ShieldMode):  # noqa: ANN202
+    def _create_mode(self, mode: ShieldMode) -> ShieldModeBackend:
         """Create the mode backend for the given mode."""
         if mode == ShieldMode.HOOK:
             from .hooks.mode import HookMode
