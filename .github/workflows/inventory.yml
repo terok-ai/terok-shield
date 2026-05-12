@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
-# SPDX-License-Identifier: 0BSD
+# SPDX-License-Identifier: Apache-2.0
 
 # Calls the reusable inventory-publish workflow on every master merge,
 # in parallel with `docs.yml`.  Decoupled lifecycles: a failed Pages
