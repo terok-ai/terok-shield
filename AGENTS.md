@@ -61,6 +61,7 @@ make spdx NAME="Real Human Name" FILES="src/terok_shield/new_file.py"  # Add SPD
 - **Imports**: Sorted with isort (part of ruff)
 - **Type hints**: Use Python 3.12+ type hints
 - **Docstrings**: Required for all public functions, classes, and modules (enforced by `docstr-coverage` at 95% minimum in CI)
+- **Cross-references in docstrings**: use mkdocstrings autoref syntax `` [`Name`][module.path.Name] `` — never the Sphinx ``:class:`Name``` / ``:func:`name``` forms. Sphinx roles render as literal text on the rendered docs site (mkdocstrings doesn't process them). Prefer the explicit full path over the bare `` [`Name`][] `` autoref form: explicit paths keep `properdocs build --strict` green even when the symbol's short name isn't unique. For external symbols, use the dependency's own path (e.g. `` [`Sandbox`][terok_sandbox.Sandbox] ``, `` [`StreamReader`][asyncio.StreamReader] ``) — those resolve via the inventories listed in `properdocs.yml`.
 - **Pythonic style**: Prefer modern Pythonic constructs (comprehensions, ternary expressions, walrus operator, unpacking) where they improve readability
 - **Testing**: Add tests for new functionality; maintain coverage
 - **No literal IPs/URLs in tests**: Never hardcode IP addresses, URLs, or domain names directly in test files. Instead, define named constants in `tests/testnet.py` and import them. This centralizes SonarCloud suppressions and makes network dependencies auditable
