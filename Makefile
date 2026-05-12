@@ -63,7 +63,7 @@ test-integration:
 	mkdir -p $(REPORTS_DIR)
 	poetry run pytest tests/integration/ -v --junitxml=$(INTEGRATION_JUNIT_XML) -o junit_family=legacy
 
-# Multi-distro integration test matrix (Debian 12/13, Ubuntu 24.04, Fedora 43)
+# Multi-distro integration test matrix (Debian 12/13, Ubuntu 24.04/26.04, Fedora 43/44, podman:stable)
 # Options (env vars):
 #   NO_CACHE=1    Rebuild images from scratch (ignore layer cache)
 #   BUILD_ONLY=1  Build images without running tests

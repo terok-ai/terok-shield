@@ -33,6 +33,7 @@ from ..conftest import (
 from ..helpers import (
     assert_blocked,
     assert_connectable,
+    assert_not_connectable,
     assert_reachable,
     disposable_shield as _shield,
     start_shielded_container,
@@ -180,18 +181,17 @@ class TestBypassWithAllowDeny:
         # Verify the IP is still allowed
         assert_connectable(shielded_container, BLOCKED_TARGET_IP, BLOCKED_TARGET_DNS_PORT)
 
-    def test_deny_during_bypass_has_no_traffic_effect(self, shielded_container: str) -> None:
-        """Denying during bypass doesn't block traffic (policy is accept).
+    def test_deny_during_bypass_blocks_traffic(self, shielded_container: str) -> None:
+        """Deny is enforced even in bypass mode — deny sets shadow the accept policy.
 
-        In bypass mode the output chain policy is accept, so removing
-        an IP from the allow set has no effect on traffic flow.
+        The bypass ruleset retains the ``deny_v4``/``deny_v6`` sets so an
+        operator-driven deny still drops matching traffic.  See PR #230.
         """
         shield = _shield()
         shield.down(shielded_container)
 
-        # Deny shouldn't affect traffic in bypass mode
         shield.deny(shielded_container, BLOCKED_TARGET_IP)
-        assert_connectable(shielded_container, BLOCKED_TARGET_IP, BLOCKED_TARGET_DNS_PORT)
+        assert_not_connectable(shielded_container, BLOCKED_TARGET_IP, BLOCKED_TARGET_DNS_PORT)
 
 
 @pytest.mark.needs_podman

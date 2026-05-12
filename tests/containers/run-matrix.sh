@@ -42,8 +42,10 @@ fi
 declare -A DISTROS=(
     [debian12]="debian12"
     [ubuntu2404]="ubuntu2404"
+    [ubuntu2604]="ubuntu2604"
     [debian13]="debian13"
     [fedora43]="fedora43"
+    [fedora44]="fedora44"
     [podman]="podman"
 )
 
@@ -51,8 +53,10 @@ declare -A DISTROS=(
 declare -A EXPECTED_VERSIONS=(
     [debian12]="4.3.x"
     [ubuntu2404]="4.9.x"
+    [ubuntu2604]="5.x"
     [debian13]="5.4.x"
     [fedora43]="5.8.x"
+    [fedora44]="5.x"
     [podman]="latest"
 )
 
@@ -61,8 +65,10 @@ declare -A EXPECTED_VERSIONS=(
 declare -A TEST_USERS=(
     [debian12]="testrunner"
     [ubuntu2404]="testrunner"
+    [ubuntu2604]="testrunner"
     [debian13]="testrunner"
     [fedora43]="testrunner"
+    [fedora44]="testrunner"
     [podman]="podman"
 )
 

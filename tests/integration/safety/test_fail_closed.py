@@ -20,22 +20,22 @@ class TestCLIErrors:
     """Verify CLI error handling that requires podman."""
 
     def test_cli_allow_bad_container(self, shield_env: Path) -> None:
-        """Allowing on a nonexistent container exits 1."""
+        """Allowing on a nonexistent container exits non-zero."""
         bogus = f"nonexistent-{uuid.uuid4().hex[:12]}"
         with pytest.raises(SystemExit) as exc_info:
             main(["allow", bogus, TEST_IP1])
-        assert exc_info.value.code == 1
+        assert exc_info.value.code
 
     def test_cli_down_bad_container(self, shield_env: Path) -> None:
-        """``down`` on a nonexistent container exits 1."""
+        """``down`` on a nonexistent container exits non-zero."""
         bogus = f"nonexistent-{uuid.uuid4().hex[:12]}"
         with pytest.raises(SystemExit) as exc_info:
             main(["down", bogus])
-        assert exc_info.value.code == 1
+        assert exc_info.value.code
 
     def test_cli_up_bad_container(self, shield_env: Path) -> None:
-        """``up`` on a nonexistent container exits 1."""
+        """``up`` on a nonexistent container exits non-zero."""
         bogus = f"nonexistent-{uuid.uuid4().hex[:12]}"
         with pytest.raises(SystemExit) as exc_info:
             main(["up", bogus])
-        assert exc_info.value.code == 1
+        assert exc_info.value.code

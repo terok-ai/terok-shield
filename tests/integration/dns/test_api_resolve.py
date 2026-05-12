@@ -57,7 +57,7 @@ class TestCLIResolve:
 
     def test_cli_resolve(self, shield_env: Path, capsys: pytest.CaptureFixture) -> None:
         """``main(["resolve", container])`` prints resolved IP count."""
-        main(["resolve", "cli-resolve-test"])
+        main(["--state-dir", str(shield_env), "resolve", "cli-resolve-test"])
         captured = capsys.readouterr()
         assert "Resolved" in captured.out
         assert "cli-resolve-test" in captured.out
