@@ -73,7 +73,7 @@ class HubEventEmitter:
     ) -> None:
         """Emit a ``shield_down`` (or ``shield_down_all``) event for *container*.
 
-        *dossier* — see :py[`shield_up`][terok_shield._hub_events.HubEventEmitter.shield_up].
+        *dossier* — see [`shield_up`][terok_shield._hub_events.HubEventEmitter.shield_up].
         """
         event_type = "shield_down_all" if allow_all else "shield_down"
         self._send({"type": event_type, "container": container}, dossier)
