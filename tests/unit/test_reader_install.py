@@ -30,7 +30,7 @@ class TestInstallReaderResource:
     """``install_reader_resource`` copies the script verbatim to the given path."""
 
     def test_writes_executable_script_with_shebang(self, tmp_path: Path) -> None:
-        dest = tmp_path / "share" / "terok-shield" / "nflog-reader.py"
+        dest = tmp_path / "share" / "terok" / "shield" / "nflog-reader.py"
         install_reader_resource(dest)
 
         assert dest.exists()
@@ -58,7 +58,7 @@ class TestInstallReaderResource:
         env = {"XDG_DATA_HOME": str(tmp_path), "HOME": str(tmp_path)}
         with mock.patch.dict("os.environ", env, clear=False):
             installed = install_reader_resource()
-        assert installed == tmp_path / "terok-shield" / "nflog-reader.py"
+        assert installed == tmp_path / "terok" / "shield" / "nflog-reader.py"
         assert installed.is_file()
 
 
@@ -70,7 +70,7 @@ class TestReaderScriptPath:
 
     def test_respects_xdg_data_home(self, tmp_path: Path) -> None:
         with mock.patch.dict("os.environ", {"XDG_DATA_HOME": str(tmp_path)}, clear=False):
-            assert reader_script_path() == tmp_path / "terok-shield" / "nflog-reader.py"
+            assert reader_script_path() == tmp_path / "terok" / "shield" / "nflog-reader.py"
 
     def test_falls_back_to_home_local_share(self, tmp_path: Path) -> None:
         env = {"HOME": str(tmp_path)}
@@ -78,5 +78,5 @@ class TestReaderScriptPath:
             import os as _os
 
             _os.environ.pop("XDG_DATA_HOME", None)
-            expected = tmp_path / ".local" / "share" / "terok-shield" / "nflog-reader.py"
+            expected = tmp_path / ".local" / "share" / "terok" / "shield" / "nflog-reader.py"
             assert reader_script_path() == expected

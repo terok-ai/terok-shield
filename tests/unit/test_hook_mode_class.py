@@ -682,7 +682,7 @@ def test_setup_global_hooks_non_sudo(tmp_path: Path, monkeypatch) -> None:
     """``setup_global_hooks()`` lays down nft + reader hooks + ballast + reader resource."""
     from terok_shield.hooks.install import setup_global_hooks
 
-    # Reader resource lands at ``$XDG_DATA_HOME/terok-shield/nflog-reader.py``;
+    # Reader resource lands at ``$XDG_DATA_HOME/terok/shield/nflog-reader.py``;
     # redirect it under tmp_path so the test stays hermetic.
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
     target = tmp_path / "hooks.d"
@@ -710,7 +710,7 @@ def test_setup_global_hooks_non_sudo(tmp_path: Path, monkeypatch) -> None:
     assert bridge["hook"]["args"] == ["terok-shield-bridge-hook", "createRuntime"]
 
     # NFLOG reader resource lands at the canonical XDG path.
-    reader = tmp_path / "share" / "terok-shield" / "nflog-reader.py"
+    reader = tmp_path / "share" / "terok" / "shield" / "nflog-reader.py"
     assert reader.is_file()
     assert reader.stat().st_mode & 0o100
 
@@ -763,7 +763,7 @@ def test_setup_global_hooks_sudo_uses_subprocess(tmp_path: Path, monkeypatch) ->
         cmds = [call.args[0] for call in mock_run.call_args_list]
         assert all(cmd[0] == "sudo" for cmd in cmds)
     # Reader resource still lands locally (no sudo for the per-user path).
-    assert (tmp_path / "share" / "terok-shield" / "nflog-reader.py").is_file()
+    assert (tmp_path / "share" / "terok" / "shield" / "nflog-reader.py").is_file()
 
 
 @mock.patch("terok_shield.hooks.mode.has_global_hooks", return_value=True)

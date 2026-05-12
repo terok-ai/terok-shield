@@ -284,7 +284,7 @@ def _is_our_reader(pid_int: int, sd: Path) -> bool:
 def _reader_script_path() -> Path:
     """Return the on-disk path ``terok setup`` places the reader script at."""
     data_home = os.environ.get("XDG_DATA_HOME") or f"{os.environ.get('HOME', '')}/.local/share"
-    return Path(data_home) / "terok-shield" / "nflog-reader.py"
+    return Path(data_home) / "terok" / "shield" / "nflog-reader.py"
 
 
 def _session_bus_address() -> str | None:

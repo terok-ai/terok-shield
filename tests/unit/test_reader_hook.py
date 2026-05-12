@@ -665,7 +665,9 @@ class TestReaderScriptPath:
 
     def test_xdg_data_home_wins(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
-        assert reader_hook._reader_script_path() == (tmp_path / "terok-shield" / "nflog-reader.py")
+        assert reader_hook._reader_script_path() == (
+            tmp_path / "terok" / "shield" / "nflog-reader.py"
+        )
 
     def test_falls_back_to_home_local_share(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -673,7 +675,7 @@ class TestReaderScriptPath:
         monkeypatch.delenv("XDG_DATA_HOME", raising=False)
         monkeypatch.setenv("HOME", str(tmp_path))
         assert reader_hook._reader_script_path() == (
-            tmp_path / ".local" / "share" / "terok-shield" / "nflog-reader.py"
+            tmp_path / ".local" / "share" / "terok" / "shield" / "nflog-reader.py"
         )
 
 

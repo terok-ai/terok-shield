@@ -41,4 +41,4 @@ def reader_script_path() -> Path:
     computation inlined in ``resources/hook_entrypoint.py``.
     """
     data_home = os.environ.get("XDG_DATA_HOME") or f"{os.environ.get('HOME', '')}/.local/share"
-    return Path(data_home) / "terok-shield" / "nflog-reader.py"
+    return Path(data_home) / "terok" / "shield" / "nflog-reader.py"
