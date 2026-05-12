@@ -25,6 +25,16 @@ SOURCE_MOUNT="/src"
 WORKSPACE_DIR="/workspace"
 PYTHON_VERSION="3.12"
 
+# Host-side scratch dir each test container writes its observed podman
+# version to.  Surfaced after each distro and in the final summary so the
+# matrix report shows what was actually exercised, not just what we expected.
+RESULTS_DIR="$(mktemp -d "${TMPDIR:-/tmp}/terok-shield-matrix-XXXXXX")"
+chmod 0777 "$RESULTS_DIR"
+trap 'rm -rf "$RESULTS_DIR"' EXIT
+
+# distro name -> observed podman version (populated by run_tests).
+declare -A ACTUAL_VERSIONS=()
+
 # ── Terminal colors (disabled when stdout is not a tty) ──
 if [[ -t 1 ]]; then
     C_BOLD='\033[1m'
@@ -53,10 +63,10 @@ declare -A DISTROS=(
 declare -A EXPECTED_VERSIONS=(
     [debian12]="4.3.x"
     [ubuntu2404]="4.9.x"
-    [ubuntu2604]="5.x"
+    [ubuntu2604]="5.7.x"
     [debian13]="5.4.x"
     [fedora43]="5.8.x"
-    [fedora44]="5.x"
+    [fedora44]="5.8.x"
     [podman]="latest"
 )
 
@@ -151,6 +161,7 @@ run_tests() {
         --device /dev/fuse:rw \
         -e container=podman \
         -v "$REPO_ROOT:$SOURCE_MOUNT:ro,Z" \
+        -v "$RESULTS_DIR:/results:rw,Z" \
         "$image" \
         bash -c "
             set -e
@@ -175,7 +186,17 @@ run_tests() {
                 cd $WORKSPACE_DIR
 
                 echo \"--- podman version ---\"
-                podman --version || echo \"podman not available\"
+                # Capture observed version into the shared /results dir
+                # for the host-side summary (line 1, last whitespace field
+                # → e.g. \"5.8.2\").  Tolerate podman being unavailable.
+                if podman_ver=\$(podman --version 2>&1); then
+                    echo \"\$podman_ver\"
+                    echo \"\$podman_ver\" | head -n1 | awk '{print \$NF}' \
+                        > /results/$name.podman-version
+                else
+                    echo \"podman not available\"
+                    : > /results/$name.podman-version
+                fi
 
                 echo \"--- rootless podman preflight ---\"
                 podman info --format \"podman={{.Version.Version}} storage={{.Store.GraphDriverName}}\" \
@@ -237,10 +258,18 @@ run_tests() {
         "
 
     local status=$?
+
+    # Pick up what the inner script observed (may be empty if podman
+    # was missing or the container died before reaching that step).
+    local actual
+    actual=$(cat "$RESULTS_DIR/$name.podman-version" 2>/dev/null || true)
+    ACTUAL_VERSIONS[$name]="${actual:-?}"
+
+    local versions="expected ${EXPECTED_VERSIONS[$name]}, got ${ACTUAL_VERSIONS[$name]}"
     if [[ $status -eq 0 ]]; then
-        echo -e "${C_GREEN}==> $name: PASS${C_RESET}"
+        echo -e "${C_GREEN}==> $name: PASS${C_RESET} ${C_DIM}($versions)${C_RESET}"
     else
-        echo -e "${C_RED}==> $name: FAIL${C_RESET}" >&2
+        echo -e "${C_RED}==> $name: FAIL${C_RESET} ${C_DIM}($versions)${C_RESET}" >&2
     fi
     return "$status"
 }
@@ -311,10 +340,10 @@ done
 echo ""
 echo -e "${C_BOLD}===== Matrix Summary =====${C_RESET}"
 for target in "${PASSED[@]}"; do
-    echo -e "  ${C_GREEN}PASS${C_RESET}: $target ${C_DIM}(podman ${EXPECTED_VERSIONS[$target]})${C_RESET}"
+    echo -e "  ${C_GREEN}PASS${C_RESET}: $target ${C_DIM}(expected ${EXPECTED_VERSIONS[$target]}, got ${ACTUAL_VERSIONS[$target]:-?})${C_RESET}"
 done
 for target in "${FAILED[@]}"; do
-    echo -e "  ${C_RED}FAIL${C_RESET}: $target ${C_DIM}(podman ${EXPECTED_VERSIONS[$target]})${C_RESET}"
+    echo -e "  ${C_RED}FAIL${C_RESET}: $target ${C_DIM}(expected ${EXPECTED_VERSIONS[$target]}, got ${ACTUAL_VERSIONS[$target]:-?})${C_RESET}"
 done
 
 if [[ ${#FAILED[@]} -gt 0 ]]; then
