@@ -12,10 +12,12 @@ containers or installed into host-wide locations:
   ``containers/oci/hooks.d/`` and inside each per-container
   ``state_dir``.
 
-The reader-script path has one duplicated computation in
-``resources/hook_entrypoint.py`` — that file is stdlib-only and cannot
-import from this package at runtime.  When either definition changes,
-the other must be updated by hand; the synced pair is the contract.
+The reader-script path is computed in two places: ``reader_script_path()``
+in this module, and its stdlib-only mirror ``_reader_script_path()`` in
+``resources/reader_hook.py`` — that file cannot import from this package
+at runtime, so the computation is inlined there verbatim.  When either
+definition changes, the other must be updated by hand; the synced pair
+is the contract.
 """
 
 from __future__ import annotations
@@ -38,7 +40,7 @@ def reader_script_path() -> Path:
 
     Respects ``XDG_DATA_HOME`` when set, otherwise falls back to the
     POSIX default ``~/.local/share``.  Mirrors the stdlib-only
-    computation inlined in ``resources/hook_entrypoint.py``.
+    ``_reader_script_path()`` inlined in ``resources/reader_hook.py``.
     """
     data_home = os.environ.get("XDG_DATA_HOME") or f"{os.environ.get('HOME', '')}/.local/share"
     return Path(data_home) / "terok" / "shield" / "nflog-reader.py"
