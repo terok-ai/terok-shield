@@ -56,9 +56,8 @@ plugins:
             merge_init_into_class: true
   - terok:
       ci_map: true
-      quality_report: true
-      quality_report_codecov_repo: terok-ai/terok-shield
-      quality_report_codecov_treemap_path: docs/assets/coverage_treemap.svg
+      code_metrics: true
+      code_metrics_codecov_repo: terok-ai/terok-shield
       test_map: true
       module_map: true
       ref_pages: true
@@ -101,7 +100,7 @@ nav:
     - Security & Design: security.md
     - Architecture: design.md
     - Contributing: developer.md
-    - Code Metrics: quality-report.md
+    - Code Metrics: code-metrics.md
     - CI Workflow Map: ci-map.md
     - Module Map: module-map.md
     - Integration Test Map: test-map.md
