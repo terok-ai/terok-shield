@@ -186,13 +186,15 @@ run_tests() {
                 cd $WORKSPACE_DIR
 
                 echo \"--- podman version ---\"
-                # Capture observed version into the shared /results dir
-                # for the host-side summary (line 1, last whitespace field
-                # → e.g. \"5.8.2\").  Tolerate podman being unavailable.
-                if podman_ver=\$(podman --version 2>&1); then
-                    echo \"\$podman_ver\"
-                    echo \"\$podman_ver\" | head -n1 | awk '{print \$NF}' \
-                        > /results/$name.podman-version
+                # Capture observed version into the shared /results dir.
+                # No single quotes anywhere in this inner block — it is
+                # wrapped in a single-quoted su -c argument, so any single
+                # quote would close it early.  Parameter expansion only.
+                if command -v podman >/dev/null 2>&1; then
+                    podman_ver_line=\$(podman --version 2>&1 | head -n1)
+                    echo \"\$podman_ver_line\"
+                    # podman version 5.8.2 -> 5.8.2
+                    echo \"\${podman_ver_line##* }\" > /results/$name.podman-version
                 else
                     echo \"podman not available\"
                     : > /results/$name.podman-version
