@@ -644,7 +644,8 @@ def test_main_returns_1_when_pid_missing_for_createruntime(tmp_path: Path) -> No
 def test_main_dispatches_createruntime_and_returns_0(tmp_path: Path) -> None:
     """main() calls _createruntime() and returns 0 on success."""
     sd = tmp_path / "sd"
-    sd.mkdir()
+    sd.mkdir(mode=0o700)
+    sd.chmod(0o700)  # state_dir_from_oci() rejects group/world-writable dirs
     (sd / "ruleset.nft").write_text("table inet terok_shield {}")
 
     oci = _oci_json(pid=42, state_dir=str(sd))
@@ -659,7 +660,8 @@ def test_main_dispatches_createruntime_and_returns_0(tmp_path: Path) -> None:
 def test_main_persists_container_id(tmp_path: Path) -> None:
     """main() writes the short container ID to state_dir/container.id."""
     sd = tmp_path / "sd"
-    sd.mkdir()
+    sd.mkdir(mode=0o700)
+    sd.chmod(0o700)  # state_dir_from_oci() rejects group/world-writable dirs
     full_id = "abc123def456789abcdef0123456789abcdef0123456789abcdef0123456789a"
     oci = _oci_json(pid=42, state_dir=str(sd), container_id=full_id)
 
@@ -675,7 +677,8 @@ def test_main_persists_container_id(tmp_path: Path) -> None:
 def test_main_dispatches_poststop_and_returns_0(tmp_path: Path) -> None:
     """main() calls _poststop() and returns 0 on success."""
     sd = tmp_path / "sd"
-    sd.mkdir()
+    sd.mkdir(mode=0o700)
+    sd.chmod(0o700)  # state_dir_from_oci() rejects group/world-writable dirs
 
     oci = _oci_json(pid=0, state_dir=str(sd))
 
@@ -693,7 +696,8 @@ def test_main_dispatches_poststop_on_version_mismatch(tmp_path: Path) -> None:
     before a terok-shield upgrade still needs its dnsmasq reaped on stop.
     """
     sd = tmp_path / "sd"
-    sd.mkdir()
+    sd.mkdir(mode=0o700)
+    sd.chmod(0o700)  # state_dir_from_oci() rejects group/world-writable dirs
     oci = _oci_json(pid=0, state_dir=str(sd), version=999)
 
     with mock.patch("terok_shield.resources.nft_hook._poststop") as mock_ps:
