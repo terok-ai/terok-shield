@@ -51,6 +51,7 @@ from .util import is_ip as _is_ip
 if TYPE_CHECKING:
     from ._hub_events import HubEventEmitter
     from .audit import AuditLogger
+    from .commands import COMMANDS, ArgDef, CommandDef
     from .dns.resolver import DnsResolver
     from .nft.rules import RulesetBuilder
     from .profiles import ProfileLoader
