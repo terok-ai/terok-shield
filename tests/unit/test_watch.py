@@ -14,13 +14,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import terok_shield.cli.watch as _cli_watch_mod
-from terok_shield.cli.watch import (
-    _enrich_nflog,
-    _ensure_log_file,
-    _handle_signal,
-    run_watch,
-)
+import terok_shield.watch as _cli_watch_mod
 from terok_shield.config import DnsTier
 from terok_shield.nft.constants import (
     ALLOWED_LOG_PREFIX,
@@ -29,6 +23,12 @@ from terok_shield.nft.constants import (
     DENIED_LOG_PREFIX,
     NFLOG_GROUP,
     PRIVATE_LOG_PREFIX,
+)
+from terok_shield.watch import (
+    _enrich_nflog,
+    _ensure_log_file,
+    _handle_signal,
+    run_watch,
 )
 from terok_shield.watchers import (
     AuditLogWatcher,
@@ -65,7 +65,7 @@ _CONTAINER = "test-container"
 
 @pytest.fixture(autouse=False)
 def _restore_running() -> Generator[None, None, None]:
-    """Capture and restore ``terok_shield.cli.watch._running`` around tests that mutate it."""
+    """Capture and restore ``terok_shield.watch._running`` around tests that mutate it."""
     original = _cli_watch_mod._running
     yield
     _cli_watch_mod._running = original
@@ -996,8 +996,8 @@ class TestRunWatchHappyPath:
             return ([], [], [])
 
         with (
-            patch("terok_shield.cli.watch.select.select", side_effect=_stop_immediately),
-            patch("terok_shield.cli.watch.NflogWatcher.create", return_value=None),
+            patch("terok_shield.watch.select.select", side_effect=_stop_immediately),
+            patch("terok_shield.watch.NflogWatcher.create", return_value=None),
         ):
             run_watch(dnsmasq_state, _CONTAINER)
 
@@ -1025,8 +1025,8 @@ class TestRunWatchHappyPath:
             return ([], [], [])
 
         with (
-            patch("terok_shield.cli.watch.select.select", side_effect=_select_then_stop),
-            patch("terok_shield.cli.watch.NflogWatcher.create", return_value=None),
+            patch("terok_shield.watch.select.select", side_effect=_select_then_stop),
+            patch("terok_shield.watch.NflogWatcher.create", return_value=None),
         ):
             run_watch(dnsmasq_state, _CONTAINER)
 
@@ -1055,8 +1055,8 @@ class TestRunWatchHappyPath:
             return ([], [], [])
 
         with (
-            patch("terok_shield.cli.watch.select.select", side_effect=_select_then_stop),
-            patch("terok_shield.cli.watch.NflogWatcher.create", return_value=None),
+            patch("terok_shield.watch.select.select", side_effect=_select_then_stop),
+            patch("terok_shield.watch.NflogWatcher.create", return_value=None),
         ):
             run_watch(dnsmasq_state, _CONTAINER)
 
@@ -1089,8 +1089,8 @@ class TestRunWatchHappyPath:
             return ([], [], [])
 
         with (
-            patch("terok_shield.cli.watch.select.select", side_effect=_select_then_stop),
-            patch("terok_shield.cli.watch.NflogWatcher.create", return_value=None),
+            patch("terok_shield.watch.select.select", side_effect=_select_then_stop),
+            patch("terok_shield.watch.NflogWatcher.create", return_value=None),
         ):
             run_watch(dnsmasq_state, _CONTAINER)
 
@@ -1130,8 +1130,8 @@ class TestRunWatchHappyPath:
             return ([], [], [])
 
         with (
-            patch("terok_shield.cli.watch.select.select", side_effect=_select_then_stop),
-            patch("terok_shield.cli.watch.NflogWatcher.create", return_value=mock_nflog),
+            patch("terok_shield.watch.select.select", side_effect=_select_then_stop),
+            patch("terok_shield.watch.NflogWatcher.create", return_value=mock_nflog),
         ):
             run_watch(dnsmasq_state, _CONTAINER)
 
@@ -1180,8 +1180,8 @@ class TestRunWatchHappyPath:
             return ([], [], [])
 
         with (
-            patch("terok_shield.cli.watch.select.select", side_effect=_select_then_stop),
-            patch("terok_shield.cli.watch.NflogWatcher.create", return_value=mock_nflog),
+            patch("terok_shield.watch.select.select", side_effect=_select_then_stop),
+            patch("terok_shield.watch.NflogWatcher.create", return_value=mock_nflog),
         ):
             run_watch(dnsmasq_state, _CONTAINER)
 

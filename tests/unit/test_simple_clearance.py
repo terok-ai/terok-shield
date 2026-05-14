@@ -13,7 +13,7 @@ from unittest import mock
 
 import pytest
 
-from terok_shield.cli import simple_clearance
+from terok_shield import simple_clearance
 
 from ..testnet import TEST_DOMAIN, TEST_IP1, TEST_IP2
 

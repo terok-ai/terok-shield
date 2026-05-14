@@ -13,9 +13,9 @@ import signal
 import sys
 from pathlib import Path
 
-from .. import state
-from ..config import DnsTier
-from ..watchers import AuditLogWatcher, DnsLogWatcher, DomainCache, NflogWatcher, WatchEvent
+from . import state
+from .config import DnsTier
+from .watchers import AuditLogWatcher, DnsLogWatcher, DomainCache, NflogWatcher, WatchEvent
 
 _running = True
 

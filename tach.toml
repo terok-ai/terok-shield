@@ -199,6 +199,7 @@ layer = "support"
 depends_on = [
     "terok_shield.audit",
     "terok_shield.profiles",
+    "terok_shield.watchers",
 ]
 
 # ── CLI ────────────────────────────────────────────────────

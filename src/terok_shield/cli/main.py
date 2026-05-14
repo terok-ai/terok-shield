@@ -5,7 +5,7 @@
 
 Constructs ``ShieldConfig`` from ``config.yml``, XDG conventions, and
 environment variables, then routes each subcommand through the
-``COMMANDS`` registry (``cli.registry``).  Five commands with standalone
+``COMMANDS`` registry (``terok_shield.commands``).  Five commands with standalone
 CLI logic are handled directly by ``_dispatch`` — ``setup`` and ``logs``
 (which bypass Shield entirely) and ``prepare``, ``run``, ``resolve``
 (which need Shield but carry extra CLI concerns).  All others delegate
@@ -22,11 +22,11 @@ from pathlib import Path
 from typing import Any
 
 from .. import Shield, ShieldConfig, ShieldMode
+from ..commands import COMMANDS, ArgDef, CommandDef
 from ..config import ShieldFileConfig
 from ..container import resolve_state_dir as resolve_container_state_dir
 from ..run import ExecError
 from ..validation import validate_container_name
-from .registry import COMMANDS, ArgDef, CommandDef
 
 # ── Entry point ──────────────────────────────────────────
 

@@ -1164,6 +1164,6 @@ class TestSetupInteractive:
 
 def test_simple_clearance_command_routes_to_handler(cli_dispatch: CliDispatchHarness) -> None:
     """simple-clearance subcommand dispatches to the terminal fallback handler."""
-    with mock.patch("terok_shield.cli.simple_clearance.run_simple_clearance") as mock_run:
+    with mock.patch("terok_shield.simple_clearance.run_simple_clearance") as mock_run:
         main(["simple-clearance", _CONTAINER])
     mock_run.assert_called_once()

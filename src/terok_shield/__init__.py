@@ -74,10 +74,10 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "SubprocessRunner": ("terok_shield.run", "SubprocessRunner"),
     "check_firewall_binaries": ("terok_shield.prereqs", "check_firewall_binaries"),
     "setup_global_hooks": ("terok_shield.hooks.install", "setup_global_hooks"),
-    # CLI registry — re-exported for terok integration layer
-    "ArgDef": ("terok_shield.cli.registry", "ArgDef"),
-    "COMMANDS": ("terok_shield.cli.registry", "COMMANDS"),
-    "CommandDef": ("terok_shield.cli.registry", "CommandDef"),
+    # Command registry — re-exported for the terok integration layer
+    "ArgDef": ("terok_shield.commands", "ArgDef"),
+    "COMMANDS": ("terok_shield.commands", "COMMANDS"),
+    "CommandDef": ("terok_shield.commands", "CommandDef"),
 }
 
 

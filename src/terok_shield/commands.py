@@ -15,7 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from .. import EnvironmentCheck, Shield
+from . import EnvironmentCheck, Shield
 
 
 @dataclass(frozen=True)
