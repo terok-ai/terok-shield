@@ -55,7 +55,7 @@ if TYPE_CHECKING:
     from .dns.resolver import DnsResolver
     from .nft.rules import RulesetBuilder
     from .profiles import ProfileLoader
-    from .run import CommandRunner
+    from .run import CommandRunner, ExecError
 
 # ── Lazy: core + support layer ──────────────────────────
 # Re-exported names from __all__ that are deferred until first access.
