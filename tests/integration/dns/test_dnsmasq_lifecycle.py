@@ -22,7 +22,7 @@ import pytest
 from terok_shield import Shield, ShieldConfig, state
 from terok_shield.config import DnsTier, detect_dns_tier
 from terok_shield.dns.dnsmasq import generate_config, nftset_entry, read_domains
-from terok_shield.nft.constants import DNSMASQ_BIND, PASTA_DNS
+from terok_shield.nft.constants import DNSMASQ_BIND_DEFAULT, PASTA_DNS
 from tests.testnet import (
     ALLOWED_TARGET_HTTP,
     BLOCKED_TARGET_HTTP,
@@ -108,10 +108,12 @@ class TestDnsmasqConfigGeneration:
     def test_generate_config_with_real_domains(self, tmp_path: Path) -> None:
         """generate_config() produces a valid dnsmasq config for real domains."""
         pid_path = tmp_path / "dnsmasq.pid"
-        config = generate_config(PASTA_DNS, ["github.com", "pypi.org"], pid_path)
+        config = generate_config(
+            PASTA_DNS, ["github.com", "pypi.org"], pid_path, listen_address=DNSMASQ_BIND_DEFAULT
+        )
 
         assert f"server={PASTA_DNS}" in config
-        assert f"listen-address={DNSMASQ_BIND}" in config
+        assert f"listen-address={DNSMASQ_BIND_DEFAULT}" in config
         assert "nftset=/github.com/" in config
         assert "nftset=/pypi.org/" in config
         assert "bind-interfaces" in config
@@ -122,7 +124,9 @@ class TestDnsmasqConfigGeneration:
         state.ensure_state_dirs(tmp_path)
         conf_path = state.dnsmasq_conf_path(tmp_path)
         pid_path = state.dnsmasq_pid_path(tmp_path)
-        config = generate_config(PASTA_DNS, ["example.org"], pid_path)
+        config = generate_config(
+            PASTA_DNS, ["example.org"], pid_path, listen_address=DNSMASQ_BIND_DEFAULT
+        )
         conf_path.write_text(config)
 
         assert conf_path.is_file()

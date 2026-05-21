@@ -146,7 +146,14 @@ def _start_container_dnsmasq(pid: str, sd: Path) -> None:
 
     No-op if ``dnsmasq.conf`` is absent (pre_start did not enable
     dnsmasq).  resolv.conf is pre-written by pre_start and bind-mounted
-    :ro, so DNS already points to 127.0.0.1 before the hook runs.
+    :ro, so DNS already points to the configured bind address before
+    the hook runs.
+
+    For non-loopback binds (krun runtime), assigns the listen address
+    to ``lo`` inside the netns before launching dnsmasq — ``bind-interfaces``
+    requires the address to be present on an interface.  Loopback
+    (``127.0.0.0/8``) is already on ``lo`` by kernel default, so the
+    add step is skipped.
 
     Mirrors ``terok_shield.dns.dnsmasq.launch()`` defensive measures:
     clears stale PID file, then verifies the new PID file and process
@@ -164,6 +171,13 @@ def _start_container_dnsmasq(pid: str, sd: Path) -> None:
     # to hold the recycled PID.
     if _our_dnsmasq_alive(pid_file, dnsmasq_conf):
         return
+
+    # Add the dnsmasq listen address to ``lo`` for non-loopback binds.
+    # Reads from dnsmasq.conf so the runtime info doesn't need a second
+    # state file or a new annotation — the conf is the source of truth.
+    bind = _oci_state.parse_dnsmasq_listen_address(dnsmasq_conf)
+    if bind and not bind.startswith("127."):
+        _oci_state.add_local_ip(pid, bind)
 
     # Remove stale PID file so the post-launch check is not fooled by a
     # leftover from a previous run (mirrors dnsmasq.launch()).

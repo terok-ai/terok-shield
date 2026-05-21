@@ -16,11 +16,12 @@ from terok_shield.config import (
     ANNOTATION_AUDIT_ENABLED_KEY,
     ANNOTATION_STATE_DIR_KEY,
     ShieldConfig,
+    ShieldRuntime,
     ShieldState,
 )
 from terok_shield.hooks.install import install_hooks
 from terok_shield.hooks.mode import HookMode
-from terok_shield.nft.constants import PASTA_HOST_LOOPBACK_MAP
+from terok_shield.nft.constants import DNSMASQ_BIND_KRUN, PASTA_HOST_LOOPBACK_MAP
 from terok_shield.nft.rules import RulesetBuilder
 from terok_shield.run import ExecError
 
@@ -1151,6 +1152,40 @@ class TestPreStartDnsTierBranches:
         resolv = state.resolv_conf_path(sd)
         assert resolv.is_file()
         assert "127.0.0.1" in resolv.read_text()
+
+    @mock.patch("terok_shield.hooks.mode.has_global_hooks", return_value=True)
+    def test_pre_start_dnsmasq_tier_krun_runtime_uses_link_local_bind(
+        self,
+        _has_hooks: mock.Mock,
+        monkeypatch: pytest.MonkeyPatch,
+        make_hook_mode: HookModeHarnessFactory,
+        make_config: ConfigFactory,
+    ) -> None:
+        """Under the krun runtime, dnsmasq binds to the link-local address.
+
+        The microVM guest can't reach netns ``127.0.0.1`` (its own
+        loopback is separate from the netns), so shield writes the
+        link-local bind into both the dnsmasq config and the
+        bind-mounted resolv.conf.  The OCI hook adds the address to
+        ``lo`` at createRuntime time.
+        """
+        _set_euid(monkeypatch, 0)
+        harness = make_hook_mode(config=make_config(runtime=ShieldRuntime.KRUN))
+        harness.runner.run.side_effect = lambda cmd, **_kw: (
+            _DNSMASQ_VERSION_NFTSET if cmd[0] == "dnsmasq" else _MODERN_PODMAN_INFO
+        )
+        harness.runner.has.return_value = True
+        harness.profiles.compose_profiles.return_value = [TEST_DOMAIN]
+
+        harness.mode.pre_start("test", ["dev-standard"])
+
+        sd = harness.config.state_dir.resolve()
+        resolv = state.resolv_conf_path(sd)
+        assert resolv.is_file()
+        assert DNSMASQ_BIND_KRUN in resolv.read_text()
+        assert "127.0.0.1" not in resolv.read_text()
+        conf = state.dnsmasq_conf_path(sd).read_text()
+        assert f"listen-address={DNSMASQ_BIND_KRUN}" in conf
 
     @mock.patch("terok_shield.hooks.mode.has_global_hooks", return_value=True)
     def test_pre_start_getent_tier_resolves_all_entries(

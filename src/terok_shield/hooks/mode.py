@@ -37,11 +37,14 @@ from ..config import (
     ANNOTATION_VERSION_KEY,
     DnsTier,
     ShieldConfig,
+    ShieldRuntime,
     ShieldState,
     detect_dns_tier,
 )
 from ..dns import dnsmasq
 from ..nft.constants import (
+    DNSMASQ_BIND_DEFAULT,
+    DNSMASQ_BIND_KRUN,
     NFT_SET_TIMEOUT_DNSMASQ,
     NFT_TABLE,
     NFT_TABLE_NAME,
@@ -252,15 +255,17 @@ class HookMode:
     def _write_dnsmasq_config_or_scrub(self, sd: Path, tier: DnsTier, upstream_dns: str) -> None:
         """Pre-generate dnsmasq config for dnsmasq tier, or scrub stale artifacts."""
         if tier == DnsTier.DNSMASQ:
+            bind = _dnsmasq_bind(self._config.runtime)
             domains = dnsmasq.read_merged_domains(sd)
             conf = dnsmasq.generate_config(
                 upstream_dns,
                 domains,
                 state.dnsmasq_pid_path(sd),
+                listen_address=bind,
                 log_path=state.dnsmasq_log_path(sd),
             )
             state.dnsmasq_conf_path(sd).write_text(conf)
-            state.resolv_conf_path(sd).write_text("nameserver 127.0.0.1\noptions ndots:0\n")
+            state.resolv_conf_path(sd).write_text(f"nameserver {bind}\noptions ndots:0\n")
         else:
             for stale in (
                 state.dnsmasq_conf_path(sd),
@@ -564,7 +569,9 @@ class HookMode:
         """Build a RulesetBuilder with the container's actual DNS settings.
 
         Prefers persisted upstream DNS (from pre_start) over resolv.conf,
-        because dnsmasq mode rewrites resolv.conf to ``127.0.0.1``.
+        because dnsmasq mode rewrites resolv.conf to the runtime-specific
+        dnsmasq listen address (``127.0.0.1`` by default; a link-local
+        address under krun).
         """
         upstream = self._read_upstream_dns()
         dns = upstream if upstream else self._read_container_dns(container)
@@ -667,6 +674,11 @@ class HookMode:
 
 
 # ── Module-level helpers ────────────────────────────────
+
+
+def _dnsmasq_bind(runtime: ShieldRuntime) -> str:
+    """Return the dnsmasq listen address for *runtime*."""
+    return DNSMASQ_BIND_KRUN if runtime is ShieldRuntime.KRUN else DNSMASQ_BIND_DEFAULT
 
 
 def _upstream_dns_for_mode(network_mode: str) -> str:

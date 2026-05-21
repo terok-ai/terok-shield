@@ -58,6 +58,7 @@ RFC1918_HOST = "10.0.0.1"  # Single host in 10.0.0.0/8
 RFC1918_CIDR_10: str = "10.0.0.0/8"  # Broad RFC1918 CIDR (prefix <= 16)
 RFC1918_CIDR_192: str = "192.168.1.0/24"  # Narrow RFC1918 CIDR (prefix > 16)
 LINK_LOCAL_DNS = "169.254.0.1"  # Link-local DNS forwarder (pasta-style)
+KRUN_DNSMASQ_BIND = "169.254.1.3"  # Link-local dnsmasq bind under the krun runtime
 
 # ── slirp4netns default network (10.0.2.0/24) ──
 

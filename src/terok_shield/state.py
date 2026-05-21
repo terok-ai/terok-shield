@@ -37,7 +37,7 @@ from pathlib import Path
 
 from .paths import HOOK_ENTRYPOINT_NAME
 
-BUNDLE_VERSION = 12
+BUNDLE_VERSION = 13
 """Integer version of the state bundle layout.
 
 Bumped whenever the file layout changes in a backwards-incompatible way.
@@ -48,6 +48,10 @@ changes even if the file layout itself is unchanged, so that
 ``terok setup`` rewrites the script instead of short-circuiting.
 
 Version history:
+    13 — ``dnsmasq.conf`` ``listen-address`` is runtime-dependent
+        (``127.0.0.1`` by default, link-local under krun); the OCI
+        hook now runs ``ip addr add`` inside the netns for non-loopback
+        binds before launching dnsmasq.
     12 — bridge ``createRuntime`` hook persists the OCI-extracted
         dossier under ``state_dir/dossier.json`` so host-side
         ``Shield.up()`` / ``Shield.down()`` can attach the same
@@ -174,12 +178,15 @@ def dnsmasq_log_path(state_dir: Path) -> Path:
 def resolv_conf_path(state_dir: Path) -> Path:
     """Return the path to the pre-written ``resolv.conf`` for the dnsmasq tier.
 
-    ``pre_start()`` writes ``nameserver 127.0.0.1`` here and passes
-    ``--volume {path}:/etc/resolv.conf:ro`` to podman.  Podman detects the
-    user-supplied mount and skips its automatic pasta-generated ``resolv.conf``,
-    so the container's DNS is directed to the per-container dnsmasq instance
-    at ``127.0.0.1:53``.  The read-only mount prevents the container payload
-    from redirecting DNS away from dnsmasq.
+    ``pre_start()`` writes ``nameserver <addr>`` here — the runtime-selected
+    dnsmasq listen address (``127.0.0.1`` for default runtimes,
+    ``169.254.1.3`` for krun where the microVM guest can't reach netns
+    loopback) — and passes ``--volume {path}:/etc/resolv.conf:ro`` to podman.
+    Podman detects the user-supplied mount and skips its automatic
+    pasta-generated ``resolv.conf``, so the container's DNS is directed to
+    the per-container dnsmasq instance at ``<addr>:53``.  The read-only
+    mount prevents the container payload from redirecting DNS away from
+    dnsmasq.
     """
     return state_dir / "resolv.conf"
 

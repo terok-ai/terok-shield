@@ -8,6 +8,8 @@ configuration looks like, what modes and states exist, and what contract
 a mode backend must satisfy.
 """
 
+from __future__ import annotations
+
 import enum
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -107,6 +109,35 @@ class ShieldState(enum.Enum):
     ERROR = "error"
 
 
+# ── ShieldRuntime ───────────────────────────────────────
+
+
+class ShieldRuntime(enum.Enum):
+    """Container runtime category — drives DNS-reachability assumptions.
+
+    DEFAULT: crun / runc / youki.  The container shares the netns,
+        so dnsmasq on ``127.0.0.1`` is reachable directly.
+    KRUN: libkrun microVM.  The guest has its own loopback isolated
+        from the netns, so dnsmasq must bind to a link-local address
+        on netns ``lo`` that the guest can reach via passt.
+    """
+
+    DEFAULT = "default"
+    KRUN = "krun"
+
+    @classmethod
+    def from_runtime_name(cls, name: str | None) -> ShieldRuntime:
+        """Map a podman ``--runtime <name>`` string (or ``None``) to the enum.
+
+        Centralises the wire-format vocabulary so callers don't repeat
+        ``"krun" → KRUN`` mappings inline.  Anything other than
+        ``"krun"`` (including ``None`` and unknown runtime names) maps
+        to ``DEFAULT`` — the loopback-shared-with-netns assumption holds
+        for every runtime shield has been tested against besides krun.
+        """
+        return cls.KRUN if name == "krun" else cls.DEFAULT
+
+
 # ── ShieldConfig ────────────────────────────────────────
 
 
@@ -125,6 +156,7 @@ class ShieldConfig:
     loopback_ports: tuple[int, ...] = ()
     audit_enabled: bool = True
     profiles_dir: Path | None = None
+    runtime: ShieldRuntime = ShieldRuntime.DEFAULT
 
 
 # ── Config-file schema (Pydantic) ───────────────────────

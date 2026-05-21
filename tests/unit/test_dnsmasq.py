@@ -22,7 +22,12 @@ from terok_shield.dns.dnsmasq import (
     remove_domain,
     write_resolv_conf,
 )
-from terok_shield.nft.constants import DNSMASQ_BIND, NFT_TABLE_NAME, PASTA_DNS
+from terok_shield.nft.constants import (
+    DNSMASQ_BIND_DEFAULT,
+    DNSMASQ_BIND_KRUN,
+    NFT_TABLE_NAME,
+    PASTA_DNS,
+)
 
 from ..testnet import TEST_DOMAIN, TEST_DOMAIN2
 
@@ -94,10 +99,12 @@ def test_nftset_entry_rejects_invalid_domain() -> None:
 def test_generate_config_basic(tmp_path: Path) -> None:
     """generate_config() produces valid dnsmasq config with nftset entries."""
     pid_path = state.dnsmasq_pid_path(tmp_path)
-    config = generate_config(PASTA_DNS, [TEST_DOMAIN, TEST_DOMAIN2], pid_path)
+    config = generate_config(
+        PASTA_DNS, [TEST_DOMAIN, TEST_DOMAIN2], pid_path, listen_address=DNSMASQ_BIND_DEFAULT
+    )
 
     assert f"server={PASTA_DNS}" in config
-    assert f"listen-address={DNSMASQ_BIND}" in config
+    assert f"listen-address={DNSMASQ_BIND_DEFAULT}" in config
     assert "port=53" in config
     assert "bind-interfaces" in config
     assert "no-resolv" in config
@@ -106,10 +113,31 @@ def test_generate_config_basic(tmp_path: Path) -> None:
     assert f"nftset=/{TEST_DOMAIN2}/" in config
 
 
+def test_generate_config_krun_listen_address(tmp_path: Path) -> None:
+    """generate_config(listen_address=DNSMASQ_BIND_KRUN) emits the krun bind."""
+    pid_path = state.dnsmasq_pid_path(tmp_path)
+    config = generate_config(PASTA_DNS, [TEST_DOMAIN], pid_path, listen_address=DNSMASQ_BIND_KRUN)
+
+    assert f"listen-address={DNSMASQ_BIND_KRUN}" in config
+    assert "listen-address=127.0.0.1" not in config
+
+
+def test_generate_config_rejects_invalid_listen_address(tmp_path: Path) -> None:
+    """generate_config() raises ValueError when listen_address isn't an IP."""
+    pid_path = state.dnsmasq_pid_path(tmp_path)
+    with pytest.raises(ValueError):
+        generate_config(PASTA_DNS, [], pid_path, listen_address="not-an-ip")
+
+
 def test_generate_config_skips_invalid_domains(tmp_path: Path) -> None:
     """Invalid domains are silently skipped."""
     pid_path = state.dnsmasq_pid_path(tmp_path)
-    config = generate_config(PASTA_DNS, [TEST_DOMAIN, "; rm -rf /", TEST_DOMAIN2], pid_path)
+    config = generate_config(
+        PASTA_DNS,
+        [TEST_DOMAIN, "; rm -rf /", TEST_DOMAIN2],
+        pid_path,
+        listen_address=DNSMASQ_BIND_DEFAULT,
+    )
 
     assert f"nftset=/{TEST_DOMAIN}/" in config
     assert f"nftset=/{TEST_DOMAIN2}/" in config
@@ -119,7 +147,7 @@ def test_generate_config_skips_invalid_domains(tmp_path: Path) -> None:
 def test_generate_config_empty_domains(tmp_path: Path) -> None:
     """Empty domain list produces config without nftset lines."""
     pid_path = state.dnsmasq_pid_path(tmp_path)
-    config = generate_config(PASTA_DNS, [], pid_path)
+    config = generate_config(PASTA_DNS, [], pid_path, listen_address=DNSMASQ_BIND_DEFAULT)
 
     assert "nftset" not in config
     assert f"server={PASTA_DNS}" in config
@@ -129,7 +157,9 @@ def test_generate_config_with_log_path(tmp_path: Path) -> None:
     """log_path enables query logging directives."""
     pid_path = state.dnsmasq_pid_path(tmp_path)
     log_path = state.dnsmasq_log_path(tmp_path)
-    config = generate_config(PASTA_DNS, [TEST_DOMAIN], pid_path, log_path=log_path)
+    config = generate_config(
+        PASTA_DNS, [TEST_DOMAIN], pid_path, listen_address=DNSMASQ_BIND_DEFAULT, log_path=log_path
+    )
 
     assert "log-queries" in config
     assert f"log-facility={log_path}" in config
@@ -138,7 +168,9 @@ def test_generate_config_with_log_path(tmp_path: Path) -> None:
 def test_generate_config_without_log_path(tmp_path: Path) -> None:
     """Default (no log_path) omits query logging directives."""
     pid_path = state.dnsmasq_pid_path(tmp_path)
-    config = generate_config(PASTA_DNS, [TEST_DOMAIN], pid_path)
+    config = generate_config(
+        PASTA_DNS, [TEST_DOMAIN], pid_path, listen_address=DNSMASQ_BIND_DEFAULT
+    )
 
     assert "log-queries" not in config
     assert "log-facility" not in config
@@ -160,7 +192,7 @@ def test_launch_writes_config_and_runs_nsenter(tmp_path: Path) -> None:
 
     runner.run.side_effect = _write_pid
 
-    launch(runner, "42", tmp_path, PASTA_DNS, [TEST_DOMAIN])
+    launch(runner, "42", tmp_path, PASTA_DNS, [TEST_DOMAIN], listen_address=DNSMASQ_BIND_DEFAULT)
 
     # Config was written
     conf = state.dnsmasq_conf_path(tmp_path)
@@ -184,7 +216,7 @@ def test_launch_raises_when_pid_file_missing(tmp_path: Path) -> None:
     runner.run.return_value = ""
 
     with pytest.raises(RuntimeError, match="PID file not written"):
-        launch(runner, "42", tmp_path, PASTA_DNS, [])
+        launch(runner, "42", tmp_path, PASTA_DNS, [], listen_address=DNSMASQ_BIND_DEFAULT)
 
 
 def test_launch_maps_exec_error_to_runtime_error(tmp_path: Path) -> None:
@@ -196,7 +228,9 @@ def test_launch_maps_exec_error_to_runtime_error(tmp_path: Path) -> None:
     runner.run.side_effect = ExecError(["dnsmasq"], 1, "bad option")
 
     with pytest.raises(RuntimeError, match="dnsmasq failed to start"):
-        launch(runner, "42", tmp_path, PASTA_DNS, [TEST_DOMAIN])
+        launch(
+            runner, "42", tmp_path, PASTA_DNS, [TEST_DOMAIN], listen_address=DNSMASQ_BIND_DEFAULT
+        )
 
 
 # ── _is_our_dnsmasq / _clear_pid_file ────────────────────
@@ -460,6 +494,51 @@ def test_reload_regenerates_config_and_sends_sighup(tmp_path: Path) -> None:
     mock_kill.assert_called_once_with(12345, signal.SIGHUP)
 
 
+def test_reload_preserves_krun_listen_address(tmp_path: Path) -> None:
+    """reload() reads the existing conf's listen-address and re-emits it.
+
+    Without this, a krun-runtime container's live reload would silently
+    rebind dnsmasq onto netns ``127.0.0.1`` and break DNS for the guest.
+    """
+    state.ensure_state_dirs(tmp_path)
+    state.dnsmasq_pid_path(tmp_path).write_text("12345\n")
+    # Pre-existing conf was generated for the krun runtime.
+    state.dnsmasq_conf_path(tmp_path).write_text(
+        f"listen-address={DNSMASQ_BIND_KRUN}\nport=53\nbind-interfaces\n"
+    )
+
+    with (
+        mock.patch("terok_shield.dns.dnsmasq._is_our_dnsmasq", return_value=True),
+        mock.patch("terok_shield.dns.dnsmasq.os.kill"),
+    ):
+        reload(tmp_path, PASTA_DNS, [TEST_DOMAIN])
+
+    new_conf = state.dnsmasq_conf_path(tmp_path).read_text()
+    assert f"listen-address={DNSMASQ_BIND_KRUN}" in new_conf
+    assert f"listen-address={DNSMASQ_BIND_DEFAULT}" not in new_conf
+
+
+def test_reload_falls_back_to_default_when_listen_address_missing(tmp_path: Path) -> None:
+    """reload() emits the default bind when the prior conf had no ``listen-address=`` line.
+
+    Defensive against hand-written or truncated configs — never crash, fall back
+    to the safe default-runtime bind.
+    """
+    state.ensure_state_dirs(tmp_path)
+    state.dnsmasq_pid_path(tmp_path).write_text("12345\n")
+    # No listen-address line in the old conf.
+    state.dnsmasq_conf_path(tmp_path).write_text("port=53\nbind-interfaces\n")
+
+    with (
+        mock.patch("terok_shield.dns.dnsmasq._is_our_dnsmasq", return_value=True),
+        mock.patch("terok_shield.dns.dnsmasq.os.kill"),
+    ):
+        reload(tmp_path, PASTA_DNS, [TEST_DOMAIN])
+
+    new_conf = state.dnsmasq_conf_path(tmp_path).read_text()
+    assert f"listen-address={DNSMASQ_BIND_DEFAULT}" in new_conf
+
+
 def test_reload_noop_when_not_running(tmp_path: Path) -> None:
     """reload() is a no-op when dnsmasq PID file is absent."""
     state.ensure_state_dirs(tmp_path)
@@ -536,7 +615,9 @@ def test_read_domains_skips_blank_lines(tmp_path: Path) -> None:
 def test_generate_config_rejects_invalid_upstream(tmp_path: Path) -> None:
     """generate_config() raises ValueError for non-IP upstream."""
     with pytest.raises(ValueError):
-        generate_config("not-an-ip", [], tmp_path / "dnsmasq.pid")
+        generate_config(
+            "not-an-ip", [], tmp_path / "dnsmasq.pid", listen_address=DNSMASQ_BIND_DEFAULT
+        )
 
 
 # ── has_nftset_support ───────────────────────────────────
@@ -584,7 +665,7 @@ def test_write_resolv_conf(tmp_path: Path) -> None:
     with mock.patch("terok_shield.dns.dnsmasq.Path", return_value=resolv_path):
         write_resolv_conf("42")
 
-    assert resolv_path.read_text() == f"nameserver {DNSMASQ_BIND}\n"
+    assert resolv_path.read_text() == f"nameserver {DNSMASQ_BIND_DEFAULT}\n"
 
 
 def test_write_resolv_conf_rejects_non_numeric_pid() -> None:

@@ -13,10 +13,11 @@ import pytest
 from terok_shield.prereqs import (
     BinaryCheck,
     check_firewall_binaries,
+    check_krun_binaries,
     which_sbin_aware,
 )
 
-from ..testfs import DIG_BINARY, DNSMASQ_SBIN, NFT_BINARY, NFT_SBIN
+from ..testfs import DIG_BINARY, DNSMASQ_SBIN, IP_SBIN, NFT_BINARY, NFT_SBIN
 
 
 def _fake_which(matches: dict[str | None, str]) -> object:
@@ -140,3 +141,35 @@ def test_check_firewall_binaries_reports_missing(monkeypatch: pytest.MonkeyPatch
     results = check_firewall_binaries()
     assert not any(r.ok for r in results)
     assert {r.path for r in results} == {""}
+
+
+# ── check_krun_binaries ───────────────────────────────────
+
+
+def test_check_krun_binaries_shape() -> None:
+    """The krun probe covers exactly ``ip`` with a krun-specific purpose."""
+    results = check_krun_binaries()
+    assert [r.name for r in results] == ["ip"]
+    assert "krun" in results[0].purpose
+
+
+def test_check_krun_binaries_reports_ok_when_present(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``ip`` resolvable via ``/usr/sbin`` → check is OK with that path."""
+
+    def _which(name: str, path: str | None = None) -> str | None:
+        if name == "ip" and path == "/usr/sbin":
+            return IP_SBIN
+        return None
+
+    monkeypatch.setattr(shutil, "which", _which)
+    [ip_check] = check_krun_binaries()
+    assert ip_check.ok is True
+    assert ip_check.path == IP_SBIN
+
+
+def test_check_krun_binaries_reports_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No ``ip`` anywhere on the host → ``ok`` is False, path is empty."""
+    monkeypatch.setattr(shutil, "which", _fake_which({}))
+    [ip_check] = check_krun_binaries()
+    assert ip_check.ok is False
+    assert ip_check.path == ""

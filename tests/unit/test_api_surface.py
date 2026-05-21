@@ -19,6 +19,7 @@ from terok_shield import (
     NftNotFoundError,
     ShieldConfig,
     ShieldMode,
+    ShieldRuntime,
     ShieldState,
 )
 
@@ -44,10 +45,12 @@ EXPECTED_ALL = [
     "ShieldFileConfig",
     "ShieldMode",
     "ShieldNeedsSetup",
+    "ShieldRuntime",
     "ShieldState",
     "SubprocessRunner",
     "USER_HOOKS_DIR",
     "check_firewall_binaries",
+    "check_krun_binaries",
     "ensure_containers_conf_hooks_dir",
     "reader_script_path",
     "setup_global_hooks",
@@ -83,6 +86,31 @@ class TestAPISurface:
             "ERROR": "error",
         }
 
+    # ── ShieldRuntime ─────────────────────────────────────
+
+    def test_shield_runtime_members(self):
+        """ShieldRuntime has DEFAULT and KRUN."""
+        members = {m.name: m.value for m in ShieldRuntime}
+        assert members == {"DEFAULT": "default", "KRUN": "krun"}
+
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [
+            pytest.param("krun", ShieldRuntime.KRUN, id="krun"),
+            pytest.param("crun", ShieldRuntime.DEFAULT, id="crun"),
+            pytest.param(None, ShieldRuntime.DEFAULT, id="none"),
+            pytest.param("", ShieldRuntime.DEFAULT, id="empty"),
+            pytest.param("unknown-runtime", ShieldRuntime.DEFAULT, id="unknown"),
+        ],
+    )
+    def test_shield_runtime_from_name(self, name, expected):
+        """`from_runtime_name` recognises ``krun`` and otherwise returns DEFAULT.
+
+        Default is the safe assumption — every runtime shield has been tested
+        against besides krun shares the netns loopback with the container.
+        """
+        assert ShieldRuntime.from_runtime_name(name) is expected
+
     # ── ShieldConfig ─────────────────────────────────────
 
     def test_shield_config_fields(self, make_config):
@@ -95,6 +123,7 @@ class TestAPISurface:
             "loopback_ports",
             "audit_enabled",
             "profiles_dir",
+            "runtime",
         ]
 
         cfg = make_config()
@@ -103,6 +132,7 @@ class TestAPISurface:
         assert cfg.loopback_ports == ()
         assert cfg.audit_enabled is True
         assert cfg.profiles_dir is None
+        assert cfg.runtime == ShieldRuntime.DEFAULT
 
     def test_shield_config_frozen(self, make_config):
         """ShieldConfig is frozen — assignment raises FrozenInstanceError."""

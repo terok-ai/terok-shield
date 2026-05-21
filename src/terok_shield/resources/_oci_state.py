@@ -41,12 +41,18 @@ ANN_STATE_DIR = "terok.shield.state_dir"
 ANN_VERSION = "terok.shield.version"
 """OCI annotation carrying the bundle version this container was prepared with."""
 
-BUNDLE_VERSION = 12
+BUNDLE_VERSION = 13
 """Wire-protocol version for the hook ↔ pre_start state-bundle contract.
 
 Bumped whenever the on-disk file layout, the hook → reader argv
 shape, or the wire payload changes incompatibly.  The nft hook hard-
 fails on a version mismatch — operator must re-run ``terok setup``.
+
+v13: ``dnsmasq.conf`` ``listen-address`` is runtime-dependent
+(``127.0.0.1`` by default; ``169.254.1.3`` under krun); the nft
+hook runs an in-netns ``ip addr add`` for non-loopback binds
+before launching dnsmasq.  Runtime info is read from the conf —
+no new state files or annotations.
 
 v12: the createRuntime bridge hook persists the orchestrator's
 ``dossier.meta_path`` annotation as ``state_dir/meta_path`` (a
@@ -449,6 +455,52 @@ def find_nft() -> str:
 def find_dnsmasq() -> str:
     """Path to the dnsmasq binary, falling back to ``/usr/sbin/dnsmasq``."""
     return shutil.which("dnsmasq") or "/usr/sbin/dnsmasq"
+
+
+def find_ip_bin() -> str:
+    """Path to the ``ip`` binary, falling back to ``/sbin/ip``.
+
+    ``ip`` is the new krun-path dependency: when dnsmasq binds to a
+    non-loopback address, the hook runs ``ip addr add`` inside the
+    container netns so ``bind-interfaces`` finds the address on ``lo``.
+    """
+    return shutil.which("ip") or "/sbin/ip"
+
+
+# ── DNS / netns helpers ──────────────────────────────────
+
+
+def parse_dnsmasq_listen_address(conf_path: Path) -> str | None:
+    """Extract the ``listen-address=…`` value from a dnsmasq config.
+
+    The OCI hook needs the listen address to decide whether to add it
+    to netns ``lo``: a loopback address is already on ``lo`` by kernel
+    default (no-op); a link-local address (krun runtime) is not, so
+    the hook assigns it before launching dnsmasq.
+
+    Returns ``None`` if the line is absent — shield's ``generate_config``
+    always emits it, so absence means the conf was hand-written or
+    truncated; callers treat that as "skip the IP-add step".
+    """
+    for line in conf_path.read_text().splitlines():
+        if line.startswith("listen-address="):
+            return line.split("=", 1)[1].strip()
+    return None
+
+
+def add_local_ip(pid: str, addr: str) -> None:
+    """Idempotently assign ``addr/32`` to ``lo`` inside *pid*'s netns.
+
+    Re-runs (e.g. container restart, sibling hook re-entry) are
+    harmless: ``ip addr add`` returns ``"RTNETLINK answers: File
+    exists"`` and a non-zero exit code, which we swallow.  Any other
+    failure propagates so the caller can fail-closed.
+    """
+    try:
+        nsenter(pid, find_ip_bin(), "addr", "add", f"{addr}/32", "dev", "lo")
+    except RuntimeError as exc:
+        if "File exists" not in str(exc):
+            raise
 
 
 # ── Logging ──────────────────────────────────────────────

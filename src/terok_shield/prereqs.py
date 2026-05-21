@@ -60,6 +60,24 @@ def check_firewall_binaries() -> tuple[BinaryCheck, ...]:
     )
 
 
+def check_krun_binaries() -> tuple[BinaryCheck, ...]:
+    """Probe the host for binaries the krun runtime path adds.
+
+    Separate from [`check_firewall_binaries`][terok_shield.prereqs.check_firewall_binaries]
+    because the krun runtime is experimental — callers should gate this
+    probe on whatever flag they use to expose krun (in terok, the
+    top-level ``experimental:`` toggle).  Reporting ``ip`` as missing
+    to an operator who never touches krun would be noise.
+    """
+    return (
+        BinaryCheck(
+            "ip",
+            which_sbin_aware("ip"),
+            "in-netns IP assignment for the krun runtime",
+        ),
+    )
+
+
 def which_sbin_aware(name: str) -> str:
     """Resolve *name* like [`shutil.which`][shutil.which], falling back to sbin directories.
 

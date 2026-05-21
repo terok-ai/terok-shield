@@ -51,7 +51,12 @@ SLIRP4NETNS_GATEWAY_V6 = "fd00::2"  # fd00:: + 2 (no --cidr6 exists)
 SLIRP4NETNS_DNS = "10.0.2.3"  # CIDR base + 3
 
 # ── dnsmasq defaults ─────────────────────────────────
-DNSMASQ_BIND = "127.0.0.1"  # dnsmasq listen address inside container
+# Link-local slots shield owns are kept disjoint:
+#     169.254.1.1 → pasta's built-in DNS forwarder (PASTA_DNS above)
+#     169.254.1.2 → pasta --map-host-loopback (PASTA_HOST_LOOPBACK_MAP)
+#     169.254.1.3 → dnsmasq under krun (DNSMASQ_BIND_KRUN)
+DNSMASQ_BIND_DEFAULT = "127.0.0.1"
+DNSMASQ_BIND_KRUN = "169.254.1.3"
 NFT_SET_TIMEOUT_DNSMASQ = "30m"  # set element timeout when dnsmasq manages IPs
 
 # ── NFLOG ──────────────────────────────────────────────

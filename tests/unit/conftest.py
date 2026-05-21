@@ -10,7 +10,7 @@ from typing import TypedDict, Unpack
 
 import pytest
 
-from terok_shield.config import ShieldConfig, ShieldMode
+from terok_shield.config import ShieldConfig, ShieldMode, ShieldRuntime
 from terok_shield.resources import _oci_state as _oci_state_pkg
 
 # At runtime the role hook scripts run with their install directory on
@@ -34,6 +34,7 @@ class _ShieldConfigKwargs(TypedDict, total=False):
     loopback_ports: tuple[int, ...]
     audit_enabled: bool
     profiles_dir: Path | None
+    runtime: ShieldRuntime
 
 
 @pytest.fixture

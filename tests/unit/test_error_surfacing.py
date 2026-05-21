@@ -19,7 +19,7 @@ from terok_shield.audit import AuditLogger
 from terok_shield.cli.main import _load_config_file
 from terok_shield.config import ShieldFileConfig
 from terok_shield.dns.dnsmasq import generate_config, read_domains
-from terok_shield.nft.constants import PASTA_DNS
+from terok_shield.nft.constants import DNSMASQ_BIND_DEFAULT, PASTA_DNS
 from terok_shield.run import ExecError
 
 from ..testnet import TEST_DOMAIN, TEST_DOMAIN2
@@ -208,7 +208,12 @@ class TestGenerateConfigWarnings:
         pid_path = tmp_path / "dnsmasq.pid"
 
         with caplog.at_level(logging.WARNING, logger="terok_shield.dns.dnsmasq"):
-            config = generate_config(PASTA_DNS, [TEST_DOMAIN, "; rm -rf /", TEST_DOMAIN2], pid_path)
+            config = generate_config(
+                PASTA_DNS,
+                [TEST_DOMAIN, "; rm -rf /", TEST_DOMAIN2],
+                pid_path,
+                listen_address=DNSMASQ_BIND_DEFAULT,
+            )
 
         # Valid domains are present, invalid one is not
         assert f"nftset=/{TEST_DOMAIN}/" in config
@@ -226,7 +231,12 @@ class TestGenerateConfigWarnings:
         pid_path = tmp_path / "dnsmasq.pid"
 
         with caplog.at_level(logging.WARNING, logger="terok_shield.dns.dnsmasq"):
-            config = generate_config(PASTA_DNS, [TEST_DOMAIN, TEST_DOMAIN2], pid_path)
+            config = generate_config(
+                PASTA_DNS,
+                [TEST_DOMAIN, TEST_DOMAIN2],
+                pid_path,
+                listen_address=DNSMASQ_BIND_DEFAULT,
+            )
 
         assert f"nftset=/{TEST_DOMAIN}/" in config
         assert len(caplog.records) == 0

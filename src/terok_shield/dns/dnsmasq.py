@@ -3,10 +3,12 @@
 
 """Per-container dnsmasq lifecycle: launch, reload, cleanup, and domain management.
 
-dnsmasq runs inside the container's network namespace (via ``nsenter``),
-listens on ``127.0.0.1:53``, and uses ``--nftset`` to auto-populate nft
-allow sets on every DNS resolution.  This handles IP rotation that
-static pre-start resolution cannot.
+dnsmasq runs inside the container's network namespace (via ``nsenter``)
+on a runtime-dependent listen address — ``127.0.0.1:53`` for ordinary
+runtimes that share the netns loopback, a link-local address under
+krun whose guest can't reach netns 127.0.0.1.  ``--nftset``
+auto-populates nft allow sets on every DNS resolution to handle IP
+rotation that static pre-start resolution cannot.
 
 This module is the single owner of dnsmasq config format and CLI args.
 """
@@ -20,7 +22,7 @@ import signal
 from pathlib import Path
 
 from .. import state
-from ..nft.constants import DNSMASQ_BIND, NFT_TABLE_NAME
+from ..nft.constants import DNSMASQ_BIND_DEFAULT, NFT_TABLE_NAME
 from ..run import CommandRunner, ExecError
 
 logger = logging.getLogger(__name__)
@@ -38,6 +40,8 @@ def launch(
     state_dir: Path,
     upstream_dns: str,
     domains: list[str],
+    *,
+    listen_address: str,
 ) -> None:
     """Generate config and launch dnsmasq in the container's network namespace.
 
@@ -51,6 +55,13 @@ def launch(
         state_dir: Per-container state directory.
         upstream_dns: Upstream DNS forwarder address.
         domains: Domain names for nftset auto-population.
+        listen_address: Bind address for dnsmasq (required, keyword-only).
+            ``127.0.0.1`` for shared-loopback runtimes; a link-local
+            address for the krun microVM where the guest cannot reach
+            netns loopback.  See
+            [`DNSMASQ_BIND_DEFAULT`][terok_shield.nft.constants.DNSMASQ_BIND_DEFAULT]
+            and
+            [`DNSMASQ_BIND_KRUN`][terok_shield.nft.constants.DNSMASQ_BIND_KRUN].
 
     Raises:
         RuntimeError: If dnsmasq fails to start or PID file is not written.
@@ -62,7 +73,7 @@ def launch(
     # existence check is not fooled by a stale file from a reused state dir.
     _clear_pid_file(state_dir)
 
-    config = generate_config(upstream_dns, domains, pid_path)
+    config = generate_config(upstream_dns, domains, pid_path, listen_address=listen_address)
     conf_path.write_text(config)
 
     # Launch dnsmasq inside the container's network namespace.
@@ -140,13 +151,23 @@ def reload(state_dir: Path, upstream_dns: str, domains: list[str]) -> None:
             "Restart the container to recover."
         )
 
-    # Regenerate config, then signal dnsmasq to re-read it.
-    # Preserve log-queries/log-facility if pre_start enabled them.
+    # Regenerate config, then signal dnsmasq to re-read it.  Preserve
+    # log-queries / log-facility and the listen address so a live
+    # reload never rebinds dnsmasq onto a different interface.
     pid_path = state.dnsmasq_pid_path(state_dir)
     conf_path = state.dnsmasq_conf_path(state_dir)
     old_conf = conf_path.read_text() if conf_path.is_file() else ""
     log_path = state.dnsmasq_log_path(state_dir) if "log-queries" in old_conf else None
-    conf_path.write_text(generate_config(upstream_dns, domains, pid_path, log_path=log_path))
+    listen_address = _extract_listen_address(old_conf) or DNSMASQ_BIND_DEFAULT
+    conf_path.write_text(
+        generate_config(
+            upstream_dns,
+            domains,
+            pid_path,
+            listen_address=listen_address,
+            log_path=log_path,
+        )
+    )
     try:
         os.kill(pid_int, signal.SIGHUP)
     except ProcessLookupError as e:
@@ -262,7 +283,7 @@ def read_merged_domains(state_dir: Path) -> list[str]:
 # ── Container DNS setup ────────────────────────────────
 
 
-def write_resolv_conf(pid: str, nameserver: str = DNSMASQ_BIND) -> None:
+def write_resolv_conf(pid: str, nameserver: str = DNSMASQ_BIND_DEFAULT) -> None:
     """Overwrite the container's resolv.conf to point to dnsmasq.
 
     Safety measure backing up the ``--dns`` podman flag.  Writes directly
@@ -290,6 +311,7 @@ def generate_config(
     domains: list[str],
     pid_path: Path,
     *,
+    listen_address: str,
     log_path: Path | None = None,
 ) -> str:
     """Generate a complete dnsmasq configuration.
@@ -298,15 +320,20 @@ def generate_config(
         upstream_dns: Upstream DNS forwarder (pasta or slirp4netns address).
         domains: Domain names for ``--nftset`` auto-population.
         pid_path: Path for the dnsmasq PID file.
+        listen_address: Address dnsmasq binds to inside the netns.  See
+            [`DNSMASQ_BIND_DEFAULT`][terok_shield.nft.constants.DNSMASQ_BIND_DEFAULT]
+            /
+            [`DNSMASQ_BIND_KRUN`][terok_shield.nft.constants.DNSMASQ_BIND_KRUN].
         log_path: If set, enable query logging to this file (for ``shield watch``).
 
     Raises:
-        ValueError: If *upstream_dns* is not a valid IP address.
+        ValueError: If *upstream_dns* or *listen_address* is not a valid IP address.
     """
     ipaddress.ip_address(upstream_dns)
+    ipaddress.ip_address(listen_address)
     lines = [
         f"# Generated by terok-shield (pid {os.getpid()})",
-        f"listen-address={DNSMASQ_BIND}",
+        f"listen-address={listen_address}",
         "port=53",
         "bind-interfaces",
         "no-resolv",
@@ -323,6 +350,19 @@ def generate_config(
             logger.warning("generate_config: skipping invalid domain entry")
             continue
     return "\n".join(lines) + "\n"
+
+
+def _extract_listen_address(conf_text: str) -> str | None:
+    """Return the ``listen-address=…`` value from a dnsmasq config, if any.
+
+    Used by [`reload`][terok_shield.dns.dnsmasq.reload] to preserve the
+    bind address across config regeneration — the hook ballast has its
+    own copy of this logic (stdlib-only contract on the ballast side).
+    """
+    for line in conf_text.splitlines():
+        if line.startswith("listen-address="):
+            return line.split("=", 1)[1].strip()
+    return None
 
 
 def nftset_entry(domain: str) -> str:

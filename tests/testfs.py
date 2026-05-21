@@ -51,6 +51,7 @@ NFT_SBIN = "/usr/sbin/nft"
 PODMAN_BINARY = "/usr/bin/podman"
 DIG_BINARY = "/usr/bin/dig"
 DNSMASQ_SBIN = "/usr/sbin/dnsmasq"
+IP_SBIN = "/usr/sbin/ip"
 
 # ── Well-known terok-shield path segments used in tests ──
 

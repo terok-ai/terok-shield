@@ -33,6 +33,7 @@ from .config import (
     ShieldFileConfig,
     ShieldMode,
     ShieldModeBackend,
+    ShieldRuntime,
     ShieldState,
     detect_dns_tier,
 )
@@ -74,6 +75,7 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "ShieldNeedsSetup": ("terok_shield.run", "ShieldNeedsSetup"),
     "SubprocessRunner": ("terok_shield.run", "SubprocessRunner"),
     "check_firewall_binaries": ("terok_shield.prereqs", "check_firewall_binaries"),
+    "check_krun_binaries": ("terok_shield.prereqs", "check_krun_binaries"),
     "setup_global_hooks": ("terok_shield.hooks.install", "setup_global_hooks"),
     # Command registry — re-exported for the terok integration layer
     "ArgDef": ("terok_shield.commands", "ArgDef"),
@@ -465,10 +467,12 @@ __all__ = [
     "ShieldFileConfig",
     "ShieldMode",
     "ShieldNeedsSetup",
+    "ShieldRuntime",
     "ShieldState",
     "SubprocessRunner",
     "USER_HOOKS_DIR",
     "check_firewall_binaries",
+    "check_krun_binaries",
     "ensure_containers_conf_hooks_dir",
     "reader_script_path",
     "setup_global_hooks",
