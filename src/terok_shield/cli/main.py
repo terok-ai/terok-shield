@@ -21,8 +21,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from terok_util import ArgDef, CommandDef
+
 from .. import Shield, ShieldConfig, ShieldMode
-from ..commands import COMMANDS, ArgDef, CommandDef
+from ..commands import COMMANDS, needs_container
 from ..config import ShieldFileConfig
 from ..container import resolve_state_dir as resolve_container_state_dir
 from ..run import ExecError
@@ -108,7 +110,7 @@ def _dispatch(args: argparse.Namespace) -> None:
         if cmd_def.handler is None:
             raise RuntimeError(f"Command {cmd_name!r} has no handler (standalone-only)")
         kwargs = _extract_handler_kwargs(args, cmd_def)
-        if cmd_def.needs_container:
+        if needs_container(cmd_def):
             cmd_def.handler(shield, container, **kwargs)
         else:
             cmd_def.handler(shield, **kwargs)
@@ -176,7 +178,7 @@ def _build_parser() -> argparse.ArgumentParser:
         p = sub.add_parser(cmd.name, **kwargs)
 
         # Container arg: `logs` uses --container (optional) in CLI for aggregated mode
-        if cmd.needs_container:
+        if needs_container(cmd):
             if cmd.name == "logs":
                 p.add_argument("--container", default=None, help="Filter by container name")
             else:
@@ -204,7 +206,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _add_argdef(parser: argparse.ArgumentParser, arg: ArgDef) -> None:
-    """Add an [`ArgDef`][terok_shield.cli.main.ArgDef] to an argparse parser."""
+    """Add an [`ArgDef`][terok_util.cli_types.ArgDef] to an argparse parser."""
     kwargs: dict = {}
     if arg.help:
         kwargs["help"] = arg.help

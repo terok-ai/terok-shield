@@ -11,7 +11,6 @@ import pytest
 
 from terok_shield.commands import (
     COMMANDS,
-    ArgDef,
     _handle_allow,
     _handle_deny,
     _handle_logs,
@@ -20,6 +19,7 @@ from terok_shield.commands import (
     _handle_quarantine,
     _handle_status,
     _handle_watch,
+    standalone_only,
 )
 
 
@@ -34,28 +34,14 @@ class TestCommandDefs:
     def test_handler_present_when_not_standalone_only(self) -> None:
         """Non-standalone commands have a handler."""
         for cmd in COMMANDS:
-            if not cmd.standalone_only:
+            if not standalone_only(cmd):
                 assert cmd.handler is not None, f"{cmd.name} missing handler"
 
     def test_standalone_only_have_no_handler(self) -> None:
         """Standalone-only commands have handler=None."""
         for cmd in COMMANDS:
-            if cmd.standalone_only:
+            if standalone_only(cmd):
                 assert cmd.handler is None, f"{cmd.name} should have handler=None"
-
-
-class TestArgDef:
-    """Test ArgDef dataclass."""
-
-    def test_defaults(self) -> None:
-        """ArgDef defaults are sensible."""
-        arg = ArgDef(name="--foo")
-        assert arg.help == ""
-        assert arg.type is None
-        assert arg.default is None
-        assert arg.action is None
-        assert arg.dest is None
-        assert arg.nargs is None
 
 
 class TestHandlers:

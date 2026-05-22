@@ -7,13 +7,23 @@ The ``COMMANDS`` tuple is the single source of truth consumed by both the
 standalone CLI and the terok integration layer.  Handler functions accept
 ``(shield, container?, **kwargs)`` and print to stdout, making them
 reusable across different CLI frontends.
+
+``CommandDef`` and ``ArgDef`` are re-exported from
+[`terok_util`][terok_util] — the unified vocabulary every sibling
+package shares.  Shield-specific flags (``needs_container``,
+``standalone_only``) ride along in
+[`CommandDef.extras`][terok_util.cli_types.CommandDef.extras]; the
+shield CLI dispatcher reads them via the
+[`needs_container`][terok_shield.commands.needs_container] and
+[`standalone_only`][terok_shield.commands.standalone_only] helpers
+defined below.
 """
 # WAYPOINT: main (cli.main)
 
 import json
-from collections.abc import Callable
-from dataclasses import dataclass
 from typing import Any
+
+from terok_util import ArgDef, CommandDef
 
 from . import EnvironmentCheck, Shield
 
@@ -30,52 +40,25 @@ def _csv_list(value: str) -> list[str]:
     return [p.strip() for p in value.split(",") if p.strip()]
 
 
-@dataclass(frozen=True)
-class ArgDef:
-    """Definition of a single CLI argument for a command."""
+def needs_container(cmd: CommandDef) -> bool:
+    """Whether *cmd* requires a ``container`` positional arg.
 
-    name: str
-    help: str = ""
-    type: Callable[[str], Any] | None = None
-    default: Any = None
-    action: str | None = None
-    dest: str | None = None
-    nargs: int | str | None = None
-
-
-@dataclass(frozen=True)
-class CommandDef:
-    """Definition of a shield subcommand.
-
-    Structurally compatible with terok-sandbox's
-    [`CommandDef`][terok_sandbox.commands.CommandDef]: same attribute
-    names + ``children`` for nested verb groups, so downstream
-    consumers (terok-sandbox) can wire the registry through sandbox's
-    [`CommandTree`][terok_sandbox.commands.CommandTree] without a
-    per-package adapter.  Shield-specific fields (``needs_container``,
-    ``standalone_only``) stay first-class — they're load-bearing for
-    shield's own CLI — but the unified wire layer ignores fields it
-    doesn't know about, so the extra fields don't leak downstream.
-
-    Attributes:
-        name: Subcommand name (e.g. ``"allow"``).
-        help: One-line help string for ``--help``.
-        handler: Callable that implements the command logic.
-        needs_container: Whether the command requires a ``container`` positional arg.
-        args: Extra arguments beyond the implicit ``container``.
-        standalone_only: If True, only available in the standalone CLI, not via terok.
-        children: Sub-verbs.  Empty for every existing shield verb —
-            present for structural compatibility with the unified
-            CommandDef shape across the terok-ai ecosystem.
+    Stored in
+    [`CommandDef.extras`][terok_util.cli_types.CommandDef.extras]
+    rather than as a first-class field so the registry uses the
+    unified terok-util vocabulary across siblings.
     """
+    return bool(cmd.extras.get("needs_container", False))
 
-    name: str
-    help: str = ""
-    handler: Callable[..., None] | None = None
-    needs_container: bool = False
-    args: tuple[ArgDef, ...] = ()
-    standalone_only: bool = False
-    children: tuple["CommandDef", ...] = ()
+
+def standalone_only(cmd: CommandDef) -> bool:
+    """Whether *cmd* is only available in the standalone CLI, not via terok.
+
+    Stored in
+    [`CommandDef.extras`][terok_util.cli_types.CommandDef.extras] —
+    see [`needs_container`][terok_shield.commands.needs_container].
+    """
+    return bool(cmd.extras.get("standalone_only", False))
 
 
 # ── Handler functions (ordered to match COMMANDS) ────────
@@ -216,6 +199,13 @@ def _print_env_hint(env: EnvironmentCheck) -> None:
         print(env.setup_hint)
 
 
+# Shield-specific extras keys (read by [`needs_container`][terok_shield.commands.needs_container]
+# / [`standalone_only`][terok_shield.commands.standalone_only]).
+_NEEDS_CTR: dict[str, Any] = {"needs_container": True}
+_STANDALONE: dict[str, Any] = {"standalone_only": True}
+_NEEDS_CTR_STANDALONE: dict[str, Any] = {"needs_container": True, "standalone_only": True}
+
+
 # ── Command definitions ───────────────────────────────────
 
 COMMANDS: tuple[CommandDef, ...] = (
@@ -234,8 +224,7 @@ COMMANDS: tuple[CommandDef, ...] = (
     CommandDef(
         name="prepare",
         help="Prepare shield and print podman flags",
-        needs_container=True,
-        standalone_only=True,
+        extras=_NEEDS_CTR_STANDALONE,
         args=(
             ArgDef(
                 name="--profiles",
@@ -248,8 +237,7 @@ COMMANDS: tuple[CommandDef, ...] = (
     CommandDef(
         name="run",
         help="Launch a shielded container via podman",
-        needs_container=True,
-        standalone_only=True,
+        extras=_NEEDS_CTR_STANDALONE,
         args=(
             ArgDef(
                 name="--profiles",
@@ -261,29 +249,28 @@ COMMANDS: tuple[CommandDef, ...] = (
     CommandDef(
         name="resolve",
         help="Resolve DNS profiles and cache IPs",
-        needs_container=True,
-        standalone_only=True,
+        extras=_NEEDS_CTR_STANDALONE,
         args=(ArgDef(name="--force", action="store_true", help="Bypass cache freshness"),),
     ),
     CommandDef(
         name="allow",
         help="Live-allow a domain or IP for a container",
         handler=_handle_allow,
-        needs_container=True,
+        extras=_NEEDS_CTR,
         args=(ArgDef(name="target", help="Domain name or IP address to allow"),),
     ),
     CommandDef(
         name="deny",
         help="Live-deny a domain or IP for a container",
         handler=_handle_deny,
-        needs_container=True,
+        extras=_NEEDS_CTR,
         args=(ArgDef(name="target", help="Domain name or IP address to deny"),),
     ),
     CommandDef(
         name="down",
         help="Switch container to bypass mode (accept-all + log)",
         handler=_handle_down,
-        needs_container=True,
+        extras=_NEEDS_CTR,
         args=(
             ArgDef(
                 name="--all",
@@ -297,31 +284,31 @@ COMMANDS: tuple[CommandDef, ...] = (
         name="up",
         help="Restore deny-all mode for a container",
         handler=_handle_up,
-        needs_container=True,
+        extras=_NEEDS_CTR,
     ),
     CommandDef(
         name="quarantine",
         help="Total network blackout (drop all, log dropped traffic)",
         handler=_handle_quarantine,
-        needs_container=True,
+        extras=_NEEDS_CTR,
     ),
     CommandDef(
         name="rules",
         help="Show current nft rules for a container",
         handler=_handle_rules,
-        needs_container=True,
+        extras=_NEEDS_CTR,
     ),
     CommandDef(
         name="watch",
         help="Stream shield events — DNS blocks, audit log, NFLOG packets (requires dnsmasq tier)",
         handler=_handle_watch,
-        needs_container=True,
+        extras=_NEEDS_CTR,
     ),
     CommandDef(
         name="simple-clearance",
         help="Terminal clearance fallback — prompts operator for each blocked connection (no D-Bus)",
         handler=_handle_simple_clearance,
-        needs_container=True,
+        extras=_NEEDS_CTR,
     ),
     # NOTE: CLI special-cases logs with --container optional for aggregated mode.
     # The terok integration layer always has a per-container Shield, so the
@@ -330,7 +317,7 @@ COMMANDS: tuple[CommandDef, ...] = (
         name="logs",
         help="Show audit log entries",
         handler=_handle_logs,
-        needs_container=True,
+        extras=_NEEDS_CTR,
         args=(ArgDef(name="-n", type=int, default=50, help="Number of recent entries"),),
     ),
     CommandDef(
@@ -341,7 +328,7 @@ COMMANDS: tuple[CommandDef, ...] = (
     CommandDef(
         name="setup",
         help="Install global OCI hooks for restart persistence",
-        standalone_only=True,
+        extras=_STANDALONE,
         args=(
             ArgDef(name="--root", action="store_true", help="Install system-wide (uses sudo)"),
             ArgDef(name="--user", action="store_true", help="Install to user directory"),

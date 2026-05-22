@@ -50,9 +50,11 @@ from .podman_info import (
 from .util import is_ip as _is_ip
 
 if TYPE_CHECKING:
+    from terok_util import ArgDef, CommandDef
+
     from ._hub_events import HubEventEmitter
     from .audit import AuditLogger
-    from .commands import COMMANDS, ArgDef, CommandDef
+    from .commands import COMMANDS
     from .dns.resolver import DnsResolver
     from .nft.rules import RulesetBuilder
     from .profiles import ProfileLoader
@@ -77,10 +79,12 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "check_firewall_binaries": ("terok_shield.prereqs", "check_firewall_binaries"),
     "check_krun_binaries": ("terok_shield.prereqs", "check_krun_binaries"),
     "setup_global_hooks": ("terok_shield.hooks.install", "setup_global_hooks"),
-    # Command registry — re-exported for the terok integration layer
-    "ArgDef": ("terok_shield.commands", "ArgDef"),
+    # Command registry — re-exported for the terok integration layer.
+    # ArgDef/CommandDef now live in terok-util; we route through it so
+    # existing consumers (terok.lib.integrations.shield) keep working.
+    "ArgDef": ("terok_util", "ArgDef"),
     "COMMANDS": ("terok_shield.commands", "COMMANDS"),
-    "CommandDef": ("terok_shield.commands", "CommandDef"),
+    "CommandDef": ("terok_util", "CommandDef"),
 }
 
 
