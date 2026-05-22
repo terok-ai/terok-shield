@@ -52,7 +52,7 @@ packages = [
 include = [
   { path = "src/terok_shield/resources/nflog_reader.py", format = ["sdist", "wheel"] },
 ]
-version = "0.6.42a4"
+version = "0.6.42a5"
 
 [tool.poetry.group.dev.dependencies]
 ruff = ">=0.15.10"
