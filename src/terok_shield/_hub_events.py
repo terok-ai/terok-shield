@@ -60,7 +60,7 @@ class HubEventEmitter:
         events; passing it through here keeps the clearance UI's
         rendering of every event for the same container consistent
         (``project/task · name`` rather than the bare container slug).
-        Empty / omitted dossier degrades to the pre-v12 wire shape.
+        Empty / omitted dossier omits the key entirely.
         """
         self._send({"type": "shield_up", "container": container}, dossier)
 
@@ -82,9 +82,9 @@ class HubEventEmitter:
         """Write one JSON line to the hub socket, swallowing all I/O errors.
 
         *dossier* is folded into the payload only when non-empty —
-        keeps the wire identical to the pre-v12 shape on standalone
-        containers (``podman run`` without orchestrator annotations),
-        so old ingesters never see a key they don't understand.
+        keeps the wire flat for standalone containers (``podman run``
+        without orchestrator annotations) so the ingester only has
+        to handle the dossier key when one is actually populated.
 
         Every string value is run through the producer-side sanitiser
         (``WIRE_SPEC(safe-string)``) before serialisation so the wire

@@ -18,7 +18,6 @@ from terok_shield.podman_info import (
     global_hooks_hint,
     has_global_hooks,
     parse_podman_info,
-    parse_proc_net_route,
     parse_resolv_conf,
     parse_slirp4netns_cidr,
     slirp4netns_gateway,
@@ -194,45 +193,6 @@ class TestHooksDirPersists:
 
 
 # ── parse_resolv_conf tests ──────────────────────────────
-
-
-class TestParseProcNetRoute:
-    """Tests for /proc/net/route gateway parsing."""
-
-    def test_slirp4netns_default(self) -> None:
-        """Standard slirp4netns default route (10.0.2.2)."""
-        text = (
-            "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\n"
-            "tap0\t00000000\t0202000A\t0003\t0\t0\t0\t00000000\n"
-            "tap0\t0002000A\t00000000\t0001\t0\t0\t0\t00FFFFFF\n"
-        )
-        assert parse_proc_net_route(text) == "10.0.2.2"
-
-    def test_custom_cidr(self) -> None:
-        """Custom CIDR (192.168.42.0/24) gateway is 192.168.42.2."""
-        # 192.168.42.2 = 0xC0A82A02, in little-endian hex: 022AA8C0
-        text = (
-            "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\n"
-            "tap0\t00000000\t022AA8C0\t0003\t0\t0\t0\t00000000\n"
-        )
-        assert parse_proc_net_route(text) == "192.168.42.2"
-
-    def test_no_default_route(self) -> None:
-        """No default route returns empty string (e.g. pasta mode)."""
-        text = (
-            "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\n"
-            "eth0\t0002000A\t00000000\t0001\t0\t0\t0\t00FFFFFF\n"
-        )
-        assert parse_proc_net_route(text) == ""
-
-    def test_empty_input(self) -> None:
-        """Empty input returns empty string."""
-        assert parse_proc_net_route("") == ""
-
-    def test_header_only(self) -> None:
-        """Header-only input returns empty string."""
-        text = "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\n"
-        assert parse_proc_net_route(text) == ""
 
 
 class TestParseResolvConf:

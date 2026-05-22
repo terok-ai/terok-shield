@@ -14,13 +14,10 @@ from terok_shield.dns.dnsmasq import (
     add_domain,
     generate_config,
     has_nftset_support,
-    kill,
-    launch,
     nftset_entry,
     read_merged_domains,
     reload,
     remove_domain,
-    write_resolv_conf,
 )
 from terok_shield.nft.constants import (
     DNSMASQ_BIND_DEFAULT,
@@ -176,63 +173,6 @@ def test_generate_config_without_log_path(tmp_path: Path) -> None:
     assert "log-facility" not in config
 
 
-# ── launch ───────────────────────────────────────────────
-
-
-def test_launch_writes_config_and_runs_nsenter(tmp_path: Path) -> None:
-    """launch() writes config file and calls runner with nsenter command."""
-    state.ensure_state_dirs(tmp_path)
-    runner = mock.MagicMock()
-
-    # Simulate dnsmasq daemonising and writing its PID file as a side effect
-    # of the nsenter run call (matches real behaviour; pre-seeding would be
-    # cleared by launch()'s stale-PID cleanup).
-    def _write_pid(_cmd, **_kw):
-        state.dnsmasq_pid_path(tmp_path).write_text("12345\n")
-
-    runner.run.side_effect = _write_pid
-
-    launch(runner, "42", tmp_path, PASTA_DNS, [TEST_DOMAIN], listen_address=DNSMASQ_BIND_DEFAULT)
-
-    # Config was written
-    conf = state.dnsmasq_conf_path(tmp_path)
-    assert conf.is_file()
-    assert TEST_DOMAIN in conf.read_text()
-
-    # nsenter command was called
-    runner.run.assert_called_once()
-    cmd = runner.run.call_args[0][0]
-    assert cmd[0] == "nsenter"
-    assert "-t" in cmd
-    assert "42" in cmd
-    assert "-n" in cmd
-    assert "dnsmasq" in cmd
-
-
-def test_launch_raises_when_pid_file_missing(tmp_path: Path) -> None:
-    """launch() raises RuntimeError if dnsmasq doesn't write PID file."""
-    state.ensure_state_dirs(tmp_path)
-    runner = mock.MagicMock()
-    runner.run.return_value = ""
-
-    with pytest.raises(RuntimeError, match="PID file not written"):
-        launch(runner, "42", tmp_path, PASTA_DNS, [], listen_address=DNSMASQ_BIND_DEFAULT)
-
-
-def test_launch_maps_exec_error_to_runtime_error(tmp_path: Path) -> None:
-    """launch() converts ExecError from runner into RuntimeError."""
-    from terok_shield.run import ExecError
-
-    state.ensure_state_dirs(tmp_path)
-    runner = mock.MagicMock()
-    runner.run.side_effect = ExecError(["dnsmasq"], 1, "bad option")
-
-    with pytest.raises(RuntimeError, match="dnsmasq failed to start"):
-        launch(
-            runner, "42", tmp_path, PASTA_DNS, [TEST_DOMAIN], listen_address=DNSMASQ_BIND_DEFAULT
-        )
-
-
 # ── _is_our_dnsmasq / _clear_pid_file ────────────────────
 
 
@@ -322,56 +262,6 @@ def test_clear_pid_file_ignores_missing(tmp_path: Path) -> None:
     from terok_shield.dns.dnsmasq import _clear_pid_file
 
     _clear_pid_file(tmp_path)  # should not raise
-
-
-# ── kill ─────────────────────────────────────────────────
-
-
-def test_kill_sends_sigterm(tmp_path: Path) -> None:
-    """kill() reads PID file, verifies identity, and sends SIGTERM."""
-    state.dnsmasq_pid_path(tmp_path).write_text("12345\n")
-
-    with (
-        mock.patch("terok_shield.dns.dnsmasq._is_our_dnsmasq", return_value=True),
-        mock.patch("terok_shield.dns.dnsmasq.os.kill") as mock_kill,
-    ):
-        kill(tmp_path)
-
-    import signal
-
-    mock_kill.assert_called_once_with(12345, signal.SIGTERM)
-
-
-def test_kill_silently_ignores_missing_pid_file(tmp_path: Path) -> None:
-    """kill() does nothing if PID file is absent."""
-    kill(tmp_path)  # should not raise
-
-
-def test_kill_silently_ignores_stale_pid(tmp_path: Path) -> None:
-    """kill() silently handles ProcessLookupError (already dead)."""
-    state.dnsmasq_pid_path(tmp_path).write_text("99999\n")
-
-    with (
-        mock.patch("terok_shield.dns.dnsmasq._is_our_dnsmasq", return_value=True),
-        mock.patch("terok_shield.dns.dnsmasq.os.kill", side_effect=ProcessLookupError),
-    ):
-        kill(tmp_path)  # should not raise
-
-
-def test_kill_clears_stale_pid_file(tmp_path: Path) -> None:
-    """kill() clears PID file when PID is not a dnsmasq process."""
-    state.dnsmasq_pid_path(tmp_path).write_text("12345\n")
-
-    with mock.patch("terok_shield.dns.dnsmasq._is_our_dnsmasq", return_value=False):
-        kill(tmp_path)
-
-    assert not state.dnsmasq_pid_path(tmp_path).is_file()
-
-
-def test_kill_silently_ignores_invalid_pid_content(tmp_path: Path) -> None:
-    """kill() silently handles non-numeric PID content."""
-    state.dnsmasq_pid_path(tmp_path).write_text("not-a-number\n")
-    kill(tmp_path)  # should not raise
 
 
 # ── add_domain / remove_domain ────────────────────────────
@@ -652,29 +542,3 @@ def test_has_nftset_support_missing_dnsmasq() -> None:
         ""  # SubprocessRunner returns "" on FileNotFoundError with check=False
     )
     assert has_nftset_support(runner) is False
-
-
-# ── write_resolv_conf ────────────────────────────────────
-
-
-def test_write_resolv_conf(tmp_path: Path) -> None:
-    """write_resolv_conf() overwrites the resolv.conf file."""
-    resolv_path = tmp_path / "resolv.conf"
-    resolv_path.write_text("nameserver 169.254.1.1\n")
-
-    with mock.patch("terok_shield.dns.dnsmasq.Path", return_value=resolv_path):
-        write_resolv_conf("42")
-
-    assert resolv_path.read_text() == f"nameserver {DNSMASQ_BIND_DEFAULT}\n"
-
-
-def test_write_resolv_conf_rejects_non_numeric_pid() -> None:
-    """write_resolv_conf() raises ValueError for non-numeric PID."""
-    with pytest.raises(ValueError, match="numeric"):
-        write_resolv_conf("../../etc")
-
-
-def test_write_resolv_conf_rejects_invalid_nameserver() -> None:
-    """write_resolv_conf() raises ValueError for a non-IP nameserver."""
-    with pytest.raises(ValueError, match="valid IP address"):
-        write_resolv_conf("42", nameserver="not-an-ip")

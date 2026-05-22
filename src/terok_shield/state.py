@@ -47,44 +47,11 @@ stale on-disk entrypoint — bump it whenever the entrypoint *protocol*
 changes even if the file layout itself is unchanged, so that
 ``terok setup`` rewrites the script instead of short-circuiting.
 
-Version history:
-    13 — ``dnsmasq.conf`` ``listen-address`` is runtime-dependent
-        (``127.0.0.1`` by default, link-local under krun); the OCI
-        hook now runs ``ip addr add`` inside the netns for non-loopback
-        binds before launching dnsmasq.
-    12 — bridge ``createRuntime`` hook persists the OCI-extracted
-        dossier under ``state_dir/dossier.json`` so host-side
-        ``Shield.up()`` / ``Shield.down()`` can attach the same
-        identity bundle to their hub events that block events already
-        carry.  Pre-v12 state bundles work fine on a v12 reader; v12
-        bundles need a v12 reader (the JSON file is the only new
-        file).
-    11 — bridge hook extracts ``dossier.*`` OCI annotations and
-        forwards them to the reader as a JSON-encoded
-        ``--annotations=…`` argv element; reader resolves a per-emit
-        dossier (static annotations merged with optional meta-path
-        JSON) and ships it on the wire and in the audit log.  Old
-        readers reject the new flag; bumping forces ``terok setup``
-        to rewrite the on-disk reader script.
-    10 — reader appends ``"action": "blocked"`` entries to
-        ``audit.jsonl`` before each wire emit, closing the
-        block→verdict timeline gap (verdicts were already audited
-        by the host-side ``allow``/``deny`` path; blocks were not).
-        Same on-disk layout; new action keyword in an existing file.
-    9 — pre_start on dnsmasq tier seeds profile.allowed with resolved
-        domains so the initial allow set has permanent entries before
-        dnsmasq starts.  Reader swaps lifetime-dedup for a 30 s rolling
-        window so dismissed notifications can re-surface.
-    8 — reader emits JSON over a unix socket to the host-userns hub
-        (``--emit=socket``) instead of ``dbus-send`` from NS_ROOTLESS;
-        hook spawn line and reader script both need refreshing.
-    7 — bridge hook captures reader stdout+stderr into ``reader.log``
-        under the state dir; reader splits into host-userns outer and
-        container-netns inner.  File layout adds ``reader.log``.
-    6 — hook-argv dispatch protocol: bridge hook adds ``--bridge`` flag
-        between ``args[0]`` and the stage; file layout unchanged.
-    5 — add the optional bridge hook pair and ``reader.pid`` lifecycle file.
-    4 — previous stable shape (nft + dnsmasq only).
+Current shape (v13): ``dnsmasq.conf`` ``listen-address`` is runtime-
+dependent (``127.0.0.1`` by default, link-local under krun); the OCI
+hook runs ``ip addr add`` inside the netns for non-loopback binds
+before launching dnsmasq.  Earlier shapes are recoverable via
+``git log -L /^BUNDLE_VERSION/:src/terok_shield/state.py``.
 """
 
 

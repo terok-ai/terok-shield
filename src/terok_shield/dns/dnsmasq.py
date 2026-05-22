@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""Per-container dnsmasq lifecycle: launch, reload, cleanup, and domain management.
+"""Per-container dnsmasq config generation, reload, and domain management.
 
 dnsmasq runs inside the container's network namespace (via ``nsenter``)
 on a runtime-dependent listen address — ``127.0.0.1:53`` for ordinary
@@ -10,7 +10,10 @@ krun whose guest can't reach netns 127.0.0.1.  ``--nftset``
 auto-populates nft allow sets on every DNS resolution to handle IP
 rotation that static pre-start resolution cannot.
 
-This module is the single owner of dnsmasq config format and CLI args.
+This module is the single package-side owner of dnsmasq config format
+and CLI args; the per-container start/stop dance is owned by the OCI
+hook resource (``resources/nft_hook.py``), which has its own stdlib-
+only copy because hook scripts run outside the package venv.
 """
 # WAYPOINT: HookMode (hooks.mode)
 
@@ -23,7 +26,7 @@ from pathlib import Path
 
 from .. import state
 from ..nft.constants import DNSMASQ_BIND_DEFAULT, NFT_TABLE_NAME
-from ..run import CommandRunner, ExecError
+from ..run import CommandRunner
 
 logger = logging.getLogger(__name__)
 
@@ -32,96 +35,6 @@ _DOMAIN_RE = re.compile(r"^(\*\.)?([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-
 
 
 # ── Lifecycle ──────────────────────────────────────────
-
-
-def launch(
-    runner: CommandRunner,
-    pid: str,
-    state_dir: Path,
-    upstream_dns: str,
-    domains: list[str],
-    *,
-    listen_address: str,
-) -> None:
-    """Generate config and launch dnsmasq in the container's network namespace.
-
-    dnsmasq daemonizes and writes its PID to the state directory.
-    If dnsmasq lacks ``--nftset`` support, it will fail immediately with
-    a clear "bad command line options" error (fail-closed).
-
-    Args:
-        runner: Command runner for subprocess calls.
-        pid: Container PID (for nsenter).
-        state_dir: Per-container state directory.
-        upstream_dns: Upstream DNS forwarder address.
-        domains: Domain names for nftset auto-population.
-        listen_address: Bind address for dnsmasq (required, keyword-only).
-            ``127.0.0.1`` for shared-loopback runtimes; a link-local
-            address for the krun microVM where the guest cannot reach
-            netns loopback.  See
-            [`DNSMASQ_BIND_DEFAULT`][terok_shield.nft.constants.DNSMASQ_BIND_DEFAULT]
-            and
-            [`DNSMASQ_BIND_KRUN`][terok_shield.nft.constants.DNSMASQ_BIND_KRUN].
-
-    Raises:
-        RuntimeError: If dnsmasq fails to start or PID file is not written.
-    """
-    conf_path = state.dnsmasq_conf_path(state_dir)
-    pid_path = state.dnsmasq_pid_path(state_dir)
-
-    # Remove any PID file left by a previous run so the post-launch
-    # existence check is not fooled by a stale file from a reused state dir.
-    _clear_pid_file(state_dir)
-
-    config = generate_config(upstream_dns, domains, pid_path, listen_address=listen_address)
-    conf_path.write_text(config)
-
-    # Launch dnsmasq inside the container's network namespace.
-    # --keep-in-foreground is NOT used: dnsmasq daemonizes and writes PID.
-    cmd = [
-        "nsenter",
-        "-t",
-        pid,
-        "-n",
-        "--",
-        "dnsmasq",
-        f"--conf-file={conf_path}",
-    ]
-    try:
-        runner.run(cmd, check=True)
-    except ExecError as e:
-        raise RuntimeError(f"dnsmasq failed to start: {e}") from e
-
-    if not pid_path.is_file():
-        raise RuntimeError(
-            f"dnsmasq started but PID file not written at {pid_path}. "
-            "The container's DNS may not be functional."
-        )
-
-
-def kill(state_dir: Path) -> None:
-    """Kill dnsmasq for a container (best-effort cleanup).
-
-    Reads the PID from the state directory and sends SIGTERM.
-    Silently ignores missing PID files, stale PIDs, and permission errors.
-    Verifies PID identity before signaling to avoid killing unrelated
-    processes.
-
-    Needed because dnsmasq runs in the host PID namespace (we only
-    ``nsenter -n`` into the network namespace).  When the container stops,
-    podman kills container-PID-namespace processes, but dnsmasq is NOT
-    among them — it becomes an orphan with a broken network socket.
-    """
-    pid_int = _read_pid(state_dir)
-    if pid_int is None:
-        return
-    if not _is_our_dnsmasq(pid_int, state_dir):
-        _clear_pid_file(state_dir)
-        return
-    try:
-        os.kill(pid_int, signal.SIGTERM)
-    except (ProcessLookupError, PermissionError):
-        pass
 
 
 def reload(state_dir: Path, upstream_dns: str, domains: list[str]) -> None:
@@ -281,26 +194,6 @@ def read_merged_domains(state_dir: Path) -> list[str]:
 
 
 # ── Container DNS setup ────────────────────────────────
-
-
-def write_resolv_conf(pid: str, nameserver: str = DNSMASQ_BIND_DEFAULT) -> None:
-    """Overwrite the container's resolv.conf to point to dnsmasq.
-
-    Safety measure backing up the ``--dns`` podman flag.  Writes directly
-    to ``/proc/{pid}/root/etc/resolv.conf`` from the host side.
-
-    Raises:
-        ValueError: If *pid* is not a numeric string or *nameserver* is not
-            a valid IPv4 or IPv6 address.
-    """
-    if not pid.isdigit():
-        raise ValueError(f"pid must be numeric, got {pid!r}")
-    try:
-        ipaddress.ip_address(nameserver)
-    except ValueError:
-        raise ValueError(f"nameserver must be a valid IP address, got {nameserver!r}") from None
-    resolv_path = Path(f"/proc/{pid}/root/etc/resolv.conf")
-    resolv_path.write_text(f"nameserver {nameserver}\n")
 
 
 # ── Config generation ──────────────────────────────────

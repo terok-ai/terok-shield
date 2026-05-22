@@ -326,23 +326,3 @@ def parse_resolv_conf(text: str) -> str:
         if len(parts) >= 2 and parts[0] == "nameserver":
             return parts[1]
     return ""
-
-
-def parse_proc_net_route(text: str) -> str:
-    """Extract the default gateway IP from ``/proc/{pid}/net/route`` content.
-
-    The gateway field is a 32-bit hex integer in host byte order.
-    Returns an empty string if no default route is found.
-    """
-    import socket
-    import struct
-
-    for line in text.splitlines()[1:]:  # skip header
-        fields = line.split()
-        if len(fields) >= 3 and fields[1] == "00000000":  # default route
-            try:
-                gw_int = int(fields[2], 16)
-                return socket.inet_ntoa(struct.pack("=I", gw_int))
-            except (ValueError, struct.error):
-                continue
-    return ""
