@@ -2173,7 +2173,7 @@ platformdirs = ">=4.9.6"
 type = "git"
 url = "https://github.com/sliwowitz/terok-util.git"
 reference = "chore/initial-scaffold"
-resolved_reference = "0250710f55925e83b6176af6c2b31d8cc794a79c"
+resolved_reference = "706e6ba88e27a1c12e8c1017eb24ea639ea6fd21"
 
 [[package]]
 name = "tomli"
