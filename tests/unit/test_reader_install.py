@@ -11,8 +11,8 @@ is the one place that does that copy.
 
 Bridge-hook JSON generation is no longer a separate API surface — the
 two role scripts (nft + reader) are written together by
-``setup_global_hooks``; integration coverage for that lives in
-``test_hook_mode_class.py``.
+[`HooksInstaller`][terok_shield.hooks.install.HooksInstaller]; integration
+coverage for that lives in ``test_hook_mode_class.py``.
 """
 
 from __future__ import annotations

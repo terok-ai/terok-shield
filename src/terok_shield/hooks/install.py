@@ -8,18 +8,32 @@ Writes two role-specific entrypoint scripts (``nft-hook`` and
 target hooks directory, alongside the JSON descriptors that tell
 podman to invoke each one at ``createRuntime`` and ``poststop``.
 
-Two entry points: [`install_hooks`][terok_shield.hooks.install.install_hooks] for per-container setup
-during pre_start, and [`setup_global_hooks`][terok_shield.hooks.install.setup_global_hooks] for one-time
-system-wide installation.
+Public entry points:
+
+- [`HooksInstaller`][terok_shield.hooks.install.HooksInstaller] — global
+  installation lifecycle (install + uninstall) at system or user scope.
+- [`install_hooks`][terok_shield.hooks.install.install_hooks] — per-container
+  install used by ``HookMode.pre_start``.
 
 Pure file I/O — no runtime container interaction.
 """
 # WAYPOINT: HookMode (hooks.mode)
 
+from __future__ import annotations
+
 import json
+import subprocess  # nosec B404 — sudo escalation for system-wide installs
+import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 from ..config import ANNOTATION_KEY
+from ..podman_info import (
+    USER_HOOKS_DIR,
+    _parse_hooks_dir_from_conf,
+    _user_containers_conf,
+    system_hooks_dir,
+)
 from .reader_install import install_reader_resource
 
 #: File name for the shared OCI-state ballast module.  Both role
@@ -52,7 +66,134 @@ def _bridge_hook_json(stage: str) -> str:
     return f"terok-shield-bridge-{stage}.json"
 
 
-# ── Public API ──────────────────────────────────────────
+#: Every file ``HooksInstaller.install`` writes to ``target_dir``.
+#: Drives ``uninstall`` so the symmetric cleanup never drifts from
+#: the install layout.
+_INSTALLED_FILES: tuple[str, ...] = (
+    _BALLAST_NAME,
+    _NFT_ENTRYPOINT_NAME,
+    _READER_ENTRYPOINT_NAME,
+    *(_nft_hook_json(stage) for stage in _HOOK_STAGES),
+    *(_bridge_hook_json(stage) for stage in _HOOK_STAGES),
+)
+
+
+# ── Global installer ────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class HooksInstaller:
+    """Persistent installation of terok-shield's OCI hook pair.
+
+    The createRuntime/poststop hook pair must persist across container
+    restarts: podman ≥ 5.x drops per-container ``--hooks-dir`` on
+    stop/start (containers/podman#17935), so global hooks are the
+    only reliable activation path until that upstream regression is
+    fixed.  Two scopes, exposed as classmethod factories:
+
+    - [`HooksInstaller.system`][terok_shield.hooks.install.HooksInstaller.system] —
+      `/etc/containers/oci/hooks.d` (or the existing equivalent);
+      escalates writes through ``sudo``, visible to root and every user.
+    - [`HooksInstaller.user`][terok_shield.hooks.install.HooksInstaller.user] —
+      `~/.local/share/containers/oci/hooks.d`; rootless, also patches
+      ``hooks_dir`` into the user's ``containers.conf`` so podman
+      discovers it.
+
+    The lifecycle is symmetric: [`install`][terok_shield.hooks.install.HooksInstaller.install]
+    writes, [`uninstall`][terok_shield.hooks.install.HooksInstaller.uninstall]
+    removes.  Both are idempotent.
+    """
+
+    target_dir: Path
+    """Directory the hook files (entrypoints, ballast, JSON descriptors) live in."""
+
+    use_sudo: bool = False
+    """Escalate file writes and removals through ``sudo`` (system scope)."""
+
+    register_in_containers_conf: bool = False
+    """Patch ``hooks_dir`` into the user's ``containers.conf`` on install.
+
+    Only meaningful for the user scope — system hooks dirs are
+    discovered by podman without registration.
+    """
+
+    @classmethod
+    def system(cls) -> HooksInstaller:
+        """Installer for the canonical system hooks directory (sudo-escalated).
+
+        Targets the best-existing of ``/etc/containers/oci/hooks.d``
+        and ``/usr/share/containers/oci/hooks.d`` — see
+        [`system_hooks_dir`][terok_shield.podman_info.system_hooks_dir]
+        for the resolution rule.
+        """
+        return cls(target_dir=system_hooks_dir(), use_sudo=True)
+
+    @classmethod
+    def user(cls) -> HooksInstaller:
+        """Installer for the rootless per-user hooks directory.
+
+        Writes to ``~/.local/share/containers/oci/hooks.d`` and
+        registers that directory in the user's ``containers.conf`` so
+        podman scans it on the next container start.
+        """
+        return cls(
+            target_dir=USER_HOOKS_DIR.expanduser(),
+            use_sudo=False,
+            register_in_containers_conf=True,
+        )
+
+    def install(self) -> None:
+        """Write entrypoints, ballast, and JSON descriptors into ``target_dir``.
+
+        Both hook pairs (nft + reader) and the shared ballast are
+        written unconditionally — the reader hook soft-fails on
+        missing clearance, so installing it on a shield-only host
+        costs nothing and removes a configuration knob.  The
+        standalone NFLOG reader resource is copied to its canonical
+        per-user path regardless of scope.
+
+        For [`HooksInstaller.user`][terok_shield.hooks.install.HooksInstaller.user]
+        installs (``register_in_containers_conf=True``), also patches
+        ``hooks_dir`` into the user's ``containers.conf``.
+        """
+        # Reader resource is per-user, never under target_dir; install it
+        # before the hook JSONs so the path the JSONs reference is already
+        # populated when the first container fires.
+        install_reader_resource()
+        if self.use_sudo:
+            _install_via_sudo(self.target_dir)
+        else:
+            self.target_dir.mkdir(parents=True, exist_ok=True)
+            _write_role_files(self.target_dir, self.target_dir)
+        if self.register_in_containers_conf:
+            _register_hooks_dir_in_containers_conf(self.target_dir)
+
+    def uninstall(self) -> None:
+        """Remove every hook file [`install`][terok_shield.hooks.install.HooksInstaller.install] would write.
+
+        Idempotent — missing files are tolerated.  When ``use_sudo``
+        is set, deletion runs under ``sudo`` so the calling process
+        stays unprivileged.  Containers.conf is left untouched: the
+        user's other hook directories may still need the entry.
+        """
+        paths = [self.target_dir / name for name in _INSTALLED_FILES]
+        if self.use_sudo:
+            _remove_via_sudo(paths)
+        else:
+            for path in paths:
+                path.unlink(missing_ok=True)
+
+    def is_installed(self) -> bool:
+        """True when ``target_dir`` carries the canonical createRuntime hook JSON.
+
+        A presence probe, not a version check — the
+        [`Shield.check_environment`][terok_shield.Shield.check_environment]
+        path compares the ballast's ``BUNDLE_VERSION`` separately.
+        """
+        return (self.target_dir / _nft_hook_json("createRuntime")).is_file()
+
+
+# ── Per-container install (used by HookMode.pre_start) ──
 
 
 def install_hooks(*, hook_entrypoint: Path, hooks_dir: Path) -> None:
@@ -83,44 +224,11 @@ def install_hooks(*, hook_entrypoint: Path, hooks_dir: Path) -> None:
     _write_role_files(hook_entrypoint.parent, hooks_dir, nft_entrypoint_name=hook_entrypoint.name)
 
 
-def setup_global_hooks(target_dir: Path, *, use_sudo: bool = False) -> None:
-    """Install OCI hooks system-wide for restart persistence.
-
-    Called by the ``setup`` CLI command.  When *use_sudo* is True,
-    writes to a temp directory first and copies via ``sudo cp`` —
-    avoids needing the Python process itself to run as root.
-
-    Both hook pairs (nft + reader) and the shared ballast are written
-    unconditionally, and the standalone NFLOG reader resource is
-    copied out of the package to its canonical on-disk path.  The
-    reader hook soft-fails on missing clearance (no socket to deliver
-    events to) rather than blocking container starts, so installing
-    it unconditionally costs nothing on shield-only deployments and
-    removes a configuration knob.
-
-    Args:
-        target_dir: Global hooks directory to install into.
-        use_sudo: Copy files via ``sudo`` instead of writing directly.
-    """
-    # Reader resource is per-user, never under target_dir; install it
-    # before the hook JSONs so the path the JSONs reference is already
-    # populated when the first container fires.
-    install_reader_resource()
-    if use_sudo:
-        _install_via_sudo(target_dir)
-    else:
-        target_dir.mkdir(parents=True, exist_ok=True)
-        _write_role_files(target_dir, target_dir)
-
-
 # ── Installation mechanics ──────────────────────────────
 
 
 def _install_via_sudo(target_dir: Path) -> None:
     """Write hooks to a temp dir, then sudo-copy to the target."""
-    import subprocess
-    import tempfile
-
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
         # JSONs must reference the final script paths, not the temp
@@ -131,11 +239,7 @@ def _install_via_sudo(target_dir: Path) -> None:
             ["sudo", "mkdir", "-p", str(target_dir)],
             check=True,  # noqa: S603, S607
         )
-        scripts = (_BALLAST_NAME, _NFT_ENTRYPOINT_NAME, _READER_ENTRYPOINT_NAME)
-        descriptors = [
-            fn(stage) for stage in _HOOK_STAGES for fn in (_nft_hook_json, _bridge_hook_json)
-        ]
-        files = [str(tmp_path / name) for name in (*scripts, *descriptors)]
+        files = [str(tmp_path / name) for name in _INSTALLED_FILES]
         subprocess.run(
             ["sudo", "cp", *files, str(target_dir) + "/"],
             check=True,  # noqa: S603, S607
@@ -150,6 +254,16 @@ def _install_via_sudo(target_dir: Path) -> None:
             ],  # noqa: S603, S607
             check=True,
         )
+
+
+def _remove_via_sudo(paths: list[Path]) -> None:
+    """Remove *paths* via ``sudo rm -f`` — idempotent, no error on missing files."""
+    if not paths:
+        return
+    subprocess.run(
+        ["sudo", "rm", "-f", *(str(p) for p in paths)],
+        check=True,  # noqa: S603, S607
+    )
 
 
 def _write_role_files(
@@ -200,6 +314,55 @@ def _write_role_files(
         (hooks_dir / _bridge_hook_json(stage)).write_text(
             _generate_hook_json(reader_path, stage, _READER_ENTRYPOINT_NAME)
         )
+
+
+# ── containers.conf registration (user scope only) ──────
+
+
+def _register_hooks_dir_in_containers_conf(hooks_dir: Path) -> None:
+    """Ensure ``~/.config/containers/containers.conf`` lists *hooks_dir*.
+
+    Creates the file if absent.  Inserts ``hooks_dir`` into the
+    existing ``[engine]`` section or appends a new section if none
+    exists.  Warns (does not fail) when ``hooks_dir`` is already set
+    to a different value — the operator owns containers.conf and may
+    have intentionally pinned a different location.
+
+    Pure line-based editing — comments and formatting are preserved.
+    """
+    conf_path = _user_containers_conf()
+    hooks_str = str(hooks_dir)
+    hooks_line = f'hooks_dir = ["{hooks_str}"]'
+
+    if not conf_path.is_file():
+        conf_path.parent.mkdir(parents=True, exist_ok=True)
+        conf_path.write_text(f"[engine]\n{hooks_line}\n")
+        return
+
+    existing = _parse_hooks_dir_from_conf(conf_path)
+    if not existing:
+        _insert_hooks_line(conf_path, hooks_line)
+        return
+
+    if hooks_str in existing or str(hooks_dir.expanduser()) in existing:
+        return  # already configured
+    print(
+        f"Warning: {conf_path} already has hooks_dir = {existing}\n"
+        f"Add {hooks_str!r} to the list manually if needed."
+    )
+
+
+def _insert_hooks_line(conf_path: Path, hooks_line: str) -> None:
+    """Insert *hooks_line* after ``[engine]`` in *conf_path*, or append a new section."""
+    lines = conf_path.read_text().splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        if line.strip() == "[engine]":
+            lines.insert(i + 1, hooks_line + "\n")
+            conf_path.write_text("".join(lines))
+            return
+    # No [engine] section — append one.
+    with conf_path.open("a") as f:
+        f.write(f"\n[engine]\n{hooks_line}\n")
 
 
 # ── Generators ──────────────────────────────────────────

@@ -30,6 +30,7 @@ EXPECTED_ALL = [
     "EnvironmentCheck",
     "ExecError",
     "HOOK_ENTRYPOINT_NAME",
+    "HooksInstaller",
     "NftNotFoundError",
     "Shield",
     "ShieldConfig",
@@ -40,9 +41,6 @@ EXPECTED_ALL = [
     "USER_HOOKS_DIR",
     "check_firewall_binaries",
     "check_krun_binaries",
-    "ensure_containers_conf_hooks_dir",
-    "setup_global_hooks",
-    "system_hooks_dir",
 ]
 
 

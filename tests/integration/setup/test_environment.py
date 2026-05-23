@@ -11,10 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from terok_shield import EnvironmentCheck, Shield, ShieldConfig
-from terok_shield.hooks.install import setup_global_hooks
+from terok_shield import EnvironmentCheck, HooksInstaller, Shield, ShieldConfig
 from terok_shield.podman_info import (
-    ensure_containers_conf_hooks_dir,
     find_hooks_dirs,
     has_global_hooks,
     parse_podman_info,
@@ -81,16 +79,15 @@ class TestGlobalHooksSetup:
     """Test global hooks installation with real filesystem."""
 
     def test_setup_user_hooks(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """setup --user installs hooks and updates containers.conf."""
+        """``HooksInstaller`` (user scope) installs hooks and updates containers.conf."""
         hooks_dir = tmp_path / "hooks.d"
         conf_dir = tmp_path / "config" / "containers"
         monkeypatch.setattr(
-            "terok_shield.podman_info._user_containers_conf",
+            "terok_shield.hooks.install._user_containers_conf",
             lambda: conf_dir / "containers.conf",
         )
 
-        # Install hooks
-        setup_global_hooks(hooks_dir)
+        HooksInstaller(target_dir=hooks_dir, register_in_containers_conf=True).install()
         assert (hooks_dir / "terok-shield-createRuntime.json").is_file()
         assert (hooks_dir / "terok-shield-poststop.json").is_file()
         assert (hooks_dir / "terok-shield-hook").is_file()
@@ -99,8 +96,7 @@ class TestGlobalHooksSetup:
         hook = hooks_dir / "terok-shield-hook"
         assert hook.stat().st_mode & 0o100
 
-        # Update containers.conf
-        ensure_containers_conf_hooks_dir(hooks_dir)
+        # containers.conf was patched as part of the user-scope install.
         conf = conf_dir / "containers.conf"
         assert conf.is_file()
         text = conf.read_text()
@@ -108,16 +104,17 @@ class TestGlobalHooksSetup:
         assert text.count("[engine]") == 1
 
     def test_has_global_hooks_after_setup(self, tmp_path: Path) -> None:
-        """has_global_hooks() returns True after setup_global_hooks()."""
+        """``has_global_hooks`` flips True once ``HooksInstaller.install()`` runs."""
         hooks_dir = tmp_path / "hooks.d"
         assert not has_global_hooks([hooks_dir])
-        setup_global_hooks(hooks_dir)
+        HooksInstaller(target_dir=hooks_dir).install()
         assert has_global_hooks([hooks_dir])
 
     def test_setup_idempotent(self, tmp_path: Path) -> None:
-        """Running setup twice does not break anything."""
+        """Running install twice doesn't break anything — file contents stay stable."""
         hooks_dir = tmp_path / "hooks.d"
-        setup_global_hooks(hooks_dir)
+        installer = HooksInstaller(target_dir=hooks_dir)
+        installer.install()
         first_content = (hooks_dir / "terok-shield-hook").read_text()
-        setup_global_hooks(hooks_dir)
+        installer.install()
         assert (hooks_dir / "terok-shield-hook").read_text() == first_content

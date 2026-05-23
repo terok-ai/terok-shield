@@ -696,15 +696,15 @@ def test_pre_start_writes_ruleset_nft(
     assert "terok_shield" in content
 
 
-def test_setup_global_hooks_non_sudo(tmp_path: Path, monkeypatch) -> None:
-    """``setup_global_hooks()`` lays down nft + reader hooks + ballast + reader resource."""
-    from terok_shield.hooks.install import setup_global_hooks
+def test_hooks_installer_non_sudo_writes_role_files(tmp_path: Path, monkeypatch) -> None:
+    """A non-sudo install lays down nft + reader hooks, ballast, and reader resource."""
+    from terok_shield.hooks.install import HooksInstaller
 
     # Reader resource lands at ``$XDG_DATA_HOME/terok/shield/nflog-reader.py``;
     # redirect it under tmp_path so the test stays hermetic.
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
     target = tmp_path / "hooks.d"
-    setup_global_hooks(target)
+    HooksInstaller(target_dir=target).install()
 
     # Shared ballast lands once — both role scripts import from it.
     assert (target / "_oci_state.py").is_file()
@@ -766,16 +766,16 @@ def test_install_hooks_honors_custom_entrypoint_name(tmp_path: Path) -> None:
     assert bridge_json["hook"]["path"] == str(target / "terok-shield-bridge-hook")
 
 
-def test_setup_global_hooks_sudo_uses_subprocess(tmp_path: Path, monkeypatch) -> None:
-    """setup_global_hooks(use_sudo=True) calls sudo subprocess for hook install."""
+def test_hooks_installer_sudo_uses_subprocess(tmp_path: Path, monkeypatch) -> None:
+    """``HooksInstaller(use_sudo=True).install()`` escalates writes via sudo."""
     from unittest import mock
 
-    from terok_shield.hooks.install import setup_global_hooks
+    from terok_shield.hooks.install import HooksInstaller
 
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
     target = tmp_path / "system-hooks"
-    with mock.patch("subprocess.run") as mock_run:
-        setup_global_hooks(target, use_sudo=True)
+    with mock.patch("terok_shield.hooks.install.subprocess.run") as mock_run:
+        HooksInstaller(target_dir=target, use_sudo=True).install()
         # sudo mkdir + sudo cp + sudo chmod (reader install runs in-process).
         assert mock_run.call_count == 3
         cmds = [call.args[0] for call in mock_run.call_args_list]

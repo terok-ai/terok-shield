@@ -185,37 +185,6 @@ def system_hooks_dir() -> Path:
     return _SYSTEM_HOOKS_DIRS[-1]
 
 
-def ensure_containers_conf_hooks_dir(hooks_dir: Path) -> None:
-    """Ensure ``~/.config/containers/containers.conf`` includes *hooks_dir*.
-
-    Creates the file if absent.  Inserts ``hooks_dir`` into the existing
-    ``[engine]`` section, or appends a new section if none exists.
-    Warns (does not fail) if ``hooks_dir`` is already set differently.
-
-    Uses line-based text manipulation to preserve comments and formatting.
-    """
-    conf_path = _user_containers_conf()
-    hooks_str = str(hooks_dir)
-    hooks_line = f'hooks_dir = ["{hooks_str}"]'
-
-    if not conf_path.is_file():
-        conf_path.parent.mkdir(parents=True, exist_ok=True)
-        conf_path.write_text(f"[engine]\n{hooks_line}\n")
-        return
-
-    existing = _parse_hooks_dir_from_conf(conf_path)
-    if not existing:
-        _insert_hooks_line(conf_path, hooks_line)
-        return
-
-    if hooks_str in existing or str(hooks_dir.expanduser()) in existing:
-        return  # already configured
-    print(
-        f"Warning: {conf_path} already has hooks_dir = {existing}\n"
-        f"Add {hooks_str!r} to the list manually if needed."
-    )
-
-
 def global_hooks_hint() -> str:
     """Short hint telling the user to run ``terok-shield setup``."""
     return (
@@ -252,19 +221,6 @@ def _parse_hooks_dir_from_conf(path: Path) -> list[str]:
     if isinstance(hooks, str) and hooks:
         return [hooks]
     return []
-
-
-def _insert_hooks_line(conf_path: Path, hooks_line: str) -> None:
-    """Insert *hooks_line* after ``[engine]`` in *conf_path*, or append a new section."""
-    lines = conf_path.read_text().splitlines(keepends=True)
-    for i, line in enumerate(lines):
-        if line.strip() == "[engine]":
-            lines.insert(i + 1, hooks_line + "\n")
-            conf_path.write_text("".join(lines))
-            return
-    # No [engine] section — append one
-    with conf_path.open("a") as f:
-        f.write(f"\n[engine]\n{hooks_line}\n")
 
 
 # ── slirp4netns gateway ────────────────────────────────

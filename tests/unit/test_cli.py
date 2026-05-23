@@ -1047,32 +1047,31 @@ def test_build_config_uses_resolved_state_root_when_no_container(
 class TestSetupCommand:
     """Tests for the setup CLI command."""
 
-    @mock.patch("terok_shield.hooks.install.setup_global_hooks")
-    @mock.patch("terok_shield.podman_info.ensure_containers_conf_hooks_dir")
+    @mock.patch("terok_shield.hooks.install.HooksInstaller.install")
     def test_setup_user(
         self,
-        mock_ensure: mock.Mock,
-        mock_setup: mock.Mock,
+        install: mock.Mock,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        """setup --user calls setup_global_hooks and ensure_containers_conf."""
+        """``setup --user`` dispatches to the user-scope installer."""
         main(["setup", "--user"])
-        mock_setup.assert_called_once()
-        mock_ensure.assert_called_once()
-        assert "Done" in capsys.readouterr().out
+        install.assert_called_once()
+        out = capsys.readouterr().out
+        assert "Done" in out
+        assert "user" in out
 
-    @mock.patch("terok_shield.hooks.install.setup_global_hooks")
+    @mock.patch("terok_shield.hooks.install.HooksInstaller.install")
     def test_setup_root(
         self,
-        mock_setup: mock.Mock,
+        install: mock.Mock,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        """setup --root calls setup_global_hooks with use_sudo=True."""
+        """``setup --root`` dispatches to the system-scope installer with sudo."""
         main(["setup", "--root"])
-        mock_setup.assert_called_once()
-        _, kwargs = mock_setup.call_args
-        assert kwargs.get("use_sudo") is True
-        assert "Done" in capsys.readouterr().out
+        install.assert_called_once()
+        out = capsys.readouterr().out
+        assert "Done" in out
+        assert "sudo" in out
 
     def test_setup_root_and_user_rejected(self) -> None:
         """setup --root --user raises."""
@@ -1145,21 +1144,17 @@ def test_version_flag_podman_missing(
 class TestSetupInteractive:
     """Tests for interactive setup mode."""
 
-    @mock.patch("terok_shield.hooks.install.setup_global_hooks")
+    @mock.patch("terok_shield.hooks.install.HooksInstaller.install")
     @mock.patch("builtins.input", return_value="u")
     def test_interactive_user_choice(
         self,
         _input: mock.Mock,
-        mock_setup: mock.Mock,
+        install: mock.Mock,
         capsys: pytest.CaptureFixture[str],
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Interactive setup with 'u' choice installs user hooks."""
-        monkeypatch.setattr(
-            "terok_shield.podman_info.ensure_containers_conf_hooks_dir", lambda _d: None
-        )
         main(["setup"])
-        mock_setup.assert_called_once()
+        install.assert_called_once()
         assert "Done" in capsys.readouterr().out
 
     @mock.patch("builtins.input", return_value="x")
@@ -1172,19 +1167,18 @@ class TestSetupInteractive:
         main(["setup"])
         assert "Cancelled" in capsys.readouterr().out
 
-    @mock.patch("terok_shield.hooks.install.setup_global_hooks")
+    @mock.patch("terok_shield.hooks.install.HooksInstaller.install")
     @mock.patch("builtins.input", return_value="r")
     def test_interactive_root_choice(
         self,
         _input: mock.Mock,
-        mock_setup: mock.Mock,
+        install: mock.Mock,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         """Interactive setup with 'r' choice uses sudo."""
         main(["setup"])
-        mock_setup.assert_called_once()
-        _, kwargs = mock_setup.call_args
-        assert kwargs.get("use_sudo") is True
+        install.assert_called_once()
+        assert "sudo" in capsys.readouterr().out
 
 
 def test_simple_clearance_command_routes_to_handler(cli_dispatch: CliDispatchHarness) -> None:

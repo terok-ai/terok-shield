@@ -38,7 +38,6 @@ from .config import (
 from .paths import HOOK_ENTRYPOINT_NAME
 from .podman_info import (
     USER_HOOKS_DIR,
-    ensure_containers_conf_hooks_dir,
     find_hooks_dirs,
     global_hooks_hint,
     has_global_hooks,
@@ -55,6 +54,7 @@ if TYPE_CHECKING:
     from .audit import AuditLogger
     from .commands import COMMANDS
     from .dns.resolver import DnsResolver
+    from .hooks.install import HooksInstaller
     from .nft.rules import RulesetBuilder
     from .profiles import ProfileLoader
     from .run import CommandRunner, ExecError
@@ -66,11 +66,11 @@ if TYPE_CHECKING:
 _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "BinaryCheck": ("terok_shield.prereqs", "BinaryCheck"),
     "ExecError": ("terok_shield.run", "ExecError"),
+    "HooksInstaller": ("terok_shield.hooks.install", "HooksInstaller"),
     "NftNotFoundError": ("terok_shield.run", "NftNotFoundError"),
     "ShieldNeedsSetup": ("terok_shield.run", "ShieldNeedsSetup"),
     "check_firewall_binaries": ("terok_shield.prereqs", "check_firewall_binaries"),
     "check_krun_binaries": ("terok_shield.prereqs", "check_krun_binaries"),
-    "setup_global_hooks": ("terok_shield.hooks.install", "setup_global_hooks"),
     # Command registry — re-exported for the terok integration layer.
     # ArgDef/CommandDef now live in terok-util; we route through it so
     # existing consumers (terok.lib.integrations.shield) keep working.
@@ -446,6 +446,7 @@ __all__ = [
     "EnvironmentCheck",
     "ExecError",
     "HOOK_ENTRYPOINT_NAME",
+    "HooksInstaller",
     "NftNotFoundError",
     "Shield",
     "ShieldConfig",
@@ -456,7 +457,4 @@ __all__ = [
     "USER_HOOKS_DIR",
     "check_firewall_binaries",
     "check_krun_binaries",
-    "ensure_containers_conf_hooks_dir",
-    "setup_global_hooks",
-    "system_hooks_dir",
 ]
