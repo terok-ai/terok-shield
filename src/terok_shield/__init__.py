@@ -27,17 +27,15 @@ from typing import TYPE_CHECKING
 
 # ── Eager: foundation layer (zero-cost, pure data) ─────
 from .config import (
-    AuditFileConfig,
     DnsTier,
     ShieldConfig,
-    ShieldFileConfig,
     ShieldMode,
     ShieldModeBackend,
     ShieldRuntime,
     ShieldState,
     detect_dns_tier,
 )
-from .paths import HOOK_ENTRYPOINT_NAME, reader_script_path
+from .paths import HOOK_ENTRYPOINT_NAME
 from .podman_info import (
     USER_HOOKS_DIR,
     ensure_containers_conf_hooks_dir,
@@ -66,17 +64,10 @@ if TYPE_CHECKING:
 # Keeps ``from terok_shield import ShieldConfig`` lightweight.
 
 _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
-    "AuditLogger": ("terok_shield.audit", "AuditLogger"),
     "BinaryCheck": ("terok_shield.prereqs", "BinaryCheck"),
-    "CommandRunner": ("terok_shield.run", "CommandRunner"),
-    "DigNotFoundError": ("terok_shield.run", "DigNotFoundError"),
-    "DnsResolver": ("terok_shield.dns.resolver", "DnsResolver"),
     "ExecError": ("terok_shield.run", "ExecError"),
     "NftNotFoundError": ("terok_shield.run", "NftNotFoundError"),
-    "ProfileLoader": ("terok_shield.profiles", "ProfileLoader"),
-    "RulesetBuilder": ("terok_shield.nft.rules", "RulesetBuilder"),
     "ShieldNeedsSetup": ("terok_shield.run", "ShieldNeedsSetup"),
-    "SubprocessRunner": ("terok_shield.run", "SubprocessRunner"),
     "check_firewall_binaries": ("terok_shield.prereqs", "check_firewall_binaries"),
     "check_krun_binaries": ("terok_shield.prereqs", "check_krun_binaries"),
     "setup_global_hooks": ("terok_shield.hooks.install", "setup_global_hooks"),
@@ -449,34 +440,23 @@ class Shield:
 
 __all__ = [
     "ArgDef",
-    "AuditFileConfig",
-    "AuditLogger",
     "BinaryCheck",
     "COMMANDS",
     "CommandDef",
-    "CommandRunner",
-    "DigNotFoundError",
-    "DnsResolver",
-    "DnsTier",
     "EnvironmentCheck",
     "ExecError",
     "HOOK_ENTRYPOINT_NAME",
     "NftNotFoundError",
-    "ProfileLoader",
-    "RulesetBuilder",
     "Shield",
     "ShieldConfig",
-    "ShieldFileConfig",
     "ShieldMode",
     "ShieldNeedsSetup",
     "ShieldRuntime",
     "ShieldState",
-    "SubprocessRunner",
     "USER_HOOKS_DIR",
     "check_firewall_binaries",
     "check_krun_binaries",
     "ensure_containers_conf_hooks_dir",
-    "reader_script_path",
     "setup_global_hooks",
     "system_hooks_dir",
 ]

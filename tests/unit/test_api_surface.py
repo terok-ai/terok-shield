@@ -14,7 +14,6 @@ import pytest
 
 import terok_shield
 from terok_shield import (
-    DigNotFoundError,
     ExecError,
     NftNotFoundError,
     ShieldConfig,
@@ -25,34 +24,23 @@ from terok_shield import (
 
 EXPECTED_ALL = [
     "ArgDef",
-    "AuditFileConfig",
-    "AuditLogger",
     "BinaryCheck",
     "COMMANDS",
     "CommandDef",
-    "CommandRunner",
-    "DigNotFoundError",
-    "DnsResolver",
-    "DnsTier",
     "EnvironmentCheck",
     "ExecError",
     "HOOK_ENTRYPOINT_NAME",
     "NftNotFoundError",
-    "ProfileLoader",
-    "RulesetBuilder",
     "Shield",
     "ShieldConfig",
-    "ShieldFileConfig",
     "ShieldMode",
     "ShieldNeedsSetup",
     "ShieldRuntime",
     "ShieldState",
-    "SubprocessRunner",
     "USER_HOOKS_DIR",
     "check_firewall_binaries",
     "check_krun_binaries",
     "ensure_containers_conf_hooks_dir",
-    "reader_script_path",
     "setup_global_hooks",
     "system_hooks_dir",
 ]
@@ -145,13 +133,6 @@ class TestAPISurface:
     def test_nft_not_found_error_is_runtime_error(self):
         """NftNotFoundError is a RuntimeError subclass for backwards compat."""
         err = NftNotFoundError("nft missing")
-        assert isinstance(err, RuntimeError)
-
-    # ── DigNotFoundError ─────────────────────────────────
-
-    def test_dig_not_found_error_is_runtime_error(self):
-        """DigNotFoundError is a RuntimeError subclass."""
-        err = DigNotFoundError("dig missing")
         assert isinstance(err, RuntimeError)
 
     # ── ExecError ────────────────────────────────────────
