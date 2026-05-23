@@ -2157,13 +2157,13 @@ tomli-w = ">=1.0,<2.0"
 
 [[package]]
 name = "terok-util"
-version = "0.0.1"
+version = "0.0.2a1"
 description = "Shared utility library for the terok-* sibling packages"
 optional = false
 python-versions = ">=3.12,<4.0"
 groups = ["main"]
 files = [
-    {file = "terok_util-0.0.1-py3-none-any.whl", hash = "sha256:f64d38807a3a4280c006f79de093da914e9dbb6fa9310cac1e0a436a7c8d431b"},
+    {file = "terok_util-0.0.2a1-py3-none-any.whl", hash = "sha256:00506d9720bba29755fc01bf91a0a63999a92373750545acd4b459d6290502b7"},
 ]
 
 [package.dependencies]
@@ -2172,7 +2172,7 @@ platformdirs = ">=4.9.6"
 
 [package.source]
 type = "url"
-url = "https://github.com/terok-ai/terok-util/releases/download/v0.0.1/terok_util-0.0.1-py3-none-any.whl"
+url = "https://github.com/terok-ai/terok-util/releases/download/v0.0.2a1/terok_util-0.0.2a1-py3-none-any.whl"
 
 [[package]]
 name = "tomli"
@@ -2428,4 +2428,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "63ae37b73c317c66553a7996f992439b101c6d82b6cfdd32bd81a7bb4fa49b48"
+content-hash = "5d1d66169d3716bd81ab2c0b47da9e37fda856ca7b0ad96d769c773d338ccb52"
