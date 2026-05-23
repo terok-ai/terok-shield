@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from terok_shield import state
 from terok_shield.cli.main import _resolve_config_root, _resolve_state_root
 
 
@@ -42,7 +41,10 @@ class TestPathResolution:
     def test_ensure_state_dirs_creates_tree(self, tmp_path: Path) -> None:
         """state.ensure_state_dirs() creates the bundle directory tree."""
         sd = tmp_path / "containers" / "test-ctr"
-        state.ensure_state_dirs(sd)
+        StateBundle(sd).ensure_dirs()
 
         assert sd.is_dir()
-        assert state.hooks_dir(sd).is_dir()
+        assert StateBundle(sd).hooks_dir.is_dir()
+
+
+from terok_shield.state import StateBundle

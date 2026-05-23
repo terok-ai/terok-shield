@@ -68,6 +68,7 @@ from ..podman_info import (
     slirp4netns_gateway,
 )
 from ..run import ExecError, ShieldNeedsSetup
+from ..state import StateBundle
 from ..util import is_ip as _is_ip, is_ipv4
 from .install import install_hooks
 
@@ -135,10 +136,10 @@ class HookMode:
         info = self._get_podman_info()
 
         # Ensure state dirs and install hooks (idempotent)
-        state.ensure_state_dirs(sd)
+        StateBundle(sd).ensure_dirs()
         install_hooks(
-            hook_entrypoint=state.hook_entrypoint(sd),
-            hooks_dir=state.hooks_dir(sd),
+            hook_entrypoint=StateBundle(sd).hook_entrypoint,
+            hooks_dir=StateBundle(sd).hooks_dir,
         )
 
         # Detect DNS tier, upstream DNS, and gateway addresses
@@ -150,8 +151,8 @@ class HookMode:
         # Resolve DNS, write allowlists, generate ruleset + dnsmasq config
         entries = self._profiles.compose_profiles(profiles)
         self._resolve_and_write_allowlists(sd, tier, entries)
-        state.upstream_dns_path(sd).write_text(f"{upstream_dns}\n")
-        state.dns_tier_path(sd).write_text(f"{tier.value}\n")
+        StateBundle(sd).upstream_dns.write_text(f"{upstream_dns}\n")
+        StateBundle(sd).dns_tier.write_text(f"{tier.value}\n")
         self._write_ruleset(sd, tier, upstream_dns, gw_v4, gw_v6)
         self._write_dnsmasq_config_or_scrub(sd, tier, upstream_dns)
 
@@ -161,7 +162,7 @@ class HookMode:
         # Redirect container DNS through per-container dnsmasq via volume mount.
         # See commit history for detailed rationale on why --dns cannot be used.
         if tier == DnsTier.DNSMASQ:
-            args += ["--volume", f"{state.resolv_conf_path(sd)}:/etc/resolv.conf:ro,Z"]
+            args += ["--volume", f"{StateBundle(sd).resolv_conf}:/etc/resolv.conf:ro,Z"]
 
         # Annotations: profiles, name, state_dir, loopback_ports, version, dns
         ports_str = ANNOTATION_LIST_SEP.join(str(p) for p in self._config.loopback_ports)
@@ -186,7 +187,7 @@ class HookMode:
 
         # WORKAROUND(hooks-dir-persist): currently always takes the global path
         if info.hooks_dir_persists:
-            args += ["--hooks-dir", str(state.hooks_dir(sd))]
+            args += ["--hooks-dir", str(StateBundle(sd).hooks_dir)]
         elif has_global_hooks():
             self._audit.log_event(
                 container,
@@ -226,11 +227,11 @@ class HookMode:
         """
         if tier == DnsTier.DNSMASQ:
             domains, _raw_ips = _split_domains_ips(entries)
-            state.profile_domains_path(sd).write_text("\n".join(domains) + "\n" if domains else "")
-            self._dns.resolve_and_cache(entries, state.profile_allowed_path(sd))
+            StateBundle(sd).profile_domains.write_text("\n".join(domains) + "\n" if domains else "")
+            self._dns.resolve_and_cache(entries, StateBundle(sd).profile_allowed)
         else:
             # dig/getent tier: resolve everything to IPs at pre-start time.
-            self._dns.resolve_and_cache(entries, state.profile_allowed_path(sd))
+            self._dns.resolve_and_cache(entries, StateBundle(sd).profile_allowed)
 
     def _write_ruleset(
         self, sd: Path, tier: DnsTier, upstream_dns: str, gw_v4: str = "", gw_v6: str = ""
@@ -244,13 +245,13 @@ class HookMode:
             gateway_v6=gw_v6,
             set_timeout=set_timeout,
         )
-        ips = state.read_effective_ips(sd)
-        denied_ips = list(state.read_denied_ips(sd))
+        ips = StateBundle(sd).read_effective_ips()
+        denied_ips = list(StateBundle(sd).read_denied_ips())
         ruleset = ruleset_builder.build_hook()
         ruleset += ruleset_builder.add_elements_dual(ips)
         if denied_ips:
             ruleset += add_deny_elements_dual(denied_ips)
-        state.ruleset_path(sd).write_text(ruleset)
+        StateBundle(sd).ruleset.write_text(ruleset)
 
     def _write_dnsmasq_config_or_scrub(self, sd: Path, tier: DnsTier, upstream_dns: str) -> None:
         """Pre-generate dnsmasq config for dnsmasq tier, or scrub stale artifacts."""
@@ -260,17 +261,17 @@ class HookMode:
             conf = dnsmasq.generate_config(
                 upstream_dns,
                 domains,
-                state.dnsmasq_pid_path(sd),
+                StateBundle(sd).dnsmasq_pid,
                 listen_address=bind,
-                log_path=state.dnsmasq_log_path(sd),
+                log_path=StateBundle(sd).dnsmasq_log,
             )
-            state.dnsmasq_conf_path(sd).write_text(conf)
-            state.resolv_conf_path(sd).write_text(f"nameserver {bind}\noptions ndots:0\n")
+            StateBundle(sd).dnsmasq_conf.write_text(conf)
+            StateBundle(sd).resolv_conf.write_text(f"nameserver {bind}\noptions ndots:0\n")
         else:
             for stale in (
-                state.dnsmasq_conf_path(sd),
-                state.dnsmasq_pid_path(sd),
-                state.resolv_conf_path(sd),
+                StateBundle(sd).dnsmasq_conf,
+                StateBundle(sd).dnsmasq_pid,
+                StateBundle(sd).resolv_conf,
             ):
                 stale.unlink(missing_ok=True)
 
@@ -369,9 +370,9 @@ class HookMode:
 
         # Un-deny: remove from deny.list and nft deny set if present
         sd = self._config.state_dir.resolve()
-        dp = state.deny_path(sd)
+        dp = StateBundle(sd).deny
         if dp.is_file():
-            denied = state.read_denied_ips(sd)
+            denied = StateBundle(sd).read_denied_ips()
             if ip in denied:
                 denied.discard(ip)
                 dp.write_text("".join(f"{d}\n" for d in sorted(denied)))
@@ -381,7 +382,7 @@ class HookMode:
 
         # When the dnsmasq set has a default timeout (30 m), permanent IPs must use
         # 'timeout 0s' so they are never evicted by the set's per-element expiry clock.
-        tier_path = state.dns_tier_path(sd)
+        tier_path = StateBundle(sd).dns_tier
         if tier_path.is_file() and tier_path.read_text().strip() == DnsTier.DNSMASQ.value:
             element = f"{{ {ip} timeout 0s }}"
         else:
@@ -446,8 +447,8 @@ class HookMode:
 
         # Persist to deny.list so deny sets survive shield_up / restart.
         # Operator deny decisions always stick.
-        dp = state.deny_path(sd)
-        if ip not in state.read_denied_ips(sd):
+        dp = StateBundle(sd).deny
+        if ip not in StateBundle(sd).read_denied_ips():
             with dp.open("a") as f:
                 f.write(f"{ip}\n")
 
@@ -457,7 +458,7 @@ class HookMode:
 
     def _live_path(self) -> Path:
         """Return the resolved path to live.allowed (prevents path traversal)."""
-        return state.live_allowed_path(self._config.state_dir).resolve()
+        return StateBundle(self._config.state_dir).live_allowed.resolve()
 
     def _nft_apply_best_effort(self, container: str, nft_cmd: str) -> None:
         """Run multi-line nft commands via nsenter, swallowing errors."""
@@ -484,7 +485,7 @@ class HookMode:
         self._runner.nft_via_nsenter(container, stdin=stdin)
 
         # Repopulate deny sets so deny.list is enforced even when shield is down.
-        denied_ips = list(state.read_denied_ips(sd))
+        denied_ips = list(StateBundle(sd).read_denied_ips())
         if denied_ips:
             deny_cmd = add_deny_elements_dual(denied_ips)
             if deny_cmd:
@@ -539,14 +540,14 @@ class HookMode:
         self._runner.nft_via_nsenter(container, stdin=stdin)
 
         # Re-add effective IPs (allowed minus denied)
-        unique_ips = state.read_effective_ips(sd)
+        unique_ips = StateBundle(sd).read_effective_ips()
         if unique_ips:
             elements_cmd = ruleset.add_elements_dual(unique_ips)
             if elements_cmd:
                 self._runner.nft_via_nsenter(container, stdin=elements_cmd)
 
         # Repopulate deny sets from deny.list
-        denied_ips = list(state.read_denied_ips(sd))
+        denied_ips = list(StateBundle(sd).read_denied_ips())
         if denied_ips:
             deny_cmd = add_deny_elements_dual(denied_ips)
             if deny_cmd:
@@ -578,7 +579,7 @@ class HookMode:
 
         # Read persisted DNS tier to determine if set timeouts are needed
         sd = self._config.state_dir.resolve()
-        tier_path = state.dns_tier_path(sd)
+        tier_path = StateBundle(sd).dns_tier
         set_timeout = ""
         if tier_path.is_file():
             tier_str = tier_path.read_text().strip()
@@ -603,7 +604,7 @@ class HookMode:
         container started before this feature).
         """
         sd = self._config.state_dir.resolve()
-        path = state.upstream_dns_path(sd)
+        path = StateBundle(sd).upstream_dns
         if not path.is_file():
             return None
         value = path.read_text().strip()
@@ -742,7 +743,7 @@ def _is_dnsmasq_tier(state_dir: Path) -> bool:
     Returns True when ``dns_tier_path`` is absent (pre_start not yet run —
     pass-through so the caller can still attempt the dnsmasq operation).
     """
-    tier_path = state.dns_tier_path(state_dir)
+    tier_path = StateBundle(state_dir).dns_tier
     if not tier_path.is_file():
         return True
     return tier_path.read_text().strip() == DnsTier.DNSMASQ.value

@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 
-from terok_shield import state
 from terok_shield.audit import AuditLogger
 from tests.testnet import TEST_IP1, TEST_IP2
 
@@ -21,7 +20,7 @@ class TestAuditLive:
 
     def test_log_and_tail(self, tmp_path: Path) -> None:
         """Write audit events and read them back."""
-        audit = AuditLogger(audit_path=state.audit_path(tmp_path))
+        audit = AuditLogger(audit_path=StateBundle(tmp_path).audit)
 
         audit.log_event("test-ctr", "setup", detail="integration test")
         audit.log_event("test-ctr", "allowed", dest=TEST_IP1)
@@ -35,7 +34,7 @@ class TestAuditLive:
 
     def test_jsonl_format(self, tmp_path: Path) -> None:
         """Each line must be valid compact JSON."""
-        audit_path = state.audit_path(tmp_path)
+        audit_path = StateBundle(tmp_path).audit
         audit = AuditLogger(audit_path=audit_path)
 
         audit.log_event("fmt-test", "setup")
@@ -54,7 +53,10 @@ class TestAuditLive:
 
     def test_tail_empty_returns_no_events(self, tmp_path: Path) -> None:
         """Tailing when no log file exists returns no events."""
-        audit = AuditLogger(audit_path=state.audit_path(tmp_path))
+        audit = AuditLogger(audit_path=StateBundle(tmp_path).audit)
 
         events = list(audit.tail_log(n=10))
         assert events == []
+
+
+from terok_shield.state import StateBundle

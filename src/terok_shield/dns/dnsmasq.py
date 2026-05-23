@@ -24,9 +24,9 @@ import re
 import signal
 from pathlib import Path
 
-from .. import state
 from ..nft.constants import DNSMASQ_BIND_DEFAULT, NFT_TABLE_NAME
 from ..run import CommandRunner
+from ..state import StateBundle
 
 logger = logging.getLogger(__name__)
 
@@ -67,10 +67,10 @@ def reload(state_dir: Path, upstream_dns: str, domains: list[str]) -> None:
     # Regenerate config, then signal dnsmasq to re-read it.  Preserve
     # log-queries / log-facility and the listen address so a live
     # reload never rebinds dnsmasq onto a different interface.
-    pid_path = state.dnsmasq_pid_path(state_dir)
-    conf_path = state.dnsmasq_conf_path(state_dir)
+    pid_path = StateBundle(state_dir).dnsmasq_pid
+    conf_path = StateBundle(state_dir).dnsmasq_conf
     old_conf = conf_path.read_text() if conf_path.is_file() else ""
-    log_path = state.dnsmasq_log_path(state_dir) if "log-queries" in old_conf else None
+    log_path = StateBundle(state_dir).dnsmasq_log if "log-queries" in old_conf else None
     listen_address = _extract_listen_address(old_conf) or DNSMASQ_BIND_DEFAULT
     conf_path.write_text(
         generate_config(
@@ -109,14 +109,14 @@ def add_domain(state_dir: Path, domain: str) -> bool:
         return False
 
     # Remove from denied.domains if present (un-deny)
-    denied_path = state.denied_domains_path(state_dir)
+    denied_path = StateBundle(state_dir).denied_domains
     if denied_path.is_file():
         denied = read_domains(denied_path)
         if domain in denied:
             denied.remove(domain)
             denied_path.write_text("\n".join(denied) + "\n" if denied else "")
 
-    live_path = state.live_domains_path(state_dir)
+    live_path = StateBundle(state_dir).live_domains
     with live_path.open("a") as f:
         f.write(f"{domain}\n")
     return True
@@ -137,7 +137,7 @@ def remove_domain(state_dir: Path, domain: str) -> bool:
         return False
 
     # Remove from live.domains if present
-    live_path = state.live_domains_path(state_dir)
+    live_path = StateBundle(state_dir).live_domains
     if live_path.is_file():
         live = read_domains(live_path)
         if domain in live:
@@ -145,7 +145,7 @@ def remove_domain(state_dir: Path, domain: str) -> bool:
             live_path.write_text("\n".join(live) + "\n" if live else "")
 
     # Add to denied.domains
-    denied_path = state.denied_domains_path(state_dir)
+    denied_path = StateBundle(state_dir).denied_domains
     denied = read_domains(denied_path)
     if domain not in denied:
         with denied_path.open("a") as f:
@@ -180,9 +180,9 @@ def read_merged_domains(state_dir: Path) -> list[str]:
 
     Returns a deduplicated, stable-order list.
     """
-    profile = read_domains(state.profile_domains_path(state_dir))
-    live = read_domains(state.live_domains_path(state_dir))
-    denied = set(read_domains(state.denied_domains_path(state_dir)))
+    profile = read_domains(StateBundle(state_dir).profile_domains)
+    live = read_domains(StateBundle(state_dir).live_domains)
+    denied = set(read_domains(StateBundle(state_dir).denied_domains))
 
     merged: list[str] = []
     seen: set[str] = set()
@@ -308,7 +308,7 @@ def _validate_domain(domain: str) -> str:
 
 def _read_pid(state_dir: Path) -> int | None:
     """Read the dnsmasq PID from state, or None if missing/invalid."""
-    pid_path = state.dnsmasq_pid_path(state_dir)
+    pid_path = StateBundle(state_dir).dnsmasq_pid
     try:
         return int(pid_path.read_text().strip())
     except (OSError, ValueError):
@@ -324,7 +324,7 @@ def _is_our_dnsmasq(pid_int: int, state_dir: Path) -> bool:
     argument.  Substring matching is not used, preventing false positives
     from monitoring tools that embed these strings in their own arguments.
     """
-    conf_arg = b"--conf-file=" + str(state.dnsmasq_conf_path(state_dir)).encode()
+    conf_arg = b"--conf-file=" + str(StateBundle(state_dir).dnsmasq_conf).encode()
     try:
         raw = Path(f"/proc/{pid_int}/cmdline").read_bytes()
     except OSError:
@@ -339,6 +339,6 @@ def _is_our_dnsmasq(pid_int: int, state_dir: Path) -> bool:
 def _clear_pid_file(state_dir: Path) -> None:
     """Remove the dnsmasq PID file (best-effort)."""
     try:
-        state.dnsmasq_pid_path(state_dir).unlink()
+        StateBundle(state_dir).dnsmasq_pid.unlink()
     except OSError:
         pass

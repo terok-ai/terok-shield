@@ -11,7 +11,6 @@ from unittest import mock
 
 import pytest
 
-from terok_shield import state
 from terok_shield.config import (
     ANNOTATION_AUDIT_ENABLED_KEY,
     ANNOTATION_STATE_DIR_KEY,
@@ -192,8 +191,8 @@ def test_pre_start_installs_hooks_and_creates_state_dirs(
 
     harness.mode.pre_start("test", ["dev-standard"])
 
-    assert state.hooks_dir(config.state_dir).is_dir()
-    assert state.hook_entrypoint(config.state_dir).is_file()
+    assert StateBundle(config.state_dir).hooks_dir.is_dir()
+    assert StateBundle(config.state_dir).hook_entrypoint.is_file()
 
 
 @pytest.mark.parametrize(
@@ -266,7 +265,7 @@ def test_allow_persists_and_deduplicates_live_allowed(
     harness.mode.allow_ip("test-ctr", TEST_IP1)
     harness.mode.allow_ip("test-ctr", TEST_IP1)
 
-    lines = state.live_allowed_path(harness.config.state_dir).read_text().splitlines()
+    lines = StateBundle(harness.config.state_dir).live_allowed.read_text().splitlines()
     assert lines.count(TEST_IP1) == 1
 
 
@@ -277,7 +276,7 @@ def test_allow_ip_uses_timeout_zero_in_dnsmasq_tier(
     """allow_ip() adds 'timeout 0s' when dnsmasq tier is active so the element never expires."""
     harness = make_hook_mode(config=make_config())
     sd = harness.config.state_dir.resolve()
-    state.dns_tier_path(sd).write_text("dnsmasq\n")
+    StateBundle(sd).dns_tier.write_text("dnsmasq\n")
 
     harness.mode.allow_ip("test-ctr", TEST_IP1)
 
@@ -292,7 +291,7 @@ def test_allow_ip_no_timeout_zero_without_dnsmasq_tier(
     """allow_ip() omits 'timeout 0s' when dnsmasq tier is not active."""
     harness = make_hook_mode(config=make_config())
     sd = harness.config.state_dir.resolve()
-    state.dns_tier_path(sd).write_text("dig\n")
+    StateBundle(sd).dns_tier.write_text("dig\n")
 
     harness.mode.allow_ip("test-ctr", TEST_IP1)
 
@@ -325,18 +324,18 @@ def test_deny_updates_state_files(
     """deny_ip() removes live entries and optionally persists a deny.list record."""
     harness = make_hook_mode(config=make_config())
     if profile_lines:
-        write_lines(state.profile_allowed_path(harness.config.state_dir), profile_lines)
+        write_lines(StateBundle(harness.config.state_dir).profile_allowed, profile_lines)
     if live_lines:
-        write_lines(state.live_allowed_path(harness.config.state_dir), live_lines)
+        write_lines(StateBundle(harness.config.state_dir).live_allowed, live_lines)
     harness.runner.nft_via_nsenter.side_effect = nft_side_effect
 
     harness.mode.deny_ip("test-ctr", TEST_IP1)
 
-    live_path = state.live_allowed_path(harness.config.state_dir)
+    live_path = StateBundle(harness.config.state_dir).live_allowed
     live_content = live_path.read_text().splitlines() if live_path.exists() else []
     assert TEST_IP1 not in live_content
 
-    deny_file = state.deny_path(harness.config.state_dir)
+    deny_file = StateBundle(harness.config.state_dir).deny
     assert deny_file.is_file() is expect_deny_file
     if expect_deny_file:
         assert TEST_IP1 in deny_file.read_text()
@@ -348,10 +347,10 @@ def test_allow_after_deny_clears_deny_list(
 ) -> None:
     """allow_ip() removes the IP from deny.list when re-allowing it."""
     harness = make_hook_mode(config=make_config())
-    write_lines(state.deny_path(harness.config.state_dir), [TEST_IP1, TEST_IP2])
+    write_lines(StateBundle(harness.config.state_dir).deny, [TEST_IP1, TEST_IP2])
 
     harness.mode.allow_ip("test-ctr", TEST_IP1)
-    denied = state.read_denied_ips(harness.config.state_dir)
+    denied = StateBundle(harness.config.state_dir).read_denied_ips()
     assert TEST_IP1 not in denied
     assert TEST_IP2 in denied
 
@@ -426,7 +425,7 @@ def test_shield_up_reapplies_hook_ruleset(
     """shield_up() restores hook mode, optionally re-adding effective IPs."""
     harness = make_hook_mode(config=make_config())
     if allowed_ips:
-        write_lines(state.profile_allowed_path(harness.config.state_dir), allowed_ips)
+        write_lines(StateBundle(harness.config.state_dir).profile_allowed, allowed_ips)
     # Mock DNS reading so _container_ruleset returns the mock ruleset
     harness.mode._container_ruleset = lambda _c: harness.ruleset
     # shield_state() call (list_rules) returns existing table (UP state)
@@ -691,7 +690,7 @@ def test_pre_start_writes_ruleset_nft(
 
     harness.mode.pre_start("test", ["dev-standard"])
 
-    ruleset_file = state.ruleset_path(config.state_dir)
+    ruleset_file = StateBundle(config.state_dir).ruleset
     assert ruleset_file.is_file(), "pre_start() must write ruleset.nft"
     content = ruleset_file.read_text()
     assert "terok_shield" in content
@@ -970,11 +969,11 @@ class TestDomainOperations:
         """allow_domain() writes domain to live.domains and sends SIGHUP."""
         harness = make_hook_mode()
         sd = harness.config.state_dir.resolve()
-        state.ensure_state_dirs(sd)
+        StateBundle(sd).ensure_dirs()
         # Write upstream.dns so reload works
-        state.upstream_dns_path(sd).write_text("169.254.1.1\n")
+        StateBundle(sd).upstream_dns.write_text("169.254.1.1\n")
         # Write a dnsmasq PID file so reload triggers
-        state.dnsmasq_pid_path(sd).write_text("12345\n")
+        StateBundle(sd).dnsmasq_pid.write_text("12345\n")
 
         with (
             mock.patch("terok_shield.dns.dnsmasq._is_our_dnsmasq", return_value=True),
@@ -982,15 +981,15 @@ class TestDomainOperations:
         ):
             harness.mode.allow_domain(TEST_DOMAIN)
 
-        domains = state.live_domains_path(sd).read_text()
+        domains = StateBundle(sd).live_domains.read_text()
         assert TEST_DOMAIN in domains
 
     def test_allow_domain_skips_duplicate(self, make_hook_mode: HookModeHarnessFactory) -> None:
         """allow_domain() is a no-op for already-present domains."""
         harness = make_hook_mode()
         sd = harness.config.state_dir.resolve()
-        state.ensure_state_dirs(sd)
-        state.profile_domains_path(sd).write_text(f"{TEST_DOMAIN}\n")
+        StateBundle(sd).ensure_dirs()
+        StateBundle(sd).profile_domains.write_text(f"{TEST_DOMAIN}\n")
 
         with mock.patch("terok_shield.dns.dnsmasq.reload") as mock_reload:
             harness.mode.allow_domain(TEST_DOMAIN)
@@ -1000,10 +999,10 @@ class TestDomainOperations:
         """deny_domain() adds domain to denied.domains and reloads."""
         harness = make_hook_mode()
         sd = harness.config.state_dir.resolve()
-        state.ensure_state_dirs(sd)
-        state.profile_domains_path(sd).write_text(f"{TEST_DOMAIN}\n")
-        state.upstream_dns_path(sd).write_text("169.254.1.1\n")
-        state.dnsmasq_pid_path(sd).write_text("12345\n")
+        StateBundle(sd).ensure_dirs()
+        StateBundle(sd).profile_domains.write_text(f"{TEST_DOMAIN}\n")
+        StateBundle(sd).upstream_dns.write_text("169.254.1.1\n")
+        StateBundle(sd).dnsmasq_pid.write_text("12345\n")
 
         with (
             mock.patch("terok_shield.dns.dnsmasq._is_our_dnsmasq", return_value=True),
@@ -1014,7 +1013,7 @@ class TestDomainOperations:
         # Domain is in denied.domains, excluded from merged set
         from terok_shield.dns.dnsmasq import read_merged_domains
 
-        denied = state.denied_domains_path(sd).read_text()
+        denied = StateBundle(sd).denied_domains.read_text()
         assert TEST_DOMAIN in denied
         assert TEST_DOMAIN not in read_merged_domains(sd)
 
@@ -1024,7 +1023,7 @@ class TestDomainOperations:
         """_reload_dnsmasq() raises when upstream DNS is not persisted."""
         harness = make_hook_mode()
         sd = harness.config.state_dir.resolve()
-        state.ensure_state_dirs(sd)
+        StateBundle(sd).ensure_dirs()
 
         with pytest.raises(RuntimeError, match="upstream DNS not persisted"):
             harness.mode._reload_dnsmasq(sd)
@@ -1048,13 +1047,13 @@ class TestDomainOperations:
         """
         harness = make_hook_mode()
         sd = harness.config.state_dir.resolve()
-        state.ensure_state_dirs(sd)
-        state.dns_tier_path(sd).write_text(f"{tier}\n")
+        StateBundle(sd).ensure_dirs()
+        StateBundle(sd).dns_tier.write_text(f"{tier}\n")
 
         # Must not raise
         getattr(harness.mode, method_name)(TEST_DOMAIN)
         # And must not have written any domain state files
-        assert not state.live_domains_path(sd).exists()
+        assert not StateBundle(sd).live_domains.exists()
 
     def test_allow_domain_passes_when_tier_absent(
         self, make_hook_mode: HookModeHarnessFactory
@@ -1062,9 +1061,9 @@ class TestDomainOperations:
         """allow_domain() proceeds normally when dns_tier file does not exist (pre_start not run)."""
         harness = make_hook_mode()
         sd = harness.config.state_dir.resolve()
-        state.ensure_state_dirs(sd)
-        state.upstream_dns_path(sd).write_text("169.254.1.1\n")
-        state.dnsmasq_pid_path(sd).write_text("12345\n")
+        StateBundle(sd).ensure_dirs()
+        StateBundle(sd).upstream_dns.write_text("169.254.1.1\n")
+        StateBundle(sd).dnsmasq_pid.write_text("12345\n")
         # dns_tier_path NOT written — pre_start has not run
 
         with (
@@ -1073,7 +1072,7 @@ class TestDomainOperations:
         ):
             harness.mode.allow_domain(TEST_DOMAIN)
 
-        domains = state.live_domains_path(sd).read_text()
+        domains = StateBundle(sd).live_domains.read_text()
         assert TEST_DOMAIN in domains
 
 
@@ -1139,7 +1138,7 @@ class TestPreStartDnsTierBranches:
         # Domains also written to profile.domains so dnsmasq's --nftset can
         # add on-demand as new A/AAAA records come back.
         sd = harness.config.state_dir.resolve()
-        domains_content = state.profile_domains_path(sd).read_text()
+        domains_content = StateBundle(sd).profile_domains.read_text()
         assert TEST_DOMAIN in domains_content
         # No --dns flag (triggers pasta to bind host port 53, fails rootless).
         # Instead, resolv.conf is pre-written and bind-mounted :ro via --volume.
@@ -1149,7 +1148,7 @@ class TestPreStartDnsTierBranches:
         assert any("/etc/resolv.conf:ro,Z" in v for v in volume_args)
         # The resolv.conf source file exists and points to dnsmasq
         sd = harness.config.state_dir.resolve()
-        resolv = state.resolv_conf_path(sd)
+        resolv = StateBundle(sd).resolv_conf
         assert resolv.is_file()
         assert "127.0.0.1" in resolv.read_text()
 
@@ -1180,11 +1179,11 @@ class TestPreStartDnsTierBranches:
         harness.mode.pre_start("test", ["dev-standard"])
 
         sd = harness.config.state_dir.resolve()
-        resolv = state.resolv_conf_path(sd)
+        resolv = StateBundle(sd).resolv_conf
         assert resolv.is_file()
         assert DNSMASQ_BIND_KRUN in resolv.read_text()
         assert "127.0.0.1" not in resolv.read_text()
-        conf = state.dnsmasq_conf_path(sd).read_text()
+        conf = StateBundle(sd).dnsmasq_conf.read_text()
         assert f"listen-address={DNSMASQ_BIND_KRUN}" in conf
 
     @mock.patch("terok_shield.hooks.mode.has_global_hooks", return_value=True)
@@ -1214,10 +1213,10 @@ class TestDenyDomainWithReload:
         """deny_domain() removes domain from live.domains and reloads dnsmasq."""
         harness = make_hook_mode()
         sd = harness.config.state_dir.resolve()
-        state.ensure_state_dirs(sd)
-        state.live_domains_path(sd).write_text(f"{TEST_DOMAIN}\n")
-        state.upstream_dns_path(sd).write_text("169.254.1.1\n")
-        state.dnsmasq_pid_path(sd).write_text("12345\n")
+        StateBundle(sd).ensure_dirs()
+        StateBundle(sd).live_domains.write_text(f"{TEST_DOMAIN}\n")
+        StateBundle(sd).upstream_dns.write_text("169.254.1.1\n")
+        StateBundle(sd).dnsmasq_pid.write_text("12345\n")
 
         with (
             mock.patch("terok_shield.dns.dnsmasq._is_our_dnsmasq", return_value=True),
@@ -1225,7 +1224,7 @@ class TestDenyDomainWithReload:
         ):
             harness.mode.deny_domain(TEST_DOMAIN)
 
-        denied = state.denied_domains_path(sd).read_text()
+        denied = StateBundle(sd).denied_domains.read_text()
         assert TEST_DOMAIN in denied
 
     def test_deny_domain_noop_when_not_present(
@@ -1234,7 +1233,7 @@ class TestDenyDomainWithReload:
         """deny_domain() is a no-op when the domain is not in any domain file."""
         harness = make_hook_mode()
         sd = harness.config.state_dir.resolve()
-        state.ensure_state_dirs(sd)
+        StateBundle(sd).ensure_dirs()
 
         with mock.patch("terok_shield.dns.dnsmasq.reload") as mock_reload:
             harness.mode.deny_domain(TEST_DOMAIN)
@@ -1248,9 +1247,9 @@ class TestContainerRulesetDnsTier:
         """When dns.tier is 'dnsmasq', RulesetBuilder gets set_timeout."""
         harness = make_hook_mode()
         sd = harness.config.state_dir.resolve()
-        state.ensure_state_dirs(sd)
-        state.upstream_dns_path(sd).write_text("169.254.1.1\n")
-        state.dns_tier_path(sd).write_text("dnsmasq\n")
+        StateBundle(sd).ensure_dirs()
+        StateBundle(sd).upstream_dns.write_text("169.254.1.1\n")
+        StateBundle(sd).dns_tier.write_text("dnsmasq\n")
 
         harness.runner.podman_inspect.return_value = "42"
         harness.runner.run.side_effect = [
@@ -1265,9 +1264,9 @@ class TestContainerRulesetDnsTier:
         """When dns.tier is 'dig', RulesetBuilder has no timeout."""
         harness = make_hook_mode()
         sd = harness.config.state_dir.resolve()
-        state.ensure_state_dirs(sd)
-        state.upstream_dns_path(sd).write_text("169.254.1.1\n")
-        state.dns_tier_path(sd).write_text("dig\n")
+        StateBundle(sd).ensure_dirs()
+        StateBundle(sd).upstream_dns.write_text("169.254.1.1\n")
+        StateBundle(sd).dns_tier.write_text("dig\n")
 
         harness.runner.podman_inspect.return_value = "42"
         harness.runner.run.side_effect = [
@@ -1282,7 +1281,7 @@ class TestContainerRulesetDnsTier:
         """When dns.tier file is absent, no timeout (backward compat)."""
         harness = make_hook_mode()
         sd = harness.config.state_dir.resolve()
-        state.ensure_state_dirs(sd)
+        StateBundle(sd).ensure_dirs()
 
         harness.runner.podman_inspect.return_value = "42"
         harness.runner.run.side_effect = [
@@ -1360,11 +1359,11 @@ def test_pre_start_with_denied_ips_includes_deny_elements(
     harness.profiles.compose_profiles.return_value = []
 
     # Write a deny.list before pre_start
-    state.deny_path(config.state_dir).write_text(f"{TEST_IP1}\n")
+    StateBundle(config.state_dir).deny.write_text(f"{TEST_IP1}\n")
 
     harness.mode.pre_start("test", ["dev-standard"])
 
-    ruleset = state.ruleset_path(config.state_dir).read_text()
+    ruleset = StateBundle(config.state_dir).ruleset.read_text()
     assert "deny_v4" in ruleset
     assert TEST_IP1 in ruleset
 
@@ -1389,7 +1388,7 @@ def test_pre_start_does_not_inspect_container(
     harness.mode.pre_start("test", ["dev-standard"])
 
     harness.runner.podman_inspect.assert_not_called()
-    assert not state.container_id_path(config.state_dir).exists()
+    assert not StateBundle(config.state_dir).container_id.exists()
 
 
 def test_shield_up_repopulates_deny_sets(
@@ -1407,7 +1406,7 @@ def test_shield_up_repopulates_deny_sets(
     harness.ruleset.verify_bypass.return_value = ["not bypass"]
 
     # Write a deny.list
-    state.deny_path(config.state_dir).write_text(f"{TEST_IP1}\n")
+    StateBundle(config.state_dir).deny.write_text(f"{TEST_IP1}\n")
 
     harness.mode.shield_up("test-ctr")
 
@@ -1429,10 +1428,13 @@ def test_shield_down_repopulates_deny_sets(
     harness.ruleset.verify_bypass.return_value = []
 
     # Write a deny.list before going down
-    state.deny_path(config.state_dir).write_text(f"{TEST_IP1}\n")
+    StateBundle(config.state_dir).deny.write_text(f"{TEST_IP1}\n")
 
     harness.mode.shield_down("test-ctr", allow_all=False)
 
     # Verify deny elements were sent via nsenter
     deny_calls = [c for c in harness.runner.nft_via_nsenter.call_args_list if c.kwargs.get("stdin")]
     assert any(TEST_IP1 in (c.kwargs.get("stdin", "") or "") for c in deny_calls)
+
+
+from terok_shield.state import StateBundle

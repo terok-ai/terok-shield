@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from terok_shield import Shield, ShieldConfig, ShieldState, state
+from terok_shield import Shield, ShieldConfig, ShieldState
 from tests.testnet import (
     ALLOWED_TARGET_HTTP,
     ALLOWED_TARGET_IPS,
@@ -226,7 +226,7 @@ class TestBypassIPRestoration:
             assert_reachable(name, ALLOWED_TARGET_HTTP)
 
             # Write these IPs to the profile.allowed (simulating DNS resolution)
-            state.profile_allowed_path(sd).write_text("\n".join(ALLOWED_TARGET_IPS) + "\n")
+            StateBundle(sd).profile_allowed.write_text("\n".join(ALLOWED_TARGET_IPS) + "\n")
 
             # Go down (all traffic allowed regardless)
             shield.down(name)
@@ -325,7 +325,7 @@ class TestBypassFullE2E:
             assert_blocked(name, BLOCKED_TARGET_HTTP)
 
             # Persist to profile.allowed for restoration
-            state.profile_allowed_path(sd).write_text("\n".join(ALLOWED_TARGET_IPS) + "\n")
+            StateBundle(sd).profile_allowed.write_text("\n".join(ALLOWED_TARGET_IPS) + "\n")
 
             # Step 3: Down for discovery
             shield.down(name)
@@ -412,3 +412,6 @@ class TestBypassFullE2E:
 
         # IPs survive because live.allowed is read back by shield_up()
         assert_reachable(shielded_container, ALLOWED_TARGET_HTTP)
+
+
+from terok_shield.state import StateBundle

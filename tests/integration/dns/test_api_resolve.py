@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from terok_shield import Shield, ShieldConfig, state
+from terok_shield import Shield, ShieldConfig
 from terok_shield.cli.main import main
 from tests.testnet import TEST_IP4
 
@@ -31,14 +31,14 @@ class TestShieldResolve:
         sd = shield_env / "containers" / "cache-test-ctr"
         Shield(ShieldConfig(state_dir=sd)).resolve()
 
-        allowed = state.profile_allowed_path(sd)
+        allowed = StateBundle(sd).profile_allowed
         assert allowed.is_file(), "profile.allowed should be created"
 
     def test_resolve_force_bypasses_cache(self, shield_env: Path) -> None:
         """``force=True`` re-resolves even if cache is fresh."""
         sd = shield_env / "containers" / "force-test-ctr"
         sd.mkdir(parents=True, exist_ok=True)
-        cache_file = state.profile_allowed_path(sd)
+        cache_file = StateBundle(sd).profile_allowed
         cache_file.write_text(f"{TEST_IP4}\n")
 
         ips = Shield(ShieldConfig(state_dir=sd)).resolve(force=True)
@@ -61,3 +61,6 @@ class TestCLIResolve:
         captured = capsys.readouterr()
         assert "Resolved" in captured.out
         assert "cli-resolve-test" in captured.out
+
+
+from terok_shield.state import StateBundle

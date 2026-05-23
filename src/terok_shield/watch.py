@@ -13,8 +13,8 @@ import signal
 import sys
 from pathlib import Path
 
-from . import state
 from .config import DnsTier
+from .state import StateBundle
 from .watchers import AuditLogWatcher, DnsLogWatcher, DomainCache, NflogWatcher, WatchEvent
 
 _running = True
@@ -40,13 +40,13 @@ def run_watch(state_dir: Path, container: str) -> None:
     """
     _validate_dnsmasq_tier(state_dir)
 
-    log_path = state.dnsmasq_log_path(state_dir)
+    log_path = StateBundle(state_dir).dnsmasq_log
     _ensure_log_file(log_path)
 
     _install_signal_handlers()
 
     dns_watcher = DnsLogWatcher(log_path, state_dir, container)
-    audit_watcher = AuditLogWatcher(state.audit_path(state_dir), container)
+    audit_watcher = AuditLogWatcher(StateBundle(state_dir).audit, container)
     nflog_watcher = NflogWatcher.create(container)
     domain_cache = DomainCache(state_dir)
 
@@ -71,7 +71,7 @@ def _validate_dnsmasq_tier(state_dir: Path) -> None:
     Raises:
         SystemExit: If the DNS tier file is missing or not dnsmasq.
     """
-    tier_path = state.dns_tier_path(state_dir)
+    tier_path = StateBundle(state_dir).dns_tier
     if tier_path.is_file():
         tier_value = tier_path.read_text().strip()
         if tier_value != DnsTier.DNSMASQ.value:

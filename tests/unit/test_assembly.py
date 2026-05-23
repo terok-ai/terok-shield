@@ -16,7 +16,7 @@ from unittest import mock
 
 import pytest
 
-from terok_shield import Shield, ShieldConfig, state
+from terok_shield import Shield, ShieldConfig
 from terok_shield.audit import AuditLogger
 from terok_shield.dns.resolver import DnsResolver
 from terok_shield.hooks.mode import HookMode
@@ -49,7 +49,7 @@ def make_hook_mode(tmp_path: Path) -> Callable[..., HookModeHarness]:
         ruleset: mock.MagicMock | None = None,
     ) -> HookModeHarness:
         effective_state_dir = state_dir or tmp_path
-        state.ensure_state_dirs(effective_state_dir)
+        StateBundle(effective_state_dir).ensure_dirs()
         runner = runner or mock.MagicMock()
         ruleset = ruleset or mock.MagicMock()
         return HookModeHarness(
@@ -94,7 +94,7 @@ def test_dns_resolver_rejects_resolved_dir() -> None:
 
 def test_audit_logger_accepts_audit_path(tmp_path: Path) -> None:
     """AuditLogger takes audit_path=, not log_dir."""
-    assert isinstance(AuditLogger(audit_path=state.audit_path(tmp_path)), AuditLogger)
+    assert isinstance(AuditLogger(audit_path=StateBundle(tmp_path).audit), AuditLogger)
 
 
 def test_ruleset_builder_constructor() -> None:
@@ -113,7 +113,7 @@ def test_resolve_and_cache_accepts_cache_path(tmp_path: Path) -> None:
     runner.dig_all.return_value = [TEST_IP1]
     resolver = DnsResolver(runner=runner)
 
-    cache_path = state.profile_allowed_path(tmp_path)
+    cache_path = StateBundle(tmp_path).profile_allowed
     ips = resolver.resolve_and_cache([TEST_DOMAIN], cache_path)
     assert TEST_IP1 in ips
     assert cache_path.is_file()
@@ -125,7 +125,7 @@ def test_resolve_and_cache_reuses_fresh_cache(tmp_path: Path) -> None:
     runner = mock.MagicMock()
     runner.dig_all.return_value = [TEST_IP1]
     resolver = DnsResolver(runner=runner)
-    cache_path = state.profile_allowed_path(tmp_path)
+    cache_path = StateBundle(tmp_path).profile_allowed
 
     resolver.resolve_and_cache([TEST_DOMAIN], cache_path)
     runner.dig_all.reset_mock()
@@ -141,14 +141,14 @@ def test_allow_ip_writes_to_live_allowed(
     harness.runner.nft_via_nsenter.return_value = ""
 
     harness.mode.allow_ip("test-ctr", TEST_IP1)
-    assert TEST_IP1 in state.live_allowed_path(tmp_path).read_text()
+    assert TEST_IP1 in StateBundle(tmp_path).live_allowed.read_text()
 
 
 def test_deny_ip_removes_from_live_allowed(
     make_hook_mode: Callable[..., HookModeHarness], tmp_path: Path
 ) -> None:
     """deny_ip() removes the IP from live.allowed."""
-    live_path = write_lines(state.live_allowed_path(tmp_path), [TEST_IP1, TEST_IP2])
+    live_path = write_lines(StateBundle(tmp_path).live_allowed, [TEST_IP1, TEST_IP2])
     harness = make_hook_mode(state_dir=tmp_path)
     harness.runner.nft_via_nsenter.return_value = ""
 
@@ -172,17 +172,17 @@ def test_read_allowed_ips_merges_state_files(
     expected: list[str],
 ) -> None:
     """state.read_allowed_ips() merges profile.allowed and live.allowed."""
-    state.ensure_state_dirs(tmp_path)
-    write_lines(state.profile_allowed_path(tmp_path), profile_lines)
-    write_lines(state.live_allowed_path(tmp_path), live_lines)
-    assert state.read_allowed_ips(tmp_path) == expected
+    StateBundle(tmp_path).ensure_dirs()
+    write_lines(StateBundle(tmp_path).profile_allowed, profile_lines)
+    write_lines(StateBundle(tmp_path).live_allowed, live_lines)
+    assert StateBundle(tmp_path).read_allowed_ips() == expected
 
 
 def test_shield_up_reads_live_allowed(
     make_hook_mode: Callable[..., HookModeHarness], tmp_path: Path
 ) -> None:
     """shield_up() re-adds persisted live.allowed IPs."""
-    write_lines(state.live_allowed_path(tmp_path), [TEST_IP1, TEST_IP2])
+    write_lines(StateBundle(tmp_path).live_allowed, [TEST_IP1, TEST_IP2])
     harness = make_hook_mode(state_dir=tmp_path)
     # Mock DNS reading so _container_ruleset returns the mock ruleset
     harness.mode._container_ruleset = lambda _c: harness.ruleset
@@ -209,7 +209,7 @@ def test_shield_constructs_real_collaborators(_find: mock.Mock, tmp_path: Path) 
 def test_shield_audit_path_derived_from_state_dir(_find: mock.Mock, tmp_path: Path) -> None:
     """Shield's AuditLogger writes to state_dir/audit.jsonl."""
     shield = Shield(ShieldConfig(state_dir=tmp_path))
-    assert shield.audit._audit_path == state.audit_path(tmp_path)
+    assert shield.audit._audit_path == StateBundle(tmp_path).audit
 
 
 @mock.patch("terok_shield.run.find_nft", return_value=NFT_BINARY)
@@ -224,4 +224,7 @@ def test_shield_resolve_uses_profile_allowed_path(_find: mock.Mock, tmp_path: Pa
 
     args = dns.resolve_and_cache.call_args.args
     assert args[0] == [TEST_DOMAIN]
-    assert args[1] == state.profile_allowed_path(tmp_path)
+    assert args[1] == StateBundle(tmp_path).profile_allowed
+
+
+from terok_shield.state import StateBundle

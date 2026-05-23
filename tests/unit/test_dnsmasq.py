@@ -8,7 +8,6 @@ from unittest import mock
 
 import pytest
 
-from terok_shield import state
 from terok_shield.dns.dnsmasq import (
     _validate_domain,
     add_domain,
@@ -95,7 +94,7 @@ def test_nftset_entry_rejects_invalid_domain() -> None:
 
 def test_generate_config_basic(tmp_path: Path) -> None:
     """generate_config() produces valid dnsmasq config with nftset entries."""
-    pid_path = state.dnsmasq_pid_path(tmp_path)
+    pid_path = StateBundle(tmp_path).dnsmasq_pid
     config = generate_config(
         PASTA_DNS, [TEST_DOMAIN, TEST_DOMAIN2], pid_path, listen_address=DNSMASQ_BIND_DEFAULT
     )
@@ -112,7 +111,7 @@ def test_generate_config_basic(tmp_path: Path) -> None:
 
 def test_generate_config_krun_listen_address(tmp_path: Path) -> None:
     """generate_config(listen_address=DNSMASQ_BIND_KRUN) emits the krun bind."""
-    pid_path = state.dnsmasq_pid_path(tmp_path)
+    pid_path = StateBundle(tmp_path).dnsmasq_pid
     config = generate_config(PASTA_DNS, [TEST_DOMAIN], pid_path, listen_address=DNSMASQ_BIND_KRUN)
 
     assert f"listen-address={DNSMASQ_BIND_KRUN}" in config
@@ -121,14 +120,14 @@ def test_generate_config_krun_listen_address(tmp_path: Path) -> None:
 
 def test_generate_config_rejects_invalid_listen_address(tmp_path: Path) -> None:
     """generate_config() raises ValueError when listen_address isn't an IP."""
-    pid_path = state.dnsmasq_pid_path(tmp_path)
+    pid_path = StateBundle(tmp_path).dnsmasq_pid
     with pytest.raises(ValueError):
         generate_config(PASTA_DNS, [], pid_path, listen_address="not-an-ip")
 
 
 def test_generate_config_skips_invalid_domains(tmp_path: Path) -> None:
     """Invalid domains are silently skipped."""
-    pid_path = state.dnsmasq_pid_path(tmp_path)
+    pid_path = StateBundle(tmp_path).dnsmasq_pid
     config = generate_config(
         PASTA_DNS,
         [TEST_DOMAIN, "; rm -rf /", TEST_DOMAIN2],
@@ -143,7 +142,7 @@ def test_generate_config_skips_invalid_domains(tmp_path: Path) -> None:
 
 def test_generate_config_empty_domains(tmp_path: Path) -> None:
     """Empty domain list produces config without nftset lines."""
-    pid_path = state.dnsmasq_pid_path(tmp_path)
+    pid_path = StateBundle(tmp_path).dnsmasq_pid
     config = generate_config(PASTA_DNS, [], pid_path, listen_address=DNSMASQ_BIND_DEFAULT)
 
     assert "nftset" not in config
@@ -152,8 +151,8 @@ def test_generate_config_empty_domains(tmp_path: Path) -> None:
 
 def test_generate_config_with_log_path(tmp_path: Path) -> None:
     """log_path enables query logging directives."""
-    pid_path = state.dnsmasq_pid_path(tmp_path)
-    log_path = state.dnsmasq_log_path(tmp_path)
+    pid_path = StateBundle(tmp_path).dnsmasq_pid
+    log_path = StateBundle(tmp_path).dnsmasq_log
     config = generate_config(
         PASTA_DNS, [TEST_DOMAIN], pid_path, listen_address=DNSMASQ_BIND_DEFAULT, log_path=log_path
     )
@@ -164,7 +163,7 @@ def test_generate_config_with_log_path(tmp_path: Path) -> None:
 
 def test_generate_config_without_log_path(tmp_path: Path) -> None:
     """Default (no log_path) omits query logging directives."""
-    pid_path = state.dnsmasq_pid_path(tmp_path)
+    pid_path = StateBundle(tmp_path).dnsmasq_pid
     config = generate_config(
         PASTA_DNS, [TEST_DOMAIN], pid_path, listen_address=DNSMASQ_BIND_DEFAULT
     )
@@ -180,7 +179,7 @@ def test_is_our_dnsmasq_true(tmp_path: Path) -> None:
     """_is_our_dnsmasq returns True when argv[0]=='dnsmasq' and --conf-file= matches exactly."""
     from terok_shield.dns.dnsmasq import _is_our_dnsmasq
 
-    conf_path = str(state.dnsmasq_conf_path(tmp_path))
+    conf_path = str(StateBundle(tmp_path).dnsmasq_conf)
     fake_proc = tmp_path / "cmdline"
     fake_proc.write_bytes(f"dnsmasq\x00--conf-file={conf_path}\x00".encode())
     with mock.patch("terok_shield.dns.dnsmasq.Path", return_value=fake_proc):
@@ -191,7 +190,7 @@ def test_is_our_dnsmasq_true_absolute_path_binary(tmp_path: Path) -> None:
     """_is_our_dnsmasq returns True when argv[0] is an absolute path ending with /dnsmasq."""
     from terok_shield.dns.dnsmasq import _is_our_dnsmasq
 
-    conf_path = str(state.dnsmasq_conf_path(tmp_path))
+    conf_path = str(StateBundle(tmp_path).dnsmasq_conf)
     fake_proc = tmp_path / "cmdline"
     fake_proc.write_bytes(f"/usr/sbin/dnsmasq\x00--conf-file={conf_path}\x00".encode())
     with mock.patch("terok_shield.dns.dnsmasq.Path", return_value=fake_proc):
@@ -212,7 +211,7 @@ def test_is_our_dnsmasq_false_conf_path_as_substring(tmp_path: Path) -> None:
     """_is_our_dnsmasq returns False when our conf path is embedded inside a longer arg."""
     from terok_shield.dns.dnsmasq import _is_our_dnsmasq
 
-    conf_path = str(state.dnsmasq_conf_path(tmp_path))
+    conf_path = str(StateBundle(tmp_path).dnsmasq_conf)
     longer_path = f"/other{conf_path}"
     fake_proc = tmp_path / "cmdline"
     fake_proc.write_bytes(f"dnsmasq\x00--conf-file={longer_path}\x00".encode())
@@ -252,9 +251,9 @@ def test_clear_pid_file_removes_file(tmp_path: Path) -> None:
     """_clear_pid_file removes the PID file."""
     from terok_shield.dns.dnsmasq import _clear_pid_file
 
-    state.dnsmasq_pid_path(tmp_path).write_text("12345\n")
+    StateBundle(tmp_path).dnsmasq_pid.write_text("12345\n")
     _clear_pid_file(tmp_path)
-    assert not state.dnsmasq_pid_path(tmp_path).exists()
+    assert not StateBundle(tmp_path).dnsmasq_pid.exists()
 
 
 def test_clear_pid_file_ignores_missing(tmp_path: Path) -> None:
@@ -269,37 +268,37 @@ def test_clear_pid_file_ignores_missing(tmp_path: Path) -> None:
 
 def test_add_domain_appends(tmp_path: Path) -> None:
     """add_domain() appends a new domain to live.domains."""
-    state.ensure_state_dirs(tmp_path)
+    StateBundle(tmp_path).ensure_dirs()
     assert add_domain(tmp_path, TEST_DOMAIN) is True
-    assert TEST_DOMAIN in state.live_domains_path(tmp_path).read_text()
+    assert TEST_DOMAIN in StateBundle(tmp_path).live_domains.read_text()
 
 
 def test_add_domain_deduplicates(tmp_path: Path) -> None:
     """add_domain() returns False for an already-present domain."""
-    state.ensure_state_dirs(tmp_path)
+    StateBundle(tmp_path).ensure_dirs()
     add_domain(tmp_path, TEST_DOMAIN)
     assert add_domain(tmp_path, TEST_DOMAIN) is False
 
 
 def test_add_domain_deduplicates_against_profile(tmp_path: Path) -> None:
     """add_domain() returns False when domain already exists in profile.domains."""
-    state.ensure_state_dirs(tmp_path)
-    state.profile_domains_path(tmp_path).write_text(f"{TEST_DOMAIN}\n")
+    StateBundle(tmp_path).ensure_dirs()
+    StateBundle(tmp_path).profile_domains.write_text(f"{TEST_DOMAIN}\n")
     assert add_domain(tmp_path, TEST_DOMAIN) is False
 
 
 def test_add_domain_undenies(tmp_path: Path) -> None:
     """add_domain() removes domain from denied.domains if present."""
-    state.ensure_state_dirs(tmp_path)
-    state.denied_domains_path(tmp_path).write_text(f"{TEST_DOMAIN}\n")
+    StateBundle(tmp_path).ensure_dirs()
+    StateBundle(tmp_path).denied_domains.write_text(f"{TEST_DOMAIN}\n")
     assert add_domain(tmp_path, TEST_DOMAIN) is True
-    denied = state.denied_domains_path(tmp_path).read_text()
+    denied = StateBundle(tmp_path).denied_domains.read_text()
     assert TEST_DOMAIN not in denied
 
 
 def test_remove_domain(tmp_path: Path) -> None:
     """remove_domain() adds domain to denied.domains and removes from live.domains."""
-    state.ensure_state_dirs(tmp_path)
+    StateBundle(tmp_path).ensure_dirs()
     add_domain(tmp_path, TEST_DOMAIN)
     add_domain(tmp_path, TEST_DOMAIN2)
     assert remove_domain(tmp_path, TEST_DOMAIN) is True
@@ -310,19 +309,19 @@ def test_remove_domain(tmp_path: Path) -> None:
 
 def test_remove_domain_from_profile(tmp_path: Path) -> None:
     """remove_domain() denies a domain that exists in profile.domains."""
-    state.ensure_state_dirs(tmp_path)
-    state.profile_domains_path(tmp_path).write_text(f"{TEST_DOMAIN}\n{TEST_DOMAIN2}\n")
+    StateBundle(tmp_path).ensure_dirs()
+    StateBundle(tmp_path).profile_domains.write_text(f"{TEST_DOMAIN}\n{TEST_DOMAIN2}\n")
     assert remove_domain(tmp_path, TEST_DOMAIN) is True
     merged = read_merged_domains(tmp_path)
     assert TEST_DOMAIN not in merged
     assert TEST_DOMAIN2 in merged
     # profile.domains is unchanged
-    assert TEST_DOMAIN in state.profile_domains_path(tmp_path).read_text()
+    assert TEST_DOMAIN in StateBundle(tmp_path).profile_domains.read_text()
 
 
 def test_remove_domain_not_found(tmp_path: Path) -> None:
     """remove_domain() returns False when domain is not present."""
-    state.ensure_state_dirs(tmp_path)
+    StateBundle(tmp_path).ensure_dirs()
     assert remove_domain(tmp_path, TEST_DOMAIN) is False
 
 
@@ -331,22 +330,22 @@ def test_remove_domain_not_found(tmp_path: Path) -> None:
 
 def test_read_merged_domains_empty(tmp_path: Path) -> None:
     """read_merged_domains() returns empty list when no domain files exist."""
-    state.ensure_state_dirs(tmp_path)
+    StateBundle(tmp_path).ensure_dirs()
     assert read_merged_domains(tmp_path) == []
 
 
 def test_read_merged_domains_profile_only(tmp_path: Path) -> None:
     """read_merged_domains() returns profile domains when no live/denied."""
-    state.ensure_state_dirs(tmp_path)
-    state.profile_domains_path(tmp_path).write_text(f"{TEST_DOMAIN}\n{TEST_DOMAIN2}\n")
+    StateBundle(tmp_path).ensure_dirs()
+    StateBundle(tmp_path).profile_domains.write_text(f"{TEST_DOMAIN}\n{TEST_DOMAIN2}\n")
     assert read_merged_domains(tmp_path) == [TEST_DOMAIN, TEST_DOMAIN2]
 
 
 def test_read_merged_domains_merges_live(tmp_path: Path) -> None:
     """read_merged_domains() merges profile + live with dedup."""
-    state.ensure_state_dirs(tmp_path)
-    state.profile_domains_path(tmp_path).write_text(f"{TEST_DOMAIN}\n")
-    state.live_domains_path(tmp_path).write_text(f"{TEST_DOMAIN2}\n")
+    StateBundle(tmp_path).ensure_dirs()
+    StateBundle(tmp_path).profile_domains.write_text(f"{TEST_DOMAIN}\n")
+    StateBundle(tmp_path).live_domains.write_text(f"{TEST_DOMAIN2}\n")
     merged = read_merged_domains(tmp_path)
     assert TEST_DOMAIN in merged
     assert TEST_DOMAIN2 in merged
@@ -354,9 +353,9 @@ def test_read_merged_domains_merges_live(tmp_path: Path) -> None:
 
 def test_read_merged_domains_subtracts_denied(tmp_path: Path) -> None:
     """read_merged_domains() subtracts denied domains from the result."""
-    state.ensure_state_dirs(tmp_path)
-    state.profile_domains_path(tmp_path).write_text(f"{TEST_DOMAIN}\n{TEST_DOMAIN2}\n")
-    state.denied_domains_path(tmp_path).write_text(f"{TEST_DOMAIN}\n")
+    StateBundle(tmp_path).ensure_dirs()
+    StateBundle(tmp_path).profile_domains.write_text(f"{TEST_DOMAIN}\n{TEST_DOMAIN2}\n")
+    StateBundle(tmp_path).denied_domains.write_text(f"{TEST_DOMAIN}\n")
     merged = read_merged_domains(tmp_path)
     assert TEST_DOMAIN not in merged
     assert TEST_DOMAIN2 in merged
@@ -367,8 +366,8 @@ def test_read_merged_domains_subtracts_denied(tmp_path: Path) -> None:
 
 def test_reload_regenerates_config_and_sends_sighup(tmp_path: Path) -> None:
     """reload() regenerates config and sends SIGHUP to dnsmasq."""
-    state.ensure_state_dirs(tmp_path)
-    state.dnsmasq_pid_path(tmp_path).write_text("12345\n")
+    StateBundle(tmp_path).ensure_dirs()
+    StateBundle(tmp_path).dnsmasq_pid.write_text("12345\n")
 
     with (
         mock.patch("terok_shield.dns.dnsmasq._is_our_dnsmasq", return_value=True),
@@ -377,7 +376,7 @@ def test_reload_regenerates_config_and_sends_sighup(tmp_path: Path) -> None:
         reload(tmp_path, PASTA_DNS, [TEST_DOMAIN])
 
     # Config was regenerated
-    assert TEST_DOMAIN in state.dnsmasq_conf_path(tmp_path).read_text()
+    assert TEST_DOMAIN in StateBundle(tmp_path).dnsmasq_conf.read_text()
     # SIGHUP sent (not SIGTERM)
     import signal
 
@@ -390,10 +389,10 @@ def test_reload_preserves_krun_listen_address(tmp_path: Path) -> None:
     Without this, a krun-runtime container's live reload would silently
     rebind dnsmasq onto netns ``127.0.0.1`` and break DNS for the guest.
     """
-    state.ensure_state_dirs(tmp_path)
-    state.dnsmasq_pid_path(tmp_path).write_text("12345\n")
+    StateBundle(tmp_path).ensure_dirs()
+    StateBundle(tmp_path).dnsmasq_pid.write_text("12345\n")
     # Pre-existing conf was generated for the krun runtime.
-    state.dnsmasq_conf_path(tmp_path).write_text(
+    StateBundle(tmp_path).dnsmasq_conf.write_text(
         f"listen-address={DNSMASQ_BIND_KRUN}\nport=53\nbind-interfaces\n"
     )
 
@@ -403,7 +402,7 @@ def test_reload_preserves_krun_listen_address(tmp_path: Path) -> None:
     ):
         reload(tmp_path, PASTA_DNS, [TEST_DOMAIN])
 
-    new_conf = state.dnsmasq_conf_path(tmp_path).read_text()
+    new_conf = StateBundle(tmp_path).dnsmasq_conf.read_text()
     assert f"listen-address={DNSMASQ_BIND_KRUN}" in new_conf
     assert f"listen-address={DNSMASQ_BIND_DEFAULT}" not in new_conf
 
@@ -414,10 +413,10 @@ def test_reload_falls_back_to_default_when_listen_address_missing(tmp_path: Path
     Defensive against hand-written or truncated configs — never crash, fall back
     to the safe default-runtime bind.
     """
-    state.ensure_state_dirs(tmp_path)
-    state.dnsmasq_pid_path(tmp_path).write_text("12345\n")
+    StateBundle(tmp_path).ensure_dirs()
+    StateBundle(tmp_path).dnsmasq_pid.write_text("12345\n")
     # No listen-address line in the old conf.
-    state.dnsmasq_conf_path(tmp_path).write_text("port=53\nbind-interfaces\n")
+    StateBundle(tmp_path).dnsmasq_conf.write_text("port=53\nbind-interfaces\n")
 
     with (
         mock.patch("terok_shield.dns.dnsmasq._is_our_dnsmasq", return_value=True),
@@ -425,13 +424,13 @@ def test_reload_falls_back_to_default_when_listen_address_missing(tmp_path: Path
     ):
         reload(tmp_path, PASTA_DNS, [TEST_DOMAIN])
 
-    new_conf = state.dnsmasq_conf_path(tmp_path).read_text()
+    new_conf = StateBundle(tmp_path).dnsmasq_conf.read_text()
     assert f"listen-address={DNSMASQ_BIND_DEFAULT}" in new_conf
 
 
 def test_reload_noop_when_not_running(tmp_path: Path) -> None:
     """reload() is a no-op when dnsmasq PID file is absent."""
-    state.ensure_state_dirs(tmp_path)
+    StateBundle(tmp_path).ensure_dirs()
     with mock.patch("terok_shield.dns.dnsmasq.os.kill") as mock_kill:
         reload(tmp_path, PASTA_DNS, [TEST_DOMAIN])
     mock_kill.assert_not_called()
@@ -439,8 +438,8 @@ def test_reload_noop_when_not_running(tmp_path: Path) -> None:
 
 def test_reload_raises_on_stale_pid(tmp_path: Path) -> None:
     """reload() raises RuntimeError when PID is not dnsmasq (stale)."""
-    state.ensure_state_dirs(tmp_path)
-    state.dnsmasq_pid_path(tmp_path).write_text("12345\n")
+    StateBundle(tmp_path).ensure_dirs()
+    StateBundle(tmp_path).dnsmasq_pid.write_text("12345\n")
 
     with mock.patch("terok_shield.dns.dnsmasq._is_our_dnsmasq", return_value=False):
         with pytest.raises(RuntimeError, match="not dnsmasq"):
@@ -449,8 +448,8 @@ def test_reload_raises_on_stale_pid(tmp_path: Path) -> None:
 
 def test_reload_raises_on_dead_process(tmp_path: Path) -> None:
     """reload() raises RuntimeError when SIGHUP fails (process dead)."""
-    state.ensure_state_dirs(tmp_path)
-    state.dnsmasq_pid_path(tmp_path).write_text("12345\n")
+    StateBundle(tmp_path).ensure_dirs()
+    StateBundle(tmp_path).dnsmasq_pid.write_text("12345\n")
 
     with (
         mock.patch("terok_shield.dns.dnsmasq._is_our_dnsmasq", return_value=True),
@@ -542,3 +541,6 @@ def test_has_nftset_support_missing_dnsmasq() -> None:
         ""  # SubprocessRunner returns "" on FileNotFoundError with check=False
     )
     assert has_nftset_support(runner) is False
+
+
+from terok_shield.state import StateBundle

@@ -8,7 +8,7 @@ from unittest import mock
 
 import pytest
 
-from terok_shield import Shield, ShieldConfig, state
+from terok_shield import Shield, ShieldConfig
 
 from ..conftest import nft_missing, podman_missing
 
@@ -28,10 +28,10 @@ class TestHookInstall:
         shield = Shield(ShieldConfig(state_dir=sd))
         shield.pre_start("test-ctr")
 
-        hooks = state.hooks_dir(sd)
+        hooks = StateBundle(sd).hooks_dir
         assert (hooks / "terok-shield-createRuntime.json").is_file()
         assert (hooks / "terok-shield-poststop.json").is_file()
-        entrypoint = state.hook_entrypoint(sd)
+        entrypoint = StateBundle(sd).hook_entrypoint
         assert entrypoint.is_file()
         assert entrypoint.stat().st_mode & 0o100, "Entrypoint must be executable"
 
@@ -43,9 +43,12 @@ class TestHookInstall:
         shield.pre_start("test-ctr")
         shield.pre_start("test-ctr")
 
-        hooks = state.hooks_dir(sd)
+        hooks = StateBundle(sd).hooks_dir
         assert (hooks / "terok-shield-createRuntime.json").is_file()
         assert (hooks / "terok-shield-poststop.json").is_file()
-        entrypoint = state.hook_entrypoint(sd)
+        entrypoint = StateBundle(sd).hook_entrypoint
         assert entrypoint.is_file()
         assert entrypoint.stat().st_mode & 0o100, "Entrypoint must be executable after re-run"
+
+
+from terok_shield.state import StateBundle

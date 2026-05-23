@@ -4,9 +4,10 @@
 """Per-container state bundle layout contract.
 
 Every shielded container gets an isolated state directory.  This module
-is the single source of truth for where files live within it — all paths
-are derived from a single ``state_dir`` root.  Zero dependencies beyond
-``pathlib``.
+is the single source of truth for where files live within it — all
+paths are derived from a single ``state_dir`` root through
+[`StateBundle`][terok_shield.state.StateBundle].  Zero dependencies
+beyond ``pathlib``.
 
 Bundle layout::
 
@@ -33,6 +34,9 @@ Bundle layout::
 """
 # WAYPOINT: HookMode (hooks.mode)
 
+from __future__ import annotations
+
+from dataclasses import dataclass
 from pathlib import Path
 
 from .paths import HOOK_ENTRYPOINT_NAME
@@ -55,189 +59,6 @@ before launching dnsmasq.  Earlier shapes are recoverable via
 """
 
 
-# ── OCI hook paths ──────────────────────────────────────
-
-
-def hooks_dir(state_dir: Path) -> Path:
-    """Return the OCI hooks directory within the state bundle."""
-    return state_dir / "hooks"
-
-
-def hook_entrypoint(state_dir: Path) -> Path:
-    """Return the path to the hook entrypoint script."""
-    return state_dir / HOOK_ENTRYPOINT_NAME
-
-
-def hook_json_path(state_dir: Path, stage: str) -> Path:
-    """Return the path to a hook JSON file for a given OCI stage."""
-    return hooks_dir(state_dir) / f"terok-shield-{stage}.json"
-
-
-def ruleset_path(state_dir: Path) -> Path:
-    """Return the path to the pre-generated nft ruleset file."""
-    return state_dir / "ruleset.nft"
-
-
-# ── Network configuration ──────────────────────────────
-
-
-def upstream_dns_path(state_dir: Path) -> Path:
-    """Return the path to the persisted upstream DNS address."""
-    return state_dir / "upstream.dns"
-
-
-def dns_tier_path(state_dir: Path) -> Path:
-    """Return the path to the persisted DNS tier value."""
-    return state_dir / "dns.tier"
-
-
-# ── Allowlists and denylists ───────────────────────────
-
-
-def profile_allowed_path(state_dir: Path) -> Path:
-    """Return the path to the profile-derived allowlist file."""
-    return state_dir / "profile.allowed"
-
-
-def profile_domains_path(state_dir: Path) -> Path:
-    """Return the path to the profile domain names list (for dnsmasq config)."""
-    return state_dir / "profile.domains"
-
-
-def live_allowed_path(state_dir: Path) -> Path:
-    """Return the path to the live allow/deny allowlist file."""
-    return state_dir / "live.allowed"
-
-
-def live_domains_path(state_dir: Path) -> Path:
-    """Return the path to the live domain overrides file (from allow_domain)."""
-    return state_dir / "live.domains"
-
-
-def deny_path(state_dir: Path) -> Path:
-    """Return the path to the persistent denylist file."""
-    return state_dir / "deny.list"
-
-
-def denied_domains_path(state_dir: Path) -> Path:
-    """Return the path to the denied domains file (from deny_domain)."""
-    return state_dir / "denied.domains"
-
-
-# ── Dnsmasq tier ────────────────────────────────────────
-
-
-def dnsmasq_conf_path(state_dir: Path) -> Path:
-    """Return the path to the generated dnsmasq configuration file."""
-    return state_dir / "dnsmasq.conf"
-
-
-def dnsmasq_pid_path(state_dir: Path) -> Path:
-    """Return the path to the dnsmasq PID file."""
-    return state_dir / "dnsmasq.pid"
-
-
-def dnsmasq_log_path(state_dir: Path) -> Path:
-    """Return the path to the dnsmasq query log (tailed by ``shield watch``)."""
-    return state_dir / "dnsmasq.log"
-
-
-def resolv_conf_path(state_dir: Path) -> Path:
-    """Return the path to the pre-written ``resolv.conf`` for the dnsmasq tier.
-
-    ``pre_start()`` writes ``nameserver <addr>`` here — the runtime-selected
-    dnsmasq listen address (``127.0.0.1`` for default runtimes,
-    ``169.254.1.3`` for krun where the microVM guest can't reach netns
-    loopback) — and passes ``--volume {path}:/etc/resolv.conf:ro`` to podman.
-    Podman detects the user-supplied mount and skips its automatic
-    pasta-generated ``resolv.conf``, so the container's DNS is directed to
-    the per-container dnsmasq instance at ``<addr>:53``.  The read-only
-    mount prevents the container payload from redirecting DNS away from
-    dnsmasq.
-    """
-    return state_dir / "resolv.conf"
-
-
-# ── Container identity and observability ────────────────
-
-
-def container_id_path(state_dir: Path) -> Path:
-    """Return the path to the persisted podman container ID file."""
-    return state_dir / "container.id"
-
-
-def reader_pid_path(state_dir: Path) -> Path:
-    """Return the path where the bridge hook tracks the live NFLOG reader PID."""
-    return state_dir / "reader.pid"
-
-
-def audit_path(state_dir: Path) -> Path:
-    """Return the path to the per-container audit log."""
-    return state_dir / "audit.jsonl"
-
-
-def meta_path_file(state_dir: Path) -> Path:
-    """Return the persisted-meta-path pointer file under *state_dir*.
-
-    Mirrors the resource-side ``META_PATH_FILE_NAME`` constant — one
-    filename on both sides of the hook boundary so package code that
-    reads it (``Shield.up()``/``down()``) and resource code that
-    writes it (the bridge ``createRuntime`` hook) can never drift on
-    path convention.
-    """
-    return state_dir / "meta_path"
-
-
-# ── State readers ───────────────────────────────────────
-#
-# The path functions above are pure derivations.  The functions below
-# read file contents and compute derived state (merging, deduplication,
-# set subtraction).
-
-
-def read_allowed_ips(state_dir: Path) -> list[str]:
-    """Merge IPs from profile.allowed and live.allowed, deduplicated.
-
-    Returns a stable-order list: profile IPs first, then live IPs,
-    with duplicates removed (first occurrence wins).
-    """
-    ips: list[str] = []
-    for path in (profile_allowed_path(state_dir), live_allowed_path(state_dir)):
-        if path.is_file():
-            ips.extend(line.strip() for line in path.read_text().splitlines() if line.strip())
-    seen: set[str] = set()
-    unique: list[str] = []
-    for ip in ips:
-        if ip not in seen:
-            seen.add(ip)
-            unique.append(ip)
-    return unique
-
-
-def read_denied_ips(state_dir: Path) -> set[str]:
-    """Read IPs from deny.list.
-
-    Returns an empty set if the file does not exist.
-    """
-    path = deny_path(state_dir)
-    if not path.is_file():
-        return set()
-    return {line.strip() for line in path.read_text().splitlines() if line.strip()}
-
-
-def read_effective_ips(state_dir: Path) -> list[str]:
-    """Compute effective allowed IPs: (profile ∪ live) − deny.
-
-    Returns a stable-order list with denied IPs subtracted.
-    """
-    allowed = read_allowed_ips(state_dir)
-    denied = read_denied_ips(state_dir)
-    return [ip for ip in allowed if ip not in denied]
-
-
-# ── Setup ───────────────────────────────────────────────
-
-
 STATE_DIR_MODE = 0o700
 """Permission mode for ``state_dir`` and its subdirectories.
 
@@ -250,16 +71,186 @@ pattern the validator demands.
 """
 
 
-def ensure_state_dirs(state_dir: Path) -> None:
-    """Create the state directory and its required subdirectories.
+@dataclass(frozen=True)
+class StateBundle:
+    """File-layout contract for a single shielded container's ``state_dir``.
 
-    Both directories are forced to ``STATE_DIR_MODE`` (``0o700``) on
-    every call — the OCI hook rejects anything looser, and a prior
-    run under a permissive ``umask`` (Fedora's default ``0o002`` is
-    a common offender) would otherwise leave the bundle stranded.
+    Frozen so the per-task instance is safe to pass through hook
+    callbacks without anyone smuggling a mutated ``state_dir`` into a
+    later stage.  Every property is a pure derivation off ``state_dir``;
+    the IO methods ([`read_allowed_ips`][terok_shield.state.StateBundle.read_allowed_ips],
+    [`read_denied_ips`][terok_shield.state.StateBundle.read_denied_ips],
+    [`read_effective_ips`][terok_shield.state.StateBundle.read_effective_ips],
+    [`ensure_dirs`][terok_shield.state.StateBundle.ensure_dirs]) bundle
+    the small handful of read-and-merge / setup helpers that previously
+    floated as free functions taking ``state_dir`` repeatedly.
     """
-    state_dir.mkdir(parents=True, exist_ok=True)
-    state_dir.chmod(STATE_DIR_MODE)
-    hd = hooks_dir(state_dir)
-    hd.mkdir(parents=True, exist_ok=True)
-    hd.chmod(STATE_DIR_MODE)
+
+    state_dir: Path
+
+    # ── OCI hook paths ──────────────────────────────────────
+
+    @property
+    def hooks_dir(self) -> Path:
+        """OCI hooks directory within the state bundle."""
+        return self.state_dir / "hooks"
+
+    @property
+    def hook_entrypoint(self) -> Path:
+        """Path to the hook entrypoint script."""
+        return self.state_dir / HOOK_ENTRYPOINT_NAME
+
+    def hook_json(self, stage: str) -> Path:
+        """Hook JSON file for a given OCI stage (``createRuntime`` / ``poststop``)."""
+        return self.hooks_dir / f"terok-shield-{stage}.json"
+
+    @property
+    def ruleset(self) -> Path:
+        """Path to the pre-generated nft ruleset file."""
+        return self.state_dir / "ruleset.nft"
+
+    # ── Network configuration ──────────────────────────────
+
+    @property
+    def upstream_dns(self) -> Path:
+        """Path to the persisted upstream DNS address."""
+        return self.state_dir / "upstream.dns"
+
+    @property
+    def dns_tier(self) -> Path:
+        """Path to the persisted DNS tier value."""
+        return self.state_dir / "dns.tier"
+
+    # ── Allowlists and denylists ───────────────────────────
+
+    @property
+    def profile_allowed(self) -> Path:
+        """Path to the profile-derived allowlist file."""
+        return self.state_dir / "profile.allowed"
+
+    @property
+    def profile_domains(self) -> Path:
+        """Path to the profile domain names list (for dnsmasq config)."""
+        return self.state_dir / "profile.domains"
+
+    @property
+    def live_allowed(self) -> Path:
+        """Path to the live allow/deny allowlist file."""
+        return self.state_dir / "live.allowed"
+
+    @property
+    def live_domains(self) -> Path:
+        """Path to the live domain overrides file (from allow_domain)."""
+        return self.state_dir / "live.domains"
+
+    @property
+    def deny(self) -> Path:
+        """Path to the persistent denylist file."""
+        return self.state_dir / "deny.list"
+
+    @property
+    def denied_domains(self) -> Path:
+        """Path to the denied domains list (from deny_domain)."""
+        return self.state_dir / "denied.domains"
+
+    # ── dnsmasq runtime ────────────────────────────────────
+
+    @property
+    def dnsmasq_conf(self) -> Path:
+        """Path to the generated dnsmasq configuration file."""
+        return self.state_dir / "dnsmasq.conf"
+
+    @property
+    def dnsmasq_pid(self) -> Path:
+        """Path to the dnsmasq PID file (PID is in the container netns)."""
+        return self.state_dir / "dnsmasq.pid"
+
+    @property
+    def dnsmasq_log(self) -> Path:
+        """Path to the dnsmasq query log (consumed by ``shield watch``)."""
+        return self.state_dir / "dnsmasq.log"
+
+    @property
+    def resolv_conf(self) -> Path:
+        """Path to the resolv.conf bind-mounted over ``/etc/resolv.conf`` in dnsmasq tier."""
+        return self.state_dir / "resolv.conf"
+
+    # ── Container identity and observability ────────────────
+
+    @property
+    def container_id(self) -> Path:
+        """Path to the persisted podman container ID file."""
+        return self.state_dir / "container.id"
+
+    @property
+    def reader_pid(self) -> Path:
+        """Path where the bridge hook tracks the live NFLOG reader PID."""
+        return self.state_dir / "reader.pid"
+
+    @property
+    def audit(self) -> Path:
+        """Path to the per-container audit log."""
+        return self.state_dir / "audit.jsonl"
+
+    @property
+    def meta_path(self) -> Path:
+        """Persisted-meta-path pointer file under ``state_dir``.
+
+        Mirrors the resource-side ``META_PATH_FILE_NAME`` constant — one
+        filename on both sides of the hook boundary so package code that
+        reads it (``Shield.up()``/``down()``) and resource code that
+        writes it (the bridge ``createRuntime`` hook) can never drift
+        on path convention.
+        """
+        return self.state_dir / "meta_path"
+
+    # ── State readers ──────────────────────────────────────
+
+    def read_allowed_ips(self) -> list[str]:
+        """Merge IPs from profile.allowed and live.allowed, deduplicated.
+
+        Returns a stable-order list: profile IPs first, then live IPs,
+        with duplicates removed (first occurrence wins).
+        """
+        ips: list[str] = []
+        for path in (self.profile_allowed, self.live_allowed):
+            if path.is_file():
+                ips.extend(line.strip() for line in path.read_text().splitlines() if line.strip())
+        seen: set[str] = set()
+        unique: list[str] = []
+        for ip in ips:
+            if ip not in seen:
+                seen.add(ip)
+                unique.append(ip)
+        return unique
+
+    def read_denied_ips(self) -> set[str]:
+        """Read IPs from deny.list (empty set when the file is missing)."""
+        if not self.deny.is_file():
+            return set()
+        return {line.strip() for line in self.deny.read_text().splitlines() if line.strip()}
+
+    def read_effective_ips(self) -> list[str]:
+        """Compute effective allowed IPs: ``(profile ∪ live) − deny``.
+
+        Returns a stable-order list with denied IPs subtracted.
+        """
+        denied = self.read_denied_ips()
+        return [ip for ip in self.read_allowed_ips() if ip not in denied]
+
+    # ── Setup ──────────────────────────────────────────────
+
+    def ensure_dirs(self) -> None:
+        """Create the state directory and its required subdirectories.
+
+        Both directories are forced to
+        [`STATE_DIR_MODE`][terok_shield.state.STATE_DIR_MODE]
+        (``0o700``) on every call — the OCI hook rejects anything
+        looser, and a prior run under a permissive ``umask`` (Fedora's
+        default ``0o002`` is a common offender) would otherwise leave
+        the bundle stranded.
+        """
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        self.state_dir.chmod(STATE_DIR_MODE)
+        self.hooks_dir.mkdir(parents=True, exist_ok=True)
+        self.hooks_dir.chmod(STATE_DIR_MODE)

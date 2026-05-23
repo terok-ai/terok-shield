@@ -282,7 +282,7 @@ def test_up_resolves_dossier_via_meta_path(
     """
     meta = tmp_path / "abc.json"
     meta.write_text(json.dumps({"project": "terok", "task": "abc", "name": "diligent-octopus"}))
-    state.meta_path_file(state_dir).write_text(str(meta))
+    StateBundle(state_dir).meta_path.write_text(str(meta))
     harness = make_shield()
     harness.shield.up("test-ctr")
     harness.hub_events.shield_up.assert_called_once_with(
@@ -297,7 +297,7 @@ def test_down_resolves_dossier_via_meta_path(
     """``Shield.down()`` carries the same identity bundle as ``up()`` (resolved live each call)."""
     meta = tmp_path / "xyz.json"
     meta.write_text(json.dumps({"project": "terok", "task": "xyz"}))
-    state.meta_path_file(state_dir).write_text(str(meta))
+    StateBundle(state_dir).meta_path.write_text(str(meta))
     harness = make_shield()
     harness.shield.down("test-ctr", allow_all=True)
     harness.hub_events.shield_down.assert_called_once_with(
@@ -642,3 +642,6 @@ class TestReadInstalledHookVersion:
         hooks_dir.mkdir()
         (hooks_dir / "_oci_state.py").write_text("# no version here\n")
         assert _read_installed_hook_version([hooks_dir]) is None
+
+
+from terok_shield.state import StateBundle

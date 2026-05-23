@@ -11,7 +11,6 @@ from unittest import mock
 
 import pytest
 
-from terok_shield import state
 from terok_shield.dns.resolver import DnsResolver
 from terok_shield.run import DigNotFoundError
 
@@ -141,7 +140,7 @@ def test_resolve_and_cache_writes_cache(
     harness = make_resolver()
     harness.runner.dig_all.return_value = [TEST_IP1]
 
-    cache_path = state.profile_allowed_path(tmp_path)
+    cache_path = StateBundle(tmp_path).profile_allowed
     assert harness.resolver.resolve_and_cache([TEST_DOMAIN], cache_path) == [TEST_IP1]
     assert cache_path.is_file()
 
@@ -152,7 +151,7 @@ def test_resolve_and_cache_returns_fresh_cache(
 ) -> None:
     """resolve_and_cache() returns fresh cached IPs without re-resolving DNS."""
     harness = make_resolver()
-    cache_path = state.profile_allowed_path(tmp_path)
+    cache_path = StateBundle(tmp_path).profile_allowed
     cache_path.write_text(f"{TEST_IP1}\n{TEST_IP2}\n")
 
     assert harness.resolver.resolve_and_cache([TEST_DOMAIN], cache_path, max_age=3600) == [
@@ -170,7 +169,7 @@ def test_resolve_and_cache_re_resolves_stale_cache(
     harness = make_resolver()
     harness.runner.dig_all.return_value = [TEST_IP2]
 
-    cache_path = state.profile_allowed_path(tmp_path)
+    cache_path = StateBundle(tmp_path).profile_allowed
     cache_path.write_text(f"{TEST_IP1}\n")
     os.utime(cache_path, (0, 0))
 
@@ -186,7 +185,7 @@ def test_resolve_and_cache_mixed_entries(
     harness = make_resolver()
     harness.runner.dig_all.return_value = [TEST_IP2]
 
-    cache_path = state.profile_allowed_path(tmp_path)
+    cache_path = StateBundle(tmp_path).profile_allowed
     result = harness.resolver.resolve_and_cache([TEST_IP1, TEST_DOMAIN], cache_path)
     assert TEST_IP1 in result
     assert TEST_IP2 in result
@@ -215,3 +214,6 @@ def test_resolve_domains_getent_fallback_deduplicates(
 
     result = harness.resolver.resolve_domains([CLOUDFLARE_DOMAIN, GOOGLE_DNS_DOMAIN])
     assert result == [TEST_IP1]
+
+
+from terok_shield.state import StateBundle

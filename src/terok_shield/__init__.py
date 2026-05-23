@@ -47,6 +47,7 @@ from .podman_info import (
     parse_podman_info,
     system_hooks_dir,
 )
+from .state import StateBundle
 from .util import is_ip as _is_ip
 
 if TYPE_CHECKING:
@@ -198,7 +199,6 @@ class Shield:
                 [`HubEventEmitter`][terok_shield.HubEventEmitter] pointed at the canonical socket).
                 Pass a no-op stub in tests that should not touch the socket.
         """
-        from . import state
         from ._hub_events import HubEventEmitter
         from .audit import AuditLogger
         from .dns.resolver import DnsResolver
@@ -209,7 +209,7 @@ class Shield:
         self.config = config
         self.runner = runner or SubprocessRunner()
         self.audit = audit or AuditLogger(
-            audit_path=state.audit_path(config.state_dir),
+            audit_path=StateBundle(config.state_dir).audit,
             enabled=config.audit_enabled,
         )
         self.dns = dns or DnsResolver(runner=self.runner)
@@ -425,15 +425,13 @@ class Shield:
         force: bool = False,
     ) -> list[str]:
         """Resolve DNS profiles and cache the results."""
-        from . import state
-
         if profiles is None:
             profiles = list(self.config.default_profiles)
         entries = self.profiles.compose_profiles(profiles)
         if not entries:
             return []
         max_age = 0 if force else 3600
-        cache_path = state.profile_allowed_path(self.config.state_dir)
+        cache_path = StateBundle(self.config.state_dir).profile_allowed
         return self.dns.resolve_and_cache(entries, cache_path, max_age=max_age)
 
     def profiles_list(self) -> list[str]:

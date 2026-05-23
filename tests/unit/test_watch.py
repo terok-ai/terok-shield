@@ -1236,9 +1236,9 @@ class TestEnrichNflog:
 
     def test_refreshes_cache_on_miss(self, tmp_path: Path) -> None:
         """_enrich_nflog refreshes the cache when the IP is not initially mapped."""
-        from terok_shield import state as st
+        from terok_shield.state import StateBundle
 
-        log_path = st.dnsmasq_log_path(tmp_path)
+        log_path = StateBundle(tmp_path).dnsmasq_log
         log_path.write_text(f"reply {DNSMASQ_DOMAIN} is {TEST_IP1}\n")
         cache = DomainCache(tmp_path)
         event = WatchEvent(

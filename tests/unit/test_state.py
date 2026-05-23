@@ -5,33 +5,12 @@
 
 import os
 import stat
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
-from terok_shield.state import (
-    BUNDLE_VERSION,
-    STATE_DIR_MODE,
-    audit_path,
-    container_id_path,
-    denied_domains_path,
-    deny_path,
-    dns_tier_path,
-    dnsmasq_conf_path,
-    dnsmasq_pid_path,
-    ensure_state_dirs,
-    hook_entrypoint,
-    hook_json_path,
-    hooks_dir,
-    live_allowed_path,
-    live_domains_path,
-    profile_allowed_path,
-    profile_domains_path,
-    read_denied_ips,
-    read_effective_ips,
-    reader_pid_path,
-)
+from terok_shield.state import BUNDLE_VERSION, STATE_DIR_MODE, StateBundle
 
 from ..testfs import FAKE_STATE_DIR, READER_PID_FILENAME
 from ..testnet import TEST_IP1, TEST_IP2, TEST_IP3
@@ -44,34 +23,27 @@ def test_bundle_version_is_positive_int() -> None:
 
 
 @pytest.mark.parametrize(
-    ("path_fn", "expected"),
+    ("attr", "expected"),
     [
-        pytest.param(hooks_dir, FAKE_STATE_DIR / "hooks", id="hooks-dir"),
-        pytest.param(hook_entrypoint, FAKE_STATE_DIR / "terok-shield-hook", id="hook-entrypoint"),
-        pytest.param(
-            profile_allowed_path, FAKE_STATE_DIR / "profile.allowed", id="profile-allowed"
-        ),
-        pytest.param(live_allowed_path, FAKE_STATE_DIR / "live.allowed", id="live-allowed"),
-        pytest.param(deny_path, FAKE_STATE_DIR / "deny.list", id="deny-path"),
-        pytest.param(audit_path, FAKE_STATE_DIR / "audit.jsonl", id="audit-path"),
-        pytest.param(
-            profile_domains_path, FAKE_STATE_DIR / "profile.domains", id="profile-domains"
-        ),
-        pytest.param(dnsmasq_conf_path, FAKE_STATE_DIR / "dnsmasq.conf", id="dnsmasq-conf"),
-        pytest.param(dnsmasq_pid_path, FAKE_STATE_DIR / "dnsmasq.pid", id="dnsmasq-pid"),
-        pytest.param(dns_tier_path, FAKE_STATE_DIR / "dns.tier", id="dns-tier"),
-        pytest.param(live_domains_path, FAKE_STATE_DIR / "live.domains", id="live-domains"),
-        pytest.param(denied_domains_path, FAKE_STATE_DIR / "denied.domains", id="denied-domains"),
-        pytest.param(container_id_path, FAKE_STATE_DIR / "container.id", id="container-id"),
-        pytest.param(reader_pid_path, FAKE_STATE_DIR / READER_PID_FILENAME, id="reader-pid"),
+        pytest.param("hooks_dir", FAKE_STATE_DIR / "hooks", id="hooks-dir"),
+        pytest.param("hook_entrypoint", FAKE_STATE_DIR / "terok-shield-hook", id="hook-entrypoint"),
+        pytest.param("profile_allowed", FAKE_STATE_DIR / "profile.allowed", id="profile-allowed"),
+        pytest.param("live_allowed", FAKE_STATE_DIR / "live.allowed", id="live-allowed"),
+        pytest.param("deny", FAKE_STATE_DIR / "deny.list", id="deny-path"),
+        pytest.param("audit", FAKE_STATE_DIR / "audit.jsonl", id="audit-path"),
+        pytest.param("profile_domains", FAKE_STATE_DIR / "profile.domains", id="profile-domains"),
+        pytest.param("dnsmasq_conf", FAKE_STATE_DIR / "dnsmasq.conf", id="dnsmasq-conf"),
+        pytest.param("dnsmasq_pid", FAKE_STATE_DIR / "dnsmasq.pid", id="dnsmasq-pid"),
+        pytest.param("dns_tier", FAKE_STATE_DIR / "dns.tier", id="dns-tier"),
+        pytest.param("live_domains", FAKE_STATE_DIR / "live.domains", id="live-domains"),
+        pytest.param("denied_domains", FAKE_STATE_DIR / "denied.domains", id="denied-domains"),
+        pytest.param("container_id", FAKE_STATE_DIR / "container.id", id="container-id"),
+        pytest.param("reader_pid", FAKE_STATE_DIR / READER_PID_FILENAME, id="reader-pid"),
     ],
 )
-def test_path_derivation_functions(
-    path_fn: Callable[[Path], Path],
-    expected: Path,
-) -> None:
-    """Pure path helpers derive deterministic paths under the state dir."""
-    assert path_fn(FAKE_STATE_DIR) == expected
+def test_path_property(attr: str, expected: Path) -> None:
+    """Pure path properties derive deterministic paths under the state dir."""
+    assert getattr(StateBundle(FAKE_STATE_DIR), attr) == expected
 
 
 @pytest.mark.parametrize(
@@ -81,9 +53,9 @@ def test_path_derivation_functions(
         pytest.param("poststop", "terok-shield-poststop.json", id="poststop"),
     ],
 )
-def test_hook_json_path(stage: str, expected_name: str) -> None:
-    """hook_json_path() derives the per-stage OCI hook JSON filenames."""
-    assert hook_json_path(FAKE_STATE_DIR, stage) == FAKE_STATE_DIR / "hooks" / expected_name
+def test_hook_json(stage: str, expected_name: str) -> None:
+    """``StateBundle.hook_json(stage)`` derives the per-stage OCI hook JSON filenames."""
+    assert StateBundle(FAKE_STATE_DIR).hook_json(stage) == FAKE_STATE_DIR / "hooks" / expected_name
 
 
 @pytest.mark.parametrize(
@@ -93,24 +65,24 @@ def test_hook_json_path(stage: str, expected_name: str) -> None:
         pytest.param(Path("deep") / "nested" / "state", id="nested"),
     ],
 )
-def test_ensure_state_dirs_creates_required_directories(
+def test_ensure_dirs_creates_required_directories(
     tmp_path: Path,
     relative_state_dir: Path,
 ) -> None:
-    """ensure_state_dirs() creates the state dir and hooks subdirectory."""
-    state_dir = tmp_path / relative_state_dir
-    ensure_state_dirs(state_dir)
+    """``StateBundle.ensure_dirs()`` creates the state dir and hooks subdirectory."""
+    bundle = StateBundle(tmp_path / relative_state_dir)
+    bundle.ensure_dirs()
 
-    assert state_dir.is_dir()
-    assert hooks_dir(state_dir).is_dir()
+    assert bundle.state_dir.is_dir()
+    assert bundle.hooks_dir.is_dir()
 
 
-def test_ensure_state_dirs_is_idempotent(tmp_path: Path) -> None:
-    """ensure_state_dirs() is safe to call repeatedly."""
-    state_dir = tmp_path / "container-1"
-    ensure_state_dirs(state_dir)
-    ensure_state_dirs(state_dir)
-    assert state_dir.is_dir()
+def test_ensure_dirs_is_idempotent(tmp_path: Path) -> None:
+    """``StateBundle.ensure_dirs()`` is safe to call repeatedly."""
+    bundle = StateBundle(tmp_path / "container-1")
+    bundle.ensure_dirs()
+    bundle.ensure_dirs()
+    assert bundle.state_dir.is_dir()
 
 
 @pytest.fixture
@@ -128,7 +100,7 @@ def _mode(path: Path) -> int:
     return stat.S_IMODE(path.stat().st_mode)
 
 
-def test_ensure_state_dirs_forces_owner_only_mode(
+def test_ensure_dirs_forces_owner_only_mode(
     tmp_path: Path,
     loose_umask: None,
 ) -> None:
@@ -136,40 +108,39 @@ def test_ensure_state_dirs_forces_owner_only_mode(
 
     Regression test for the v0.6.35 ``_oci_state`` validator rejecting
     bundles created under ``umask 0o002`` (group-writable).  ``mkdir``
-    alone is umask-masked, so ``ensure_state_dirs`` must ``chmod``.
+    alone is umask-masked, so ``StateBundle.ensure_dirs()`` must ``chmod``.
     """
-    state_dir = tmp_path / "container-1"
+    bundle = StateBundle(tmp_path / "container-1")
+    bundle.ensure_dirs()
 
-    ensure_state_dirs(state_dir)
-
-    assert _mode(state_dir) == STATE_DIR_MODE
-    assert _mode(hooks_dir(state_dir)) == STATE_DIR_MODE
+    assert _mode(bundle.state_dir) == STATE_DIR_MODE
+    assert _mode(bundle.hooks_dir) == STATE_DIR_MODE
     # Validator-side invariant: no group/world write bits.
-    assert state_dir.stat().st_mode & 0o022 == 0
-    assert hooks_dir(state_dir).stat().st_mode & 0o022 == 0
+    assert bundle.state_dir.stat().st_mode & 0o022 == 0
+    assert bundle.hooks_dir.stat().st_mode & 0o022 == 0
 
 
-def test_ensure_state_dirs_repairs_loose_existing_mode(tmp_path: Path) -> None:
+def test_ensure_dirs_repairs_loose_existing_mode(tmp_path: Path) -> None:
     """A pre-existing too-permissive bundle is tightened on next call.
 
     Users hit by v0.6.35 with a 0o775 dir from a prior 0.6.34 run
     should recover automatically — no manual ``chmod`` required.
     """
-    state_dir = tmp_path / "container-1"
-    state_dir.mkdir()
-    hooks_dir(state_dir).mkdir()
-    state_dir.chmod(0o775)
-    hooks_dir(state_dir).chmod(0o775)
+    bundle = StateBundle(tmp_path / "container-1")
+    bundle.state_dir.mkdir()
+    bundle.hooks_dir.mkdir()
+    bundle.state_dir.chmod(0o775)
+    bundle.hooks_dir.chmod(0o775)
 
-    ensure_state_dirs(state_dir)
+    bundle.ensure_dirs()
 
-    assert _mode(state_dir) == STATE_DIR_MODE
-    assert _mode(hooks_dir(state_dir)) == STATE_DIR_MODE
+    assert _mode(bundle.state_dir) == STATE_DIR_MODE
+    assert _mode(bundle.hooks_dir) == STATE_DIR_MODE
 
 
 def test_read_denied_ips_empty_when_file_missing(tmp_path: Path) -> None:
-    """read_denied_ips() returns an empty set when deny.list is absent."""
-    assert read_denied_ips(tmp_path) == set()
+    """``StateBundle.read_denied_ips()`` returns an empty set when deny.list is absent."""
+    assert StateBundle(tmp_path).read_denied_ips() == set()
 
 
 @pytest.mark.parametrize(
@@ -180,30 +151,34 @@ def test_read_denied_ips_empty_when_file_missing(tmp_path: Path) -> None:
     ],
 )
 def test_read_denied_ips(tmp_path: Path, content: str, expected: set[str]) -> None:
-    """read_denied_ips() ignores blank lines while preserving denied entries."""
-    deny_path(tmp_path).write_text(content)
-    assert read_denied_ips(tmp_path) == expected
+    """``read_denied_ips()`` ignores blank lines while preserving denied entries."""
+    bundle = StateBundle(tmp_path)
+    bundle.deny.write_text(content)
+    assert bundle.read_denied_ips() == expected
 
 
 def test_read_effective_ips_subtracts_denied(tmp_path: Path) -> None:
     """Denied IPs are removed from the effective allow list."""
-    profile_allowed_path(tmp_path).write_text(f"{TEST_IP1}\n{TEST_IP2}\n")
-    deny_path(tmp_path).write_text(f"{TEST_IP1}\n")
-    assert read_effective_ips(tmp_path) == [TEST_IP2]
+    bundle = StateBundle(tmp_path)
+    bundle.profile_allowed.write_text(f"{TEST_IP1}\n{TEST_IP2}\n")
+    bundle.deny.write_text(f"{TEST_IP1}\n")
+    assert bundle.read_effective_ips() == [TEST_IP2]
 
 
 def test_read_effective_ips_without_deny_file_includes_live_entries(tmp_path: Path) -> None:
     """Without deny.list, effective IPs include both profile and live entries."""
-    profile_allowed_path(tmp_path).write_text(f"{TEST_IP1}\n{TEST_IP2}\n")
-    live_allowed_path(tmp_path).write_text(f"{TEST_IP3}\n")
-    assert read_effective_ips(tmp_path) == [TEST_IP1, TEST_IP2, TEST_IP3]
+    bundle = StateBundle(tmp_path)
+    bundle.profile_allowed.write_text(f"{TEST_IP1}\n{TEST_IP2}\n")
+    bundle.live_allowed.write_text(f"{TEST_IP3}\n")
+    assert bundle.read_effective_ips() == [TEST_IP1, TEST_IP2, TEST_IP3]
 
 
 def test_read_effective_ips_ignores_denied_entries_not_in_allowed_set(tmp_path: Path) -> None:
     """Unmatched deny.list entries do not affect the effective allow list."""
-    profile_allowed_path(tmp_path).write_text(f"{TEST_IP1}\n")
-    deny_path(tmp_path).write_text(f"{TEST_IP3}\n")
-    assert read_effective_ips(tmp_path) == [TEST_IP1]
+    bundle = StateBundle(tmp_path)
+    bundle.profile_allowed.write_text(f"{TEST_IP1}\n")
+    bundle.deny.write_text(f"{TEST_IP3}\n")
+    assert bundle.read_effective_ips() == [TEST_IP1]
 
 
 # ── ballast sync contract ────────────────────────────────────────────────────
@@ -225,23 +200,18 @@ def test_oci_state_bundle_version_matches_state() -> None:
     )
 
 
-def test_nft_hook_path_strings_match_state_functions() -> None:
-    """Path-name literals in ``nft_hook.py`` must match state path helpers.
+def test_nft_hook_path_strings_match_state_attributes() -> None:
+    """Path-name literals in ``nft_hook.py`` must match ``StateBundle`` properties.
 
     The stdlib-only script uses inline string literals for filenames
-    that state.py derives via path functions.  This test parses the
+    that ``StateBundle`` derives via properties.  This test parses the
     script with ``ast`` to collect only *code* string constants (not
-    comment text), so a rename in state.py triggers a failure here
+    comment text), so a rename in ``state.py`` triggers a failure here
     rather than a silent mismatch at runtime.
     """
     import ast
 
     from terok_shield.resources import nft_hook as _ep
-    from terok_shield.state import (
-        dnsmasq_conf_path,
-        dnsmasq_pid_path,
-        ruleset_path,
-    )
 
     source = Path(_ep.__file__).read_text()
     tree = ast.parse(source)
@@ -262,12 +232,12 @@ def test_nft_hook_path_strings_match_state_functions() -> None:
         and isinstance(node.value, str)
         and id(node) not in docstring_nodes
     }
-    root = Path("x")
+    bundle = StateBundle(Path("x"))
 
-    for fn in (ruleset_path, dnsmasq_conf_path, dnsmasq_pid_path):
-        filename = fn(root).name
+    for attr in ("ruleset", "dnsmasq_conf", "dnsmasq_pid"):
+        filename = getattr(bundle, attr).name
         assert filename in literals, (
-            f"hook_entrypoint.py has no code string literal {filename!r} but "
-            f"state.{fn.__name__}() returns that filename. "
-            "Update hook_entrypoint.py to match."
+            f"nft_hook.py has no code string literal {filename!r} but "
+            f"StateBundle.{attr} returns that filename. "
+            "Update nft_hook.py to match."
         )

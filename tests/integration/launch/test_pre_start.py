@@ -8,7 +8,7 @@ from unittest import mock
 
 import pytest
 
-from terok_shield import Shield, ShieldConfig, state
+from terok_shield import Shield, ShieldConfig
 
 from ..conftest import hooks_unavailable, nft_missing, podman_missing
 from ..helpers import assert_ruleset_applied
@@ -47,8 +47,8 @@ class TestShieldPreStart:
         shield = Shield(ShieldConfig(state_dir=sd))
         shield.pre_start("dns-test-ctr")
 
-        allowed = state.profile_allowed_path(sd)
-        domains = state.profile_domains_path(sd)
+        allowed = StateBundle(sd).profile_allowed
+        domains = StateBundle(sd).profile_domains
         dns_prepared = (allowed.is_file() and allowed.stat().st_size > 0) or (
             domains.is_file() and domains.stat().st_size > 0
         )
@@ -74,3 +74,6 @@ class TestFirewallApplied:
     def test_firewall_applied_via_hook(self, shielded_container: str) -> None:
         """A container started via the public API has firewall rules applied."""
         assert_ruleset_applied(shielded_container)
+
+
+from terok_shield.state import StateBundle

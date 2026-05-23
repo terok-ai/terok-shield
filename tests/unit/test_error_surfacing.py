@@ -21,6 +21,7 @@ from terok_shield.config import ShieldFileConfig
 from terok_shield.dns.dnsmasq import generate_config, read_domains
 from terok_shield.nft.constants import DNSMASQ_BIND_DEFAULT, PASTA_DNS
 from terok_shield.run import ExecError
+from terok_shield.state import StateBundle
 
 from ..testnet import TEST_DOMAIN, TEST_DOMAIN2
 
@@ -298,12 +299,11 @@ class TestDenyIpWarnings:
     @pytest.fixture
     def hook_mode(self, tmp_path: Path) -> tuple[mock.MagicMock, object]:
         """Create a minimal HookMode with a mock runner for deny_ip tests."""
-        from terok_shield import state
         from terok_shield.config import ShieldConfig, ShieldMode
         from terok_shield.hooks.mode import HookMode
         from terok_shield.nft.rules import RulesetBuilder
 
-        state.ensure_state_dirs(tmp_path)
+        StateBundle(tmp_path).ensure_dirs()
         config = ShieldConfig(state_dir=tmp_path, mode=ShieldMode.HOOK)
         runner = mock.MagicMock()
         audit = mock.MagicMock()

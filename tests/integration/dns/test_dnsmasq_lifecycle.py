@@ -19,7 +19,7 @@ from unittest import mock
 
 import pytest
 
-from terok_shield import Shield, ShieldConfig, state
+from terok_shield import Shield, ShieldConfig
 from terok_shield.config import DnsTier, detect_dns_tier
 from terok_shield.dns.dnsmasq import generate_config, nftset_entry, read_domains
 from terok_shield.nft.constants import DNSMASQ_BIND_DEFAULT, PASTA_DNS
@@ -121,9 +121,9 @@ class TestDnsmasqConfigGeneration:
 
     def test_config_written_to_state_dir(self, tmp_path: Path) -> None:
         """Config is written to the state directory alongside other state files."""
-        state.ensure_state_dirs(tmp_path)
-        conf_path = state.dnsmasq_conf_path(tmp_path)
-        pid_path = state.dnsmasq_pid_path(tmp_path)
+        StateBundle(tmp_path).ensure_dirs()
+        conf_path = StateBundle(tmp_path).dnsmasq_conf
+        pid_path = StateBundle(tmp_path).dnsmasq_pid
         config = generate_config(
             PASTA_DNS, ["example.org"], pid_path, listen_address=DNSMASQ_BIND_DEFAULT
         )
@@ -163,7 +163,7 @@ class TestPreStartDnsmasqTier:
             assert "--dns" not in args
             # resolv.conf volume mount replaces the old --dns flag
             vol_args = [args[i + 1] for i, v in enumerate(args) if v == "--volume"]
-            expected_mount = f"{state.resolv_conf_path(sd)}:/etc/resolv.conf:ro,Z"
+            expected_mount = f"{StateBundle(sd).resolv_conf}:/etc/resolv.conf:ro,Z"
             assert expected_mount in vol_args, (
                 f"expected exact resolv.conf mount {expected_mount!r}, got: {vol_args!r}"
             )
@@ -178,7 +178,7 @@ class TestPreStartDnsmasqTier:
             tier = _tier_from_args(args)
             if tier != "dnsmasq":
                 pytest.skip(f"pre_start selected tier '{tier}', not dnsmasq")
-            domains_path = state.profile_domains_path(sd)
+            domains_path = StateBundle(sd).profile_domains
             assert domains_path.is_file()
             domains = read_domains(domains_path)
             assert len(domains) > 0
@@ -247,7 +247,7 @@ class TestDnsmasqInContainer:
     def test_dnsmasq_pid_file_exists(self, dnsmasq_container) -> None:
         """dnsmasq PID file was written to state directory."""
         _name, sd, _shield = dnsmasq_container
-        pid_path = state.dnsmasq_pid_path(sd)
+        pid_path = StateBundle(sd).dnsmasq_pid
         assert pid_path.is_file()
         pid_str = pid_path.read_text().strip()
         assert pid_str.isdigit()
@@ -255,7 +255,7 @@ class TestDnsmasqInContainer:
     def test_dnsmasq_config_exists(self, dnsmasq_container) -> None:
         """dnsmasq config was generated in state directory."""
         _name, sd, _shield = dnsmasq_container
-        conf_path = state.dnsmasq_conf_path(sd)
+        conf_path = StateBundle(sd).dnsmasq_conf
         assert conf_path.is_file()
         config = conf_path.read_text()
         assert "listen-address=127.0.0.1" in config
@@ -264,7 +264,7 @@ class TestDnsmasqInContainer:
     def test_upstream_dns_persisted(self, dnsmasq_container) -> None:
         """Upstream DNS address was persisted to state."""
         _name, sd, _shield = dnsmasq_container
-        upstream_path = state.upstream_dns_path(sd)
+        upstream_path = StateBundle(sd).upstream_dns
         assert upstream_path.is_file()
         upstream = upstream_path.read_text().strip()
         assert upstream  # non-empty
@@ -301,7 +301,7 @@ class TestDnsmasqInContainer:
         """Container stop triggers the poststop hook, which kills dnsmasq."""
         name, sd, _shield = dnsmasq_container
 
-        pid_str = state.dnsmasq_pid_path(sd).read_text().strip()
+        pid_str = StateBundle(sd).dnsmasq_pid.read_text().strip()
         assert Path(f"/proc/{pid_str}/cmdline").exists(), (
             "dnsmasq should be running before container stop"
         )
@@ -355,7 +355,7 @@ class TestLiveDomainAllowDeny:
         """shield.allow(domain) adds the domain to live.domains."""
         name, sd, shield = shielded
         shield.allow(name, GOOGLE_DNS_DOMAIN)
-        domains = read_domains(state.live_domains_path(sd))
+        domains = read_domains(StateBundle(sd).live_domains)
         assert GOOGLE_DNS_DOMAIN in domains
 
     def test_deny_domain_adds_to_denied_domains(self, shielded) -> None:
@@ -363,7 +363,7 @@ class TestLiveDomainAllowDeny:
         name, sd, shield = shielded
         shield.allow(name, GOOGLE_DNS_DOMAIN)
         shield.deny(name, GOOGLE_DNS_DOMAIN)
-        denied = read_domains(state.denied_domains_path(sd))
+        denied = read_domains(StateBundle(sd).denied_domains)
         assert GOOGLE_DNS_DOMAIN in denied
 
     def test_allow_domain_populates_nft_set(self, shielded) -> None:
@@ -474,7 +474,7 @@ class TestRestartWithReusedStateDir:
 
             start_shielded_container(name, extra_args, IMAGE)
 
-            first_pid = state.dnsmasq_pid_path(sd).read_text().strip()
+            first_pid = StateBundle(sd).dnsmasq_pid.read_text().strip()
             assert first_pid.isdigit()
 
             # Stop and remove — poststop hook kills dnsmasq, PID file remains on disk
@@ -489,7 +489,7 @@ class TestRestartWithReusedStateDir:
             extra_args2 = shield.pre_start(name)
             start_shielded_container(name, extra_args2, IMAGE)
 
-            second_pid = state.dnsmasq_pid_path(sd).read_text().strip()
+            second_pid = StateBundle(sd).dnsmasq_pid.read_text().strip()
             assert second_pid.isdigit()
             assert second_pid != first_pid, (
                 "dnsmasq should have a new PID after re-creation with same state dir"
@@ -499,3 +499,6 @@ class TestRestartWithReusedStateDir:
             assert "127.0.0.1" in r.stdout
         finally:
             _podman_rm(name)
+
+
+from terok_shield.state import StateBundle

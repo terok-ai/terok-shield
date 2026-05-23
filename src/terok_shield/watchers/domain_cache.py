@@ -11,7 +11,7 @@ interactive session for NFLOG event enrichment.
 import re
 from pathlib import Path
 
-from .. import state
+from ..state import StateBundle
 
 # Matches dnsmasq reply/cached lines like:
 #   reply github.com is 140.82.121.4
@@ -23,7 +23,7 @@ class DomainCache:
 
     def __init__(self, state_dir: Path) -> None:
         """Initialise with the dnsmasq log path derived from *state_dir*."""
-        self._log_path = state.dnsmasq_log_path(state_dir)
+        self._log_path = StateBundle(state_dir).dnsmasq_log
         self._mapping: dict[str, str] = {}
 
     def lookup(self, ip: str) -> str:
