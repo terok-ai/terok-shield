@@ -22,6 +22,8 @@ from terok_shield.hooks.install import (
     _register_hooks_dir_in_containers_conf,
 )
 
+from ..testfs import PLACEHOLDER_ALT_HOOKS_DIR, PLACEHOLDER_HOOKS_DIR
+
 # ── Factory constructors ─────────────────────────────────
 
 
@@ -159,9 +161,9 @@ class TestRegisterHooksDir:
             "terok_shield.hooks.install._user_containers_conf",
             lambda: conf_dir / "containers.conf",
         )
-        _register_hooks_dir_in_containers_conf(Path("/my/hooks"))
+        _register_hooks_dir_in_containers_conf(Path(PLACEHOLDER_HOOKS_DIR))
         text = (conf_dir / "containers.conf").read_text()
-        assert 'hooks_dir = ["/my/hooks"]' in text
+        assert f'hooks_dir = ["{PLACEHOLDER_HOOKS_DIR}"]' in text
         assert text.count("[engine]") == 1
 
     def test_inserts_into_existing_engine_section(
@@ -174,10 +176,10 @@ class TestRegisterHooksDir:
             "terok_shield.hooks.install._user_containers_conf",
             lambda: conf,
         )
-        _register_hooks_dir_in_containers_conf(Path("/my/hooks"))
+        _register_hooks_dir_in_containers_conf(Path(PLACEHOLDER_HOOKS_DIR))
         text = conf.read_text()
         assert text.count("[engine]") == 1
-        assert 'hooks_dir = ["/my/hooks"]' in text
+        assert f'hooks_dir = ["{PLACEHOLDER_HOOKS_DIR}"]' in text
         assert 'image_copy_tmp_dir = "/data/tmp"' in text
 
     def test_preserves_comments(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -188,7 +190,7 @@ class TestRegisterHooksDir:
             "terok_shield.hooks.install._user_containers_conf",
             lambda: conf,
         )
-        _register_hooks_dir_in_containers_conf(Path("/my/hooks"))
+        _register_hooks_dir_in_containers_conf(Path(PLACEHOLDER_HOOKS_DIR))
         text = conf.read_text()
         assert "# My config" in text
         assert "# temp dir" in text
@@ -203,7 +205,7 @@ class TestRegisterHooksDir:
             "terok_shield.hooks.install._user_containers_conf",
             lambda: conf,
         )
-        _register_hooks_dir_in_containers_conf(Path("/my/hooks"))
+        _register_hooks_dir_in_containers_conf(Path(PLACEHOLDER_HOOKS_DIR))
         text = conf.read_text()
         assert text.count("[engine]") == 2  # one in comment, one real
         assert text.count("hooks_dir") == 1
@@ -213,12 +215,12 @@ class TestRegisterHooksDir:
     ) -> None:
         """No-op when hooks_dir already points to the right path."""
         conf = tmp_path / "containers.conf"
-        conf.write_text('[engine]\nhooks_dir = ["/my/hooks"]\n')
+        conf.write_text(f'[engine]\nhooks_dir = ["{PLACEHOLDER_HOOKS_DIR}"]\n')
         monkeypatch.setattr(
             "terok_shield.hooks.install._user_containers_conf",
             lambda: conf,
         )
-        _register_hooks_dir_in_containers_conf(Path("/my/hooks"))
+        _register_hooks_dir_in_containers_conf(Path(PLACEHOLDER_HOOKS_DIR))
         assert conf.read_text().count("hooks_dir") == 1
 
     def test_appends_engine_when_no_section(
@@ -231,23 +233,23 @@ class TestRegisterHooksDir:
             "terok_shield.hooks.install._user_containers_conf",
             lambda: conf,
         )
-        _register_hooks_dir_in_containers_conf(Path("/my/hooks"))
+        _register_hooks_dir_in_containers_conf(Path(PLACEHOLDER_HOOKS_DIR))
         text = conf.read_text()
         assert "[containers]" in text
         assert "[engine]" in text
-        assert 'hooks_dir = ["/my/hooks"]' in text
+        assert f'hooks_dir = ["{PLACEHOLDER_HOOKS_DIR}"]' in text
 
     def test_warns_when_different_hooks_dir_configured(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """Warns (does not modify) when hooks_dir is already set differently."""
         conf = tmp_path / "containers.conf"
-        conf.write_text('[engine]\nhooks_dir = ["/other/hooks"]\n')
+        conf.write_text(f'[engine]\nhooks_dir = ["{PLACEHOLDER_ALT_HOOKS_DIR}"]\n')
         monkeypatch.setattr(
             "terok_shield.hooks.install._user_containers_conf",
             lambda: conf,
         )
-        _register_hooks_dir_in_containers_conf(Path("/my/hooks"))
+        _register_hooks_dir_in_containers_conf(Path(PLACEHOLDER_HOOKS_DIR))
         assert "Warning" in capsys.readouterr().out
         assert conf.read_text().count("hooks_dir") == 1  # unchanged
 

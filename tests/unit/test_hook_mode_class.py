@@ -696,7 +696,9 @@ def test_pre_start_writes_ruleset_nft(
     assert "terok_shield" in content
 
 
-def test_hooks_installer_non_sudo_writes_role_files(tmp_path: Path, monkeypatch) -> None:
+def test_hooks_installer_non_sudo_writes_role_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A non-sudo install lays down nft + reader hooks, ballast, and reader resource."""
     from terok_shield.hooks.install import HooksInstaller
 
@@ -766,7 +768,9 @@ def test_install_hooks_honors_custom_entrypoint_name(tmp_path: Path) -> None:
     assert bridge_json["hook"]["path"] == str(target / "terok-shield-bridge-hook")
 
 
-def test_hooks_installer_sudo_uses_subprocess(tmp_path: Path, monkeypatch) -> None:
+def test_hooks_installer_sudo_uses_subprocess(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """``HooksInstaller(use_sudo=True).install()`` escalates writes via sudo."""
     from unittest import mock
 

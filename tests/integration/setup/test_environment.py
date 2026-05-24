@@ -80,6 +80,7 @@ class TestGlobalHooksSetup:
 
     def test_setup_user_hooks(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """``HooksInstaller`` (user scope) installs hooks and updates containers.conf."""
+        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
         hooks_dir = tmp_path / "hooks.d"
         conf_dir = tmp_path / "config" / "containers"
         monkeypatch.setattr(
@@ -103,15 +104,19 @@ class TestGlobalHooksSetup:
         assert str(hooks_dir) in text
         assert text.count("[engine]") == 1
 
-    def test_has_global_hooks_after_setup(self, tmp_path: Path) -> None:
+    def test_has_global_hooks_after_setup(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """``has_global_hooks`` flips True once ``HooksInstaller.install()`` runs."""
+        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
         hooks_dir = tmp_path / "hooks.d"
         assert not has_global_hooks([hooks_dir])
         HooksInstaller(target_dir=hooks_dir).install()
         assert has_global_hooks([hooks_dir])
 
-    def test_setup_idempotent(self, tmp_path: Path) -> None:
+    def test_setup_idempotent(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Running install twice doesn't break anything — file contents stay stable."""
+        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
         hooks_dir = tmp_path / "hooks.d"
         installer = HooksInstaller(target_dir=hooks_dir)
         installer.install()

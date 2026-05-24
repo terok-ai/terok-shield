@@ -71,3 +71,9 @@ READER_EVENTS_SOCK_FILENAME = "events.sock"
 READER_SCRIPT_FILENAME = "reader.py"
 READER_PID_FILENAME = "reader.pid"
 HOOK_ENTRYPOINT_PATH = "/opt/terok-shield-hook"
+
+# ── Placeholder hooks_dir literal (for containers.conf parser tests) ──
+# Tests insert this string into ``hooks_dir = [...]`` lines so the
+# assertion sites can reference one canonical literal.
+PLACEHOLDER_HOOKS_DIR = "/my/hooks"
+PLACEHOLDER_ALT_HOOKS_DIR = "/other/hooks"
