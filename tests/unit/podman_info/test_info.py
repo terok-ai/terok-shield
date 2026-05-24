@@ -10,7 +10,7 @@ from terok_shield.podman_info.info import _parse_version, parse_podman_info
 # ── Real podman info samples (from actual machines) ───────
 
 # Ubuntu 24.04 — podman 4.9.3, slirp4netns default, no rootlessNetworkCmd
-UBUNTU_2404_INFO = {
+UBUNTU_2404_INFO: dict[str, object] = {
     "host": {
         "pasta": {"executable": "/usr/bin/pasta", "package": "passt_0.0~git20240220"},
         "slirp4netns": {
@@ -22,7 +22,7 @@ UBUNTU_2404_INFO = {
 }
 
 # Debian 13 — podman 5.4.2, pasta default, rootlessNetworkCmd present
-DEBIAN_13_INFO = {
+DEBIAN_13_INFO: dict[str, object] = {
     "host": {
         "rootlessNetworkCmd": "pasta",
         "pasta": {"executable": "/usr/bin/pasta"},
@@ -32,7 +32,7 @@ DEBIAN_13_INFO = {
 }
 
 # Debian 12 — podman 4.3.1, slirp4netns only, no pasta at all
-DEBIAN_12_INFO = {
+DEBIAN_12_INFO: dict[str, object] = {
     "host": {
         "slirp4netns": {
             "executable": "/usr/bin/slirp4netns",
@@ -43,7 +43,7 @@ DEBIAN_12_INFO = {
 }
 
 # Fedora 43 — podman 5.8.0, pasta default, slirp4netns not installed
-FEDORA_43_INFO = {
+FEDORA_43_INFO: dict[str, object] = {
     "host": {
         "rootlessNetworkCmd": "pasta",
         "pasta": {"executable": "/usr/bin/pasta"},

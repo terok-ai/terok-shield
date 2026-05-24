@@ -64,6 +64,18 @@ KRUN_DNSMASQ_BIND = "169.254.1.3"  # Link-local dnsmasq bind under the krun runt
 
 SLIRP4NETNS_GATEWAY = "10.0.2.2"  # Default slirp4netns gateway
 SLIRP4NETNS_DNS = "10.0.2.3"  # Default slirp4netns DNS forwarder
+SLIRP4NETNS_CIDR_DEFAULT = "10.0.2.0/24"  # Default slirp4netns CIDR
+
+# Pasta's built-in link-local DNS forwarder address — the only resolver
+# reachable from inside a krun guest under terok-shield's nft policy
+# (see ``terok_shield.nft.constants.PASTA_DNS``).
+PASTA_LINK_LOCAL_DNS = "169.254.1.1"
+
+# Custom CIDR examples used to exercise the slirp4netns CIDR parser.
+TEST_CUSTOM_CIDR_192 = "192.168.0.0/24"
+TEST_CUSTOM_GATEWAY_192 = "192.168.0.2"
+TEST_CUSTOM_CIDR_172 = "172.16.0.0/24"
+TEST_CUSTOM_CIDR_10_1 = "10.1.0.0/16"
 
 # --8<-- [start:outbound-targets]
 # ── Allowed target: Cloudflare (anycast 1.1.1.1 + 1.0.0.1) ──
