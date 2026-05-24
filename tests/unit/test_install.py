@@ -147,6 +147,14 @@ class TestSudoEscalation:
         assert argv[:3] == ["sudo", "rm", "-f"]
         assert {Path(p).name for p in argv[3:]} == set(_INSTALLED_FILES)
 
+    def test_remove_via_sudo_empty_list_short_circuits(self) -> None:
+        """Empty paths list returns without shelling out — defensive guard."""
+        from terok_shield.hooks.install import _remove_via_sudo
+
+        with mock.patch("terok_shield.hooks.install.subprocess.run") as run:
+            _remove_via_sudo([])
+        run.assert_not_called()
+
 
 # ── containers.conf registration ─────────────────────────
 
