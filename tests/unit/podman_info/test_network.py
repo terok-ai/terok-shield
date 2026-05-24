@@ -118,3 +118,9 @@ class TestSlirp4netnsGateway:
     def test_malformed_cidr_falls_back_to_default(self) -> None:
         """Malformed CIDR override falls back to default gateway."""
         assert slirp4netns_gateway("not-a-cidr") == SLIRP4NETNS_GATEWAY
+
+    def test_engine_as_scalar_returns_empty(self, tmp_path: Path) -> None:
+        """Non-table ``engine = "value"`` is rejected — no AttributeError."""
+        conf = tmp_path / "containers.conf"
+        conf.write_text('engine = "scalar-not-table"\n')
+        assert _parse_network_cmd_options(conf) == []

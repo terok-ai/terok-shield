@@ -99,6 +99,15 @@ class TestHasGlobalHooks:
         """Returns False with no dirs to check."""
         assert not has_global_hooks([])
 
+    def test_default_dirs_auto_detected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """``hooks_dirs=None`` reaches for :func:`find_hooks_dirs` (default branch)."""
+        sentinel: list[Path] = []
+        monkeypatch.setattr(
+            "terok_shield.podman_info.hooks_dir.find_hooks_dirs",
+            lambda: sentinel,
+        )
+        assert not has_global_hooks()
+
 
 # ── _parse_hooks_dir_from_conf edge cases ────────────────
 
@@ -132,6 +141,18 @@ class TestParseHooksDirFromConf:
         """Empty hooks_dir list returns empty."""
         conf = tmp_path / "containers.conf"
         conf.write_text("[engine]\nhooks_dir = []\n")
+        assert _parse_hooks_dir_from_conf(conf) == []
+
+    def test_engine_as_scalar_returns_empty(self, tmp_path: Path) -> None:
+        """Non-table ``engine = "value"`` is rejected — no AttributeError."""
+        conf = tmp_path / "containers.conf"
+        conf.write_text('engine = "scalar-not-table"\n')
+        assert _parse_hooks_dir_from_conf(conf) == []
+
+    def test_hooks_dir_wrong_type_returns_empty(self, tmp_path: Path) -> None:
+        """``hooks_dir`` set to a non-list/non-string falls through to ``return []``."""
+        conf = tmp_path / "containers.conf"
+        conf.write_text("[engine]\nhooks_dir = 42\n")
         assert _parse_hooks_dir_from_conf(conf) == []
 
 
