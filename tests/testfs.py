@@ -77,3 +77,11 @@ HOOK_ENTRYPOINT_PATH = "/opt/terok-shield-hook"
 # assertion sites can reference one canonical literal.
 PLACEHOLDER_HOOKS_DIR = "/my/hooks"
 PLACEHOLDER_ALT_HOOKS_DIR = "/other/hooks"
+
+# ── Placeholder hooks_dir literals for user/system containers.conf tests ──
+# Used by ``tests/unit/podman_info/test_hooks_dir.py`` to seed the user
+# and system layers of containers.conf so the precedence order can be
+# asserted without touching real filesystem state.
+USER_HOOKS_DIR_LITERAL = "/user/hooks"
+SYSTEM_HOOKS_DIR_LITERAL = "/sys/hooks"
+SINGLE_HOOKS_PATH_LITERAL = "/single/path"

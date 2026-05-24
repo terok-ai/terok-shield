@@ -56,8 +56,11 @@ def _parse_network_cmd_options(path: Path) -> list[str]:
             data = tomllib.load(f)
     except (OSError, tomllib.TOMLDecodeError):
         return []
-    opts = data.get("engine", {}).get("network_cmd_options", [])
-    return [str(o) for o in opts if isinstance(o, str) and o] if isinstance(opts, list) else []
+    engine = data.get("engine")
+    if not isinstance(engine, dict):
+        return []
+    opts = engine.get("network_cmd_options", [])
+    return [o for o in opts if isinstance(o, str) and o] if isinstance(opts, list) else []
 
 
 def parse_resolv_conf(text: str) -> str:

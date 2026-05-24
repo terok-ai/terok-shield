@@ -95,7 +95,10 @@ def _parse_hooks_dir_from_conf(path: Path) -> list[str]:
             data = tomllib.load(f)
     except (OSError, tomllib.TOMLDecodeError):
         return []
-    hooks = data.get("engine", {}).get("hooks_dir", [])
+    engine = data.get("engine")
+    if not isinstance(engine, dict):
+        return []
+    hooks = engine.get("hooks_dir", [])
     if isinstance(hooks, list):
         return [str(h) for h in hooks if isinstance(h, str) and h]
     if isinstance(hooks, str) and hooks:

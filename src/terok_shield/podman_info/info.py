@@ -66,11 +66,17 @@ class PodmanInfo:
 def parse_podman_info(json_str: str) -> PodmanInfo:
     """Parse ``podman info -f json`` output into a [`PodmanInfo`][terok_shield.podman_info.info.PodmanInfo].
 
-    Returns a zero-version fallback on invalid input.
+    Returns a zero-version fallback on invalid or partially-malformed input —
+    every nested section is coerced through an ``isinstance(..., dict)``
+    guard so a scalar/list where a table is expected can never produce
+    an ``AttributeError``.
     """
     try:
         info = json.loads(json_str)
     except (json.JSONDecodeError, TypeError):
+        info = None
+
+    if not isinstance(info, dict):
         return PodmanInfo(
             version=(0,),
             rootless_network_cmd="",
@@ -78,15 +84,32 @@ def parse_podman_info(json_str: str) -> PodmanInfo:
             slirp4netns_executable="",
         )
 
-    host = info.get("host", {}) if isinstance(info, dict) else {}
-    version_section = info.get("version", {}) if isinstance(info, dict) else {}
+    host = _as_dict(info.get("host"))
+    version_section = _as_dict(info.get("version"))
+    pasta = _as_dict(host.get("pasta"))
+    slirp = _as_dict(host.get("slirp4netns"))
 
     return PodmanInfo(
-        version=_parse_version(version_section.get("Version", "0")),
-        rootless_network_cmd=host.get("rootlessNetworkCmd", ""),
-        pasta_executable=host.get("pasta", {}).get("executable", ""),
-        slirp4netns_executable=host.get("slirp4netns", {}).get("executable", ""),
+        version=_parse_version(_as_str(version_section.get("Version"), "0")),
+        rootless_network_cmd=_as_str(host.get("rootlessNetworkCmd")),
+        pasta_executable=_as_str(pasta.get("executable")),
+        slirp4netns_executable=_as_str(slirp.get("executable")),
     )
+
+
+def _as_dict(value: object) -> dict[str, object]:
+    """Return *value* when it is a dict, an empty dict otherwise.
+
+    Centralises the ``isinstance(..., dict)`` guard that
+    [`parse_podman_info`][terok_shield.podman_info.info.parse_podman_info]
+    needs at every level of the JSON tree.
+    """
+    return value if isinstance(value, dict) else {}
+
+
+def _as_str(value: object, default: str = "") -> str:
+    """Return *value* when it is a string, *default* otherwise."""
+    return value if isinstance(value, str) else default
 
 
 def _parse_version(version_str: str) -> tuple[int, ...]:
