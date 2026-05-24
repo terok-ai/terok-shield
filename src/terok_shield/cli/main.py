@@ -365,7 +365,7 @@ def _collect_all_audit_entries(state_root: Path, n: int) -> list[dict]:
 def _cmd_setup(*, root: bool, user: bool) -> None:
     """Install global OCI hooks for podman < 5.6.0 restart persistence."""
     from ..hooks.install import HooksInstaller
-    from ..podman_info import _user_containers_conf
+    from ..podman_info._conf import _user_containers_conf
 
     if root and user:
         raise ValueError("--root and --user are mutually exclusive")

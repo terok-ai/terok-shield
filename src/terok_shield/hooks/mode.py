@@ -59,14 +59,9 @@ from ..nft.rules import (
     delete_deny_elements_dual,
     safe_ip,
 )
-from ..podman_info import (
-    PodmanInfo,
-    global_hooks_hint,
-    has_global_hooks,
-    parse_podman_info,
-    parse_resolv_conf,
-    slirp4netns_gateway,
-)
+from ..podman_info.hooks_dir import global_hooks_hint, has_global_hooks
+from ..podman_info.info import PodmanInfo, parse_podman_info
+from ..podman_info.network import parse_resolv_conf, slirp4netns_gateway
 from ..run import ExecError, ShieldNeedsSetup
 from ..state import StateBundle
 from ..util import is_ip as _is_ip, is_ipv4

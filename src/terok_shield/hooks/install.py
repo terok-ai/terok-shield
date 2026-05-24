@@ -28,10 +28,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..config import ANNOTATION_KEY
-from ..podman_info import (
+from ..podman_info._conf import _user_containers_conf
+from ..podman_info.hooks_dir import (
     USER_HOOKS_DIR,
     _parse_hooks_dir_from_conf,
-    _user_containers_conf,
     system_hooks_dir,
 )
 from .reader_install import install_reader_resource
@@ -123,7 +123,7 @@ class HooksInstaller:
 
         Targets the best-existing of ``/etc/containers/oci/hooks.d``
         and ``/usr/share/containers/oci/hooks.d`` — see
-        [`system_hooks_dir`][terok_shield.podman_info.system_hooks_dir]
+        [`system_hooks_dir`][terok_shield.podman_info.hooks_dir.system_hooks_dir]
         for the resolution rule.
         """
         return cls(target_dir=system_hooks_dir(), use_sudo=True)
