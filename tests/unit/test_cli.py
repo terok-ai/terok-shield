@@ -50,6 +50,7 @@ from ..testnet import TEST_DOMAIN, TEST_IP1
 from .helpers import write_jsonl
 
 _CONTAINER = "test"
+_CONTAINER_ID = "deadbeefcafe1234"
 _IMAGE = "alpine:latest"
 
 
@@ -131,8 +132,8 @@ def force_hook_mode(monkeypatch: pytest.MonkeyPatch) -> None:
         pytest.param(["status"], "status", id="status"),
         pytest.param(["rules", _CONTAINER], "rules", id="rules"),
         pytest.param(["logs"], "logs", id="logs"),
-        pytest.param(["down", _CONTAINER], "down", id="down"),
-        pytest.param(["up", _CONTAINER], "up", id="up"),
+        pytest.param(["down", _CONTAINER, "--container-id", _CONTAINER_ID], "down", id="down"),
+        pytest.param(["up", _CONTAINER, "--container-id", _CONTAINER_ID], "up", id="up"),
         pytest.param(["preview"], "preview", id="preview"),
         pytest.param(["profiles"], "profiles", id="profiles"),
     ],
@@ -227,8 +228,30 @@ def test_logs_parser_supports_optional_container_and_count(parser: argparse.Argu
 
 def test_down_parser_supports_allow_all(parser: argparse.ArgumentParser) -> None:
     """down defaults to allow_all=False and flips with --all."""
-    assert not parser.parse_args(["down", "ctr"]).allow_all
-    assert parser.parse_args(["down", "ctr", "--all"]).allow_all
+    base = ["down", "ctr", "--container-id", _CONTAINER_ID]
+    assert not parser.parse_args(base).allow_all
+    assert parser.parse_args([*base, "--all"]).allow_all
+
+
+@pytest.mark.parametrize(
+    "verb",
+    [pytest.param("up", id="up"), pytest.param("down", id="down")],
+)
+def test_emit_verbs_require_container_id(parser: argparse.ArgumentParser, verb: str) -> None:
+    """The hub-emitting verbs reject argv without ``--container-id``.
+
+    The shield CLI has no host-wide fallback hub socket; every emit
+    needs the routing key supplied by the caller.  Argparse enforces
+    this via ``required=True`` on the ``--container-id`` option.
+    """
+    with pytest.raises(SystemExit):
+        parser.parse_args([verb, "ctr"])
+
+
+def test_container_id_parses_as_attribute(parser: argparse.ArgumentParser) -> None:
+    """``--container-id <uuid>`` lands on ``args.container_id``."""
+    parsed = parser.parse_args(["up", "ctr", "--container-id", _CONTAINER_ID])
+    assert parsed.container_id == _CONTAINER_ID
 
 
 @pytest.mark.parametrize(
@@ -527,15 +550,23 @@ def test_allow_and_deny_dispatch_to_shield(
     ("argv", "method_name", "expected_call"),
     [
         pytest.param(
-            ["down", _CONTAINER], "down", mock.call(_CONTAINER, allow_all=False), id="down"
+            ["down", _CONTAINER, "--container-id", _CONTAINER_ID],
+            "down",
+            mock.call(_CONTAINER, _CONTAINER_ID, allow_all=False),
+            id="down",
         ),
         pytest.param(
-            ["down", _CONTAINER, "--all"],
+            ["down", _CONTAINER, "--container-id", _CONTAINER_ID, "--all"],
             "down",
-            mock.call(_CONTAINER, allow_all=True),
+            mock.call(_CONTAINER, _CONTAINER_ID, allow_all=True),
             id="down-all",
         ),
-        pytest.param(["up", _CONTAINER], "up", mock.call(_CONTAINER), id="up"),
+        pytest.param(
+            ["up", _CONTAINER, "--container-id", _CONTAINER_ID],
+            "up",
+            mock.call(_CONTAINER, _CONTAINER_ID),
+            id="up",
+        ),
         pytest.param(
             ["preview"],
             "preview",
@@ -884,19 +915,18 @@ def test_build_config_loads_yaml(
     isolated_roots: tuple[Path, Path],
     write_config: Callable[[str], Path],
 ) -> None:
-    """_build_config() loads mode, profiles, ports, and audit settings from YAML."""
+    """_build_config() loads mode, profiles, and audit settings from YAML.
+
+    ``loopback_ports`` is *not* a config-file knob in the per-container
+    model — it lives in the state bundle, written by ``pre_start`` from
+    the caller-supplied ``ShieldConfig``.
+    """
     state_root, _ = isolated_roots
-    write_config(
-        "mode: hook\n"
-        "default_profiles: [base, dev-python]\n"
-        "loopback_ports: [1234, 5678]\n"
-        "audit:\n"
-        "  enabled: false\n"
-    )
+    write_config("mode: hook\ndefault_profiles: [base, dev-python]\naudit:\n  enabled: false\n")
     config = _build_config("ctr", state_dir_override=state_root)
     assert config.mode == ShieldMode.HOOK
     assert config.default_profiles == ("base", "dev-python")
-    assert config.loopback_ports == (1234, 5678)
+    assert config.loopback_ports == ()
     assert not config.audit_enabled
 
 
@@ -1048,35 +1078,26 @@ class TestSetupCommand:
     """Tests for the setup CLI command."""
 
     @mock.patch("terok_shield.hooks.install.HooksInstaller.install")
-    def test_setup_user(
+    def test_setup_installs(
         self,
         install: mock.Mock,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        """``setup --user`` dispatches to the user-scope installer."""
-        main(["setup", "--user"])
+        """``setup`` installs hooks to the canonical user-owned dir."""
+        main(["setup"])
         install.assert_called_once()
         out = capsys.readouterr().out
         assert "Done" in out
-        assert "user" in out
 
-    @mock.patch("terok_shield.hooks.install.HooksInstaller.install")
-    def test_setup_root(
-        self,
-        install: mock.Mock,
-        capsys: pytest.CaptureFixture[str],
-    ) -> None:
-        """``setup --root`` dispatches to the system-scope installer with sudo."""
-        main(["setup", "--root"])
-        install.assert_called_once()
-        out = capsys.readouterr().out
-        assert "Done" in out
-        assert "sudo" in out
-
-    def test_setup_root_and_user_rejected(self) -> None:
-        """setup --root --user raises."""
+    def test_setup_rejects_root_flag(self) -> None:
+        """``--root`` is gone; passing it is a parser error."""
         with pytest.raises(SystemExit):
-            main(["setup", "--root", "--user"])
+            main(["setup", "--root"])
+
+    def test_setup_rejects_user_flag(self) -> None:
+        """``--user`` is gone; the single layout is implicit."""
+        with pytest.raises(SystemExit):
+            main(["setup", "--user"])
 
 
 # ── check-environment command test ───────────────────────
@@ -1136,49 +1157,6 @@ def test_version_flag_podman_missing(
     out = capsys.readouterr().out
     assert "podman not found" in out
     assert "nft not found" in out
-
-
-# ── interactive setup test ───────────────────────────────
-
-
-class TestSetupInteractive:
-    """Tests for interactive setup mode."""
-
-    @mock.patch("terok_shield.hooks.install.HooksInstaller.install")
-    @mock.patch("builtins.input", return_value="u")
-    def test_interactive_user_choice(
-        self,
-        _input: mock.Mock,
-        install: mock.Mock,
-        capsys: pytest.CaptureFixture[str],
-    ) -> None:
-        """Interactive setup with 'u' choice installs user hooks."""
-        main(["setup"])
-        install.assert_called_once()
-        assert "Done" in capsys.readouterr().out
-
-    @mock.patch("builtins.input", return_value="x")
-    def test_interactive_cancel(
-        self,
-        _input: mock.Mock,
-        capsys: pytest.CaptureFixture[str],
-    ) -> None:
-        """Interactive setup with invalid choice cancels."""
-        main(["setup"])
-        assert "Cancelled" in capsys.readouterr().out
-
-    @mock.patch("terok_shield.hooks.install.HooksInstaller.install")
-    @mock.patch("builtins.input", return_value="r")
-    def test_interactive_root_choice(
-        self,
-        _input: mock.Mock,
-        install: mock.Mock,
-        capsys: pytest.CaptureFixture[str],
-    ) -> None:
-        """Interactive setup with 'r' choice uses sudo."""
-        main(["setup"])
-        install.assert_called_once()
-        assert "sudo" in capsys.readouterr().out
 
 
 def test_simple_clearance_command_routes_to_handler(cli_dispatch: CliDispatchHarness) -> None:

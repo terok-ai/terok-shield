@@ -41,12 +41,17 @@ ANN_STATE_DIR = "terok.shield.state_dir"
 ANN_VERSION = "terok.shield.version"
 """OCI annotation carrying the bundle version this container was prepared with."""
 
-BUNDLE_VERSION = 13
+BUNDLE_VERSION = 14
 """Wire-protocol version for the hook ↔ pre_start state-bundle contract.
 
 Bumped whenever the on-disk file layout, the hook → reader argv
 shape, or the wire payload changes incompatibly.  The nft hook hard-
 fails on a version mismatch — operator must re-run ``terok setup``.
+
+v14: per-container host-loopback TCP ports are persisted at pre_start
+time as ``state_dir/loopback.ports`` (newline-separated list) — the
+dynamically-allocated broker / signer ports the supervisor binds for
+this container.
 
 v13: ``dnsmasq.conf`` ``listen-address`` is runtime-dependent
 (``127.0.0.1`` by default; ``169.254.1.3`` under krun); the nft

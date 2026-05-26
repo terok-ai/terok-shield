@@ -78,7 +78,8 @@ def _bridge_main(oci: dict, sd: Path, stage: str, log_path: Path) -> None:
         _oci_state.log(f"terok-shield bridge hook: unknown stage {stage!r}", log_path)
         return
 
-    container_id = str(oci.get("id") or "")[:12]
+    full_container_id = str(oci.get("id") or "")
+    container_id = full_container_id[:12]
     if not container_id:
         _oci_state.log("terok-shield bridge hook: missing container id — skipping reader", log_path)
         return
@@ -90,7 +91,7 @@ def _bridge_main(oci: dict, sd: Path, stage: str, log_path: Path) -> None:
     # they need to resolve dossiers for their hub events.  Spawn is the
     # costly step; the file write is one syscall and soft-fails on its own.
     _oci_state.persist_meta_path(sd, dossier.get("meta_path", ""))
-    _spawn_reader(sd, container_id, dossier)
+    _spawn_reader(sd, container_id, dossier, full_container_id)
 
 
 def _extract_dossier(annotations: dict) -> dict[str, str]:
@@ -111,7 +112,12 @@ def _extract_dossier(annotations: dict) -> dict[str, str]:
     return out
 
 
-def _spawn_reader(sd: Path, container_id: str, dossier: dict[str, str] | None = None) -> None:
+def _spawn_reader(
+    sd: Path,
+    container_id: str,
+    dossier: dict[str, str] | None = None,
+    full_container_id: str = "",
+) -> None:
     """Start the NFLOG reader for *container_id* as a detached child.
 
     No-op when the reader script is missing (``--no-dbus-bridge``
@@ -125,6 +131,17 @@ def _spawn_reader(sd: Path, container_id: str, dossier: dict[str, str] | None = 
     forwarded to the reader as a JSON-encoded ``--annotations`` argv
     element so the reader (which composes the wire payload) doesn't
     re-parse the OCI state itself.
+
+    *full_container_id* — the full podman container UUID (not truncated).
+    Passed through as ``--container-id`` so the reader can resolve its
+    per-container ingester socket at
+    ``$XDG_RUNTIME_DIR/terok/events/<short_id>.sock`` (where
+    ``<short_id> = container_id[:12]``) — the path the per-container
+    supervisor ingests on, deliberately distinct from the varlink
+    subscriber socket at ``terok/clearance/<id>.sock`` that operator
+    UIs glob.  The hook bails out earlier when the OCI state has no
+    ``id`` field, so ``--container-id`` is always populated by the time
+    we Popen the reader.
     """
     reader = _reader_script_path()
     if not reader.exists():
@@ -162,6 +179,7 @@ def _spawn_reader(sd: Path, container_id: str, dossier: dict[str, str] | None = 
                 container_id,
                 "--emit=socket",
                 f"--annotations={annotations_json}",
+                f"--container-id={full_container_id}",
             ],
             env=env,
             stdin=subprocess.DEVNULL,
@@ -281,10 +299,18 @@ def _is_our_reader(pid_int: int, sd: Path) -> bool:
     return args[0].endswith(b"python3") and args[1] == script_bytes and sd_bytes in args[2:]
 
 
+#: Absolute path to the NFLOG reader script, baked into the hook by
+#: ``terok-shield setup`` at install time.  The literal placeholder
+#: below is what the installer rewrites; running this script
+#: unmodified is intentionally an error so a half-installed setup
+#: surfaces fast.  See [`terok_shield.paths.reader_script_path`][terok_shield.paths.reader_script_path]
+#: for the resolver the installer uses.
+_READER_SCRIPT_PATH: str = "__READER_SCRIPT_PATH__"
+
+
 def _reader_script_path() -> Path:
-    """Return the on-disk path ``terok setup`` places the reader script at."""
-    data_home = os.environ.get("XDG_DATA_HOME") or f"{os.environ.get('HOME', '')}/.local/share"
-    return Path(data_home) / "terok" / "shield" / "nflog-reader.py"
+    """Return the path the installer baked into this hook copy."""
+    return Path(_READER_SCRIPT_PATH)
 
 
 def _session_bus_address() -> str | None:

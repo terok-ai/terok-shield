@@ -78,7 +78,7 @@ depends_on = []
 [[modules]]
 path = "terok_shield._hub_events"
 layer = "foundation"
-depends_on = ["terok_shield._wire_sanitize"]
+depends_on = ["terok_shield._wire_sanitize", "terok_shield.validation"]
 
 # Producer-side wire-format sanitiser.  WIRE_SPEC(safe-string): the
 # canonical version lives in terok_clearance.wire.sanitize; keep both

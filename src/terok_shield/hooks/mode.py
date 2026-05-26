@@ -30,7 +30,6 @@ from ..config import (
     ANNOTATION_DNS_TIER_KEY,
     ANNOTATION_KEY,
     ANNOTATION_LIST_SEP,
-    ANNOTATION_LOOPBACK_PORTS_KEY,
     ANNOTATION_NAME_KEY,
     ANNOTATION_STATE_DIR_KEY,
     ANNOTATION_UPSTREAM_DNS_KEY,
@@ -142,11 +141,17 @@ class HookMode:
         upstream_dns = _upstream_dns_for_mode(mode)
         gw_v4, gw_v6 = self._gateways = _gateways_for_mode(mode)
 
-        # Resolve DNS, write allowlists, generate ruleset + dnsmasq config
+        # Resolve DNS, write allowlists, generate ruleset + dnsmasq config.
+        # ``loopback.ports`` is persisted before ``_write_ruleset`` runs so
+        # the builder reads ports from the bundle (SSOT): later up/down
+        # rebuilds use the same source.
         entries = self._profiles.compose_profiles(profiles)
         self._resolve_and_write_allowlists(sd, tier, entries)
         StateBundle(sd).upstream_dns.write_text(f"{upstream_dns}\n")
         StateBundle(sd).dns_tier.write_text(f"{tier.value}\n")
+        StateBundle(sd).loopback_ports.write_text(
+            "".join(f"{p}\n" for p in self._config.loopback_ports)
+        )
         self._write_ruleset(sd, tier, upstream_dns, gw_v4, gw_v6)
         self._write_dnsmasq_config_or_scrub(sd, tier, upstream_dns)
 
@@ -158,8 +163,9 @@ class HookMode:
         if tier == DnsTier.DNSMASQ:
             args += ["--volume", f"{StateBundle(sd).resolv_conf}:/etc/resolv.conf:ro,Z"]
 
-        # Annotations: profiles, name, state_dir, loopback_ports, version, dns
-        ports_str = ANNOTATION_LIST_SEP.join(str(p) for p in self._config.loopback_ports)
+        # Annotations: profiles, name, state_dir, version, dns.  loopback_ports
+        # lives in the state bundle (per-container, written above), not as an
+        # annotation — annotations are write-only on shield's side.
         args += [
             "--annotation",
             f"{ANNOTATION_KEY}={ANNOTATION_LIST_SEP.join(profiles)}",
@@ -167,8 +173,6 @@ class HookMode:
             f"{ANNOTATION_NAME_KEY}={container}",
             "--annotation",
             f"{ANNOTATION_STATE_DIR_KEY}={sd}",
-            "--annotation",
-            f"{ANNOTATION_LOOPBACK_PORTS_KEY}={ports_str}",
             "--annotation",
             f"{ANNOTATION_VERSION_KEY}={state.BUNDLE_VERSION}",
             "--annotation",
@@ -234,7 +238,7 @@ class HookMode:
         set_timeout = NFT_SET_TIMEOUT_DNSMASQ if tier == DnsTier.DNSMASQ else ""
         ruleset_builder = RulesetBuilder(
             dns=upstream_dns,
-            loopback_ports=self._config.loopback_ports,
+            loopback_ports=StateBundle(sd).read_loopback_ports(),
             gateway_v4=gw_v4,
             gateway_v6=gw_v6,
             set_timeout=set_timeout,
@@ -596,7 +600,7 @@ class HookMode:
         gw_v4, gw_v6 = self._gateways
         return RulesetBuilder(
             dns=dns,
-            loopback_ports=self._config.loopback_ports,
+            loopback_ports=StateBundle(sd).read_loopback_ports(),
             gateway_v4=gw_v4,
             gateway_v6=gw_v6,
             set_timeout=set_timeout,

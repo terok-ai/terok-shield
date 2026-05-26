@@ -17,11 +17,9 @@ to import from the specific submodule when intent is clearer.
 
 from .hooks_dir import (
     HOOK_JSON_FILENAME,
-    USER_HOOKS_DIR,
     find_hooks_dirs,
     global_hooks_hint,
     has_global_hooks,
-    system_hooks_dir,
 )
 from .info import HOOKS_DIR_PERSIST_VERSION, PodmanInfo, parse_podman_info
 from .network import parse_resolv_conf, parse_slirp4netns_cidr, slirp4netns_gateway
@@ -30,7 +28,6 @@ __all__ = [
     "HOOKS_DIR_PERSIST_VERSION",
     "HOOK_JSON_FILENAME",
     "PodmanInfo",
-    "USER_HOOKS_DIR",
     "find_hooks_dirs",
     "global_hooks_hint",
     "has_global_hooks",
@@ -38,5 +35,4 @@ __all__ = [
     "parse_resolv_conf",
     "parse_slirp4netns_cidr",
     "slirp4netns_gateway",
-    "system_hooks_dir",
 ]

@@ -106,16 +106,30 @@ def _handle_deny(shield: Shield, container: str, *, target: str) -> None:
         raise RuntimeError(f"No IPs denied for {container}")
 
 
-def _handle_down(shield: Shield, container: str, *, allow_all: bool = False) -> None:
-    """Switch container to bypass mode."""
-    shield.down(container, allow_all=allow_all)
+def _handle_down(
+    shield: Shield,
+    container: str,
+    *,
+    container_id: str,
+    allow_all: bool = False,
+) -> None:
+    """Switch container to bypass mode.
+
+    *container_id* — full podman UUID; supplied by the orchestrator at
+    the call site, used to route the hub event to the supervisor's
+    per-container socket.  Required, no default.
+    """
+    shield.down(container, container_id, allow_all=allow_all)
     label = " (all traffic)" if allow_all else ""
     print(f"Shield down for {container}{label}")
 
 
-def _handle_up(shield: Shield, container: str) -> None:
-    """Restore deny-all mode."""
-    shield.up(container)
+def _handle_up(shield: Shield, container: str, *, container_id: str) -> None:
+    """Restore deny-all mode.
+
+    *container_id* — see ``_handle_down``.
+    """
+    shield.up(container, container_id)
     print(f"Shield up for {container}")
 
 
@@ -206,6 +220,17 @@ _STANDALONE: dict[str, Any] = {"standalone_only": True}
 _NEEDS_CTR_STANDALONE: dict[str, Any] = {"needs_container": True, "standalone_only": True}
 
 
+# ``--container-id`` is the per-container hub socket routing key
+# (full podman UUID).  Every emit-bearing verb (``up`` / ``down``)
+# accepts it as a required option — the caller (terok-sandbox) knows
+# the full UUID at every site that runs ``terok-shield <verb>``.
+_CONTAINER_ID_ARG = ArgDef(
+    name="--container-id",
+    required=True,
+    help="Full podman container UUID — routes hub events to the per-container supervisor socket",
+)
+
+
 # ── Command definitions ───────────────────────────────────
 
 COMMANDS: tuple[CommandDef, ...] = (
@@ -272,6 +297,7 @@ COMMANDS: tuple[CommandDef, ...] = (
         handler=_handle_down,
         extras=_NEEDS_CTR,
         args=(
+            _CONTAINER_ID_ARG,
             ArgDef(
                 name="--all",
                 action="store_true",
@@ -285,6 +311,7 @@ COMMANDS: tuple[CommandDef, ...] = (
         help="Restore deny-all mode for a container",
         handler=_handle_up,
         extras=_NEEDS_CTR,
+        args=(_CONTAINER_ID_ARG,),
     ),
     CommandDef(
         name="quarantine",
@@ -329,10 +356,6 @@ COMMANDS: tuple[CommandDef, ...] = (
         name="setup",
         help="Install global OCI hooks for restart persistence",
         extras=_STANDALONE,
-        args=(
-            ArgDef(name="--root", action="store_true", help="Install system-wide (uses sudo)"),
-            ArgDef(name="--user", action="store_true", help="Install to user directory"),
-        ),
     ),
     CommandDef(
         name="check-environment",

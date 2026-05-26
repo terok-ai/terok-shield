@@ -11,6 +11,7 @@ from terok_shield.validation import (
     SAFE_CONTAINER,
     SAFE_NAME,
     parse_entries,
+    validate_container_id,
     validate_container_name,
     validate_safe_name,
 )
@@ -80,6 +81,38 @@ def test_validate_safe_name_rejects_unsafe_names(value: str) -> None:
     """``validate_safe_name()`` is stricter than container-name validation."""
     with pytest.raises(ValueError):
         validate_safe_name(value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param("deadbeefcafe", id="short-id-12"),
+        pytest.param("a" * 64, id="full-uuid-64"),
+        pytest.param("DEADBEEFCAFE1234", id="uppercase-hex"),
+    ],
+)
+def test_validate_container_id_accepts_hex_ids(value: str) -> None:
+    """``validate_container_id()`` preserves 12-to-64-char hex ids."""
+    assert validate_container_id(value) == value
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param("", id="empty"),
+        pytest.param(FORBIDDEN_TRAVERSAL, id="path-traversal"),
+        pytest.param("dead/beef/cafe", id="slash"),
+        pytest.param(FORBIDDEN_ABSOLUTE, id="absolute-path"),
+        pytest.param("deadbeef", id="too-short"),
+        pytest.param("g" * 16, id="non-hex"),
+        pytest.param("deadbeefcafe\nfoo", id="newline"),
+        pytest.param("a" * 65, id="too-long"),
+    ],
+)
+def test_validate_container_id_rejects_unsafe_ids(value: str) -> None:
+    """``validate_container_id()`` rejects traversal, separators, and non-hex."""
+    with pytest.raises(ValueError):
+        validate_container_id(value)
 
 
 @pytest.mark.parametrize(

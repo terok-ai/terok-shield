@@ -44,6 +44,16 @@ VOLUME_MOUNT_HOST = "/host:/ctr"
 VOLUME_MOUNT_DATA = "/data:/data"
 STATE_DIR_WITH_SPACES = "/path/with spaces/dir"
 
+# ── XDG runtime fallback prefix (rootless socket base) ──
+# When ``XDG_RUNTIME_DIR`` is unset, shield/reader paths fall back to
+# ``/run/user/<uid>/...``.  Tests assert against this prefix.
+
+RUN_USER_PREFIX = "/run/user/"
+
+# ── Installer-baked reader script path (templated by ``terok-shield setup``) ──
+# A representative absolute path the setup step bakes into the reader hook.
+READER_SCRIPT_BAKED_PATH = "/opt/terok/shield/nflog-reader.py"
+
 # ── Binary paths (for mocking shutil.which results) ──
 
 NFT_BINARY = "/usr/bin/nft"

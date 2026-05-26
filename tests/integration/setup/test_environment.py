@@ -47,7 +47,7 @@ class TestPodmanInfoDetection:
         env = shield.check_environment()
         assert isinstance(env, EnvironmentCheck)
         assert env.podman_version >= (4,)
-        assert env.hooks in ("global-system", "global-user", "not-installed")
+        assert env.hooks in ("global", "not-installed")
         assert env.health in ("ok", "setup-needed")
 
     def test_hooks_dir_detection(self) -> None:
@@ -79,29 +79,29 @@ class TestGlobalHooksSetup:
     """Test global hooks installation with real filesystem."""
 
     def test_setup_user_hooks(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """``HooksInstaller`` (user scope) installs hooks and updates containers.conf."""
+        """``HooksInstaller`` installs hooks and updates containers.conf."""
         monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
-        hooks_dir = tmp_path / "hooks.d"
+        target = tmp_path / "hooks"
         conf_dir = tmp_path / "config" / "containers"
         monkeypatch.setattr(
             "terok_shield.hooks.install._user_containers_conf",
             lambda: conf_dir / "containers.conf",
         )
 
-        HooksInstaller(target_dir=hooks_dir, register_in_containers_conf=True).install()
-        assert (hooks_dir / "terok-shield-createRuntime.json").is_file()
-        assert (hooks_dir / "terok-shield-poststop.json").is_file()
-        assert (hooks_dir / "terok-shield-hook").is_file()
+        HooksInstaller(target_dir=target).install()
+        assert (target / "terok-shield-createRuntime.json").is_file()
+        assert (target / "terok-shield-poststop.json").is_file()
+        assert (target / "terok-shield-hook").is_file()
 
         # Verify entrypoint is executable
-        hook = hooks_dir / "terok-shield-hook"
+        hook = target / "terok-shield-hook"
         assert hook.stat().st_mode & 0o100
 
-        # containers.conf was patched as part of the user-scope install.
+        # containers.conf was patched as part of the install.
         conf = conf_dir / "containers.conf"
         assert conf.is_file()
         text = conf.read_text()
-        assert str(hooks_dir) in text
+        assert str(target) in text
         assert text.count("[engine]") == 1
 
     def test_has_global_hooks_after_setup(
@@ -109,17 +109,25 @@ class TestGlobalHooksSetup:
     ) -> None:
         """``has_global_hooks`` flips True once ``HooksInstaller.install()`` runs."""
         monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
-        hooks_dir = tmp_path / "hooks.d"
-        assert not has_global_hooks([hooks_dir])
-        HooksInstaller(target_dir=hooks_dir).install()
-        assert has_global_hooks([hooks_dir])
+        target = tmp_path / "hooks"
+        monkeypatch.setattr(
+            "terok_shield.hooks.install._user_containers_conf",
+            lambda: tmp_path / "containers.conf",
+        )
+        assert not has_global_hooks([target])
+        HooksInstaller(target_dir=target).install()
+        assert has_global_hooks([target])
 
     def test_setup_idempotent(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Running install twice doesn't break anything — file contents stay stable."""
         monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
-        hooks_dir = tmp_path / "hooks.d"
-        installer = HooksInstaller(target_dir=hooks_dir)
+        target = tmp_path / "hooks"
+        monkeypatch.setattr(
+            "terok_shield.hooks.install._user_containers_conf",
+            lambda: tmp_path / "containers.conf",
+        )
+        installer = HooksInstaller(target_dir=target)
         installer.install()
-        first_content = (hooks_dir / "terok-shield-hook").read_text()
+        first_content = (target / "terok-shield-hook").read_text()
         installer.install()
-        assert (hooks_dir / "terok-shield-hook").read_text() == first_content
+        assert (target / "terok-shield-hook").read_text() == first_content

@@ -170,20 +170,26 @@ def main() -> None:  # pragma: no cover — real argparse + subprocess re-exec
     On first entry (``_TEROK_SHIELD_NFLOG_NSENTER`` unset) this process re-execs
     itself under ``nsenter`` — with ``podman unshare`` prepended when we're not
     already in ``NS_ROOTLESS`` — so the NFLOG bind happens in the container's
-    netns.  The re-exec carries the same ``--emit`` and ``--annotations`` choice
-    forward, so the destination (unix socket or stdout JSON) and the orchestrator
-    dossier stay whatever the caller picked.
+    netns.  The re-exec carries the same ``--emit``, ``--annotations``,
+    ``--container-id`` and ``--hub-socket`` choice forward, so the destination
+    (unix socket or stdout JSON), the per-container hub path, and the
+    orchestrator dossier all stay whatever the caller picked.
     """
     args = _parse_args()
     logging.basicConfig(level=logging.INFO, format="nflog-reader: %(message)s")
 
     if os.environ.get(_NSENTER_ENV) != "1":
         _reexec_inside_container_netns(
-            args.state_dir, args.container, args.emit, args.annotations_raw
+            args.state_dir,
+            args.container,
+            args.emit,
+            args.annotations_raw,
+            args.container_id,
+            args.hub_socket,
         )
         return
 
-    emitter = _select_emitter(args.emit)
+    emitter = _select_emitter(args.emit, args.container_id, args.hub_socket)
     session = ReaderSession(
         state_dir=args.state_dir,
         container=args.container,
@@ -196,17 +202,56 @@ def main() -> None:  # pragma: no cover — real argparse + subprocess re-exec
         emitter.close()
 
 
-def _select_emitter(mode: str) -> EventEmitter:
-    """Pick the emitter matching ``--emit`` — socket by default, JSON for the CLI."""
+def _select_emitter(mode: str, container_id: str = "", hub_socket: str = "") -> EventEmitter:
+    """Pick the emitter matching ``--emit`` — socket by default, JSON for the CLI.
+
+    The socket emitter's target is resolved by ``_resolve_hub_socket_path``,
+    which honours an explicit ``--hub-socket`` override or a per-container
+    path derived from ``--container-id``.
+    """
     if mode == "json":
         return JsonEmitter()
-    return SocketEmitter(_events_socket_path())
+    return SocketEmitter(_resolve_hub_socket_path(container_id, hub_socket))
 
 
-def _events_socket_path() -> Path:
-    """Return the canonical hub-ingester socket path (mirrors ``terok_clearance``)."""
+def _resolve_hub_socket_path(container_id: str = "", hub_socket: str = "") -> Path:
+    """Return the hub-ingester socket path the reader should connect to.
+
+    Resolution order, matching the per-container-supervisor model:
+
+    1. ``--hub-socket`` (verbatim) — operator / supervisor explicitly pointed
+       us at a socket.  Wins outright.
+    2. ``--container-id`` — build the per-container path under
+       ``$XDG_RUNTIME_DIR/terok/events/<container_id>.sock``.  The
+       supervisor for *this* container ingests there.  This is the
+       reader-facing *ingester* socket and is deliberately distinct from
+       the varlink subscriber socket at ``terok/clearance/<id>.sock``
+       (which operator UIs glob and connect to) — the reader speaks raw
+       line-JSON, not varlink, so the two roles need separate sockets.
+
+    Raises ``SystemExit`` when neither is supplied — the OCI bridge hook
+    always passes ``--container-id``, so a missing value indicates a
+    misconfigured direct CLI invocation rather than a runtime fallback.
+
+    ``XDG_RUNTIME_DIR`` is honoured when set; the hook always exports it
+    (``_oci_state.bootstrap_env``) before spawning the reader, so the
+    ``os.getuid()`` fallback only ever fires on a direct CLI invocation
+    in the operator's own user namespace.
+    """
+    if hub_socket:
+        return Path(hub_socket)
+    if not container_id:
+        raise SystemExit(
+            "neither --hub-socket nor --container-id supplied; cannot resolve hub socket"
+        )
+    # AF_UNIX's ``sun_path`` is 108 bytes; the full 64-char container
+    # UUID under ``$XDG_RUNTIME_DIR/terok/events/<id>.sock`` lands
+    # right at the limit.  Use the 12-char podman short-ID convention,
+    # matching terok-sandbox supervisor's [`SupervisorPaths.for_container`][terok_sandbox.supervisor.main.SupervisorPaths.for_container]
+    # — both sides agree on the same per-container ingester socket name.
+    short_id = container_id[:12]
     xdg = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
-    return Path(xdg) / "terok-shield-events.sock"
+    return Path(xdg) / "terok" / "events" / f"{short_id}.sock"
 
 
 # ── nsenter re-exec ───────────────────────────────────────────────────
@@ -217,7 +262,12 @@ def _events_socket_path() -> Path:
 
 
 def _reexec_inside_container_netns(
-    state_dir: Path, container: str, emit: str, annotations_raw: str
+    state_dir: Path,
+    container: str,
+    emit: str,
+    annotations_raw: str,
+    container_id: str,
+    hub_socket: str,
 ) -> None:  # pragma: no cover — real subprocess re-exec
     """Re-enter this script inside the container's netns so NFLOG is reachable.
 
@@ -231,6 +281,12 @@ def _reexec_inside_container_netns(
     arrived avoids one round of dict→JSON re-encoding (and the dict-key-order
     drift it would inflict on the cmdline that ``_is_our_reader`` later compares
     against).
+
+    ``container_id`` (per-container hub socket key) and ``hub_socket``
+    (explicit override) flow through unchanged so the second invocation
+    resolves the same socket path the first one did — empty strings are
+    forwarded as empty-valued flags rather than omitting the flag, which
+    keeps the cmdline shape stable for ``_is_our_reader``.
     """
     pid = _podman_container_pid(container)
     script = Path(__file__).resolve()
@@ -244,6 +300,8 @@ def _reexec_inside_container_netns(
         container,
         f"--emit={emit}",
         f"--annotations={annotations_raw}",
+        f"--container-id={container_id}",
+        f"--hub-socket={hub_socket}",
     ]
     cmd = (
         [nsenter, "-t", pid, "-n", *tail]
@@ -956,6 +1014,25 @@ def _parse_args() -> argparse.Namespace:  # pragma: no cover — thin argparse w
             "container_name, meta_path, …) extracted from the container's "
             "``dossier.*`` OCI annotations.  Forwarded verbatim through the "
             "nsenter re-exec; defaults to ``{}`` for orchestrator-less use."
+        ),
+    )
+    parser.add_argument(
+        "--container-id",
+        default="",
+        help=(
+            "Full podman container UUID used to construct the per-container "
+            "ingester socket path (``$XDG_RUNTIME_DIR/terok/events/<id>.sock``).  "
+            "Set by the OCI bridge hook from the container's full id; required "
+            "unless ``--hub-socket`` is given."
+        ),
+    )
+    parser.add_argument(
+        "--hub-socket",
+        default="",
+        help=(
+            "Explicit hub-ingester socket path — overrides the per-container "
+            "default derived from ``--container-id``.  Lets a supervisor point "
+            "the reader at any socket directly without exposing UUID conventions."
         ),
     )
     args = parser.parse_args()

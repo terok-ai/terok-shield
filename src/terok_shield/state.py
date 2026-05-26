@@ -19,6 +19,7 @@ Bundle layout::
     ├── ruleset.nft                    # pre-generated nft ruleset (gateways baked in)
     ├── upstream.dns                   # upstream DNS address
     ├── dns.tier                       # active DNS tier (dig/getent/dnsmasq)
+    ├── loopback.ports                 # per-container host-loopback TCP ports (newline-separated)
     ├── profile.allowed                # IPs from DNS resolution
     ├── profile.domains                # domain names for dnsmasq config
     ├── live.allowed                   # IPs from allow/deny
@@ -41,7 +42,7 @@ from pathlib import Path
 
 from .paths import HOOK_ENTRYPOINT_NAME
 
-BUNDLE_VERSION = 13
+BUNDLE_VERSION = 14
 """Integer version of the state bundle layout.
 
 Bumped whenever the file layout changes in a backwards-incompatible way.
@@ -51,11 +52,10 @@ stale on-disk entrypoint — bump it whenever the entrypoint *protocol*
 changes even if the file layout itself is unchanged, so that
 ``terok setup`` rewrites the script instead of short-circuiting.
 
-Current shape (v13): ``dnsmasq.conf`` ``listen-address`` is runtime-
-dependent (``127.0.0.1`` by default, link-local under krun); the OCI
-hook runs ``ip addr add`` inside the netns for non-loopback binds
-before launching dnsmasq.  Earlier shapes are recoverable via
-``git log -L /^BUNDLE_VERSION/:src/terok_shield/state.py``.
+Current shape (v14): ``loopback.ports`` carries the per-container
+host-loopback TCP ports (the broker / signer ports the supervisor
+binds), persisted at pre_start time.  Earlier shapes are recoverable
+via ``git log -L /^BUNDLE_VERSION/:src/terok_shield/state.py``.
 """
 
 
@@ -120,6 +120,30 @@ class StateBundle:
     def dns_tier(self) -> Path:
         """Path to the persisted DNS tier value."""
         return self.state_dir / "dns.tier"
+
+    @property
+    def loopback_ports(self) -> Path:
+        """Path to the per-container host-loopback TCP ports list.
+
+        Written by ``HookMode.pre_start`` from the caller-supplied
+        ``ShieldConfig.loopback_ports`` (the per-container triple of
+        gate / token-broker / ssh-signer ports the supervisor binds).
+        Read back by ``shield_up`` / ``shield_down`` when they rebuild
+        the nft ruleset — so a fresh ``Shield`` constructed without
+        the override still emits the correct
+        ``tcp dport <p> ip daddr 10.0.2.2 accept`` rules.
+        """
+        return self.state_dir / "loopback.ports"
+
+    def read_loopback_ports(self) -> tuple[int, ...]:
+        """Read persisted loopback ports; empty tuple when the file is absent."""
+        if not self.loopback_ports.is_file():
+            return ()
+        return tuple(
+            int(line.strip())
+            for line in self.loopback_ports.read_text().splitlines()
+            if line.strip()
+        )
 
     # ── Allowlists and denylists ───────────────────────────
 

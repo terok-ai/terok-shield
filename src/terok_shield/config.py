@@ -20,7 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # ── OCI annotation keys ─────────────────────────────────
 
-# Delimiter for list-valued annotations (profiles, loopback_ports).
+# Delimiter for list-valued annotations (profiles).
 # Podman ≤4.9.x registers --annotation as StringSliceVar (pflag), which
 # splits values on commas.  Fixed in 5.0.0 (containers/podman#20945).
 # Colons are safe across all versions.
@@ -29,7 +29,6 @@ ANNOTATION_LIST_SEP = ":"
 ANNOTATION_KEY = "terok.shield.profiles"
 ANNOTATION_NAME_KEY = "terok.shield.name"
 ANNOTATION_STATE_DIR_KEY = "terok.shield.state_dir"
-ANNOTATION_LOOPBACK_PORTS_KEY = "terok.shield.loopback_ports"
 ANNOTATION_VERSION_KEY = "terok.shield.version"
 ANNOTATION_AUDIT_ENABLED_KEY = "terok.shield.audit_enabled"
 ANNOTATION_UPSTREAM_DNS_KEY = "terok.shield.upstream_dns"
@@ -191,10 +190,6 @@ class ShieldFileConfig(BaseModel):
         default_factory=lambda: ["dev-standard"],
         description="Profiles applied when no explicit list is given",
     )
-    loopback_ports: list[int] = Field(
-        default_factory=list,
-        description="TCP ports forwarded to host loopback (via pasta ``-T``)",
-    )
     audit: AuditFileConfig = Field(
         default_factory=AuditFileConfig, description="Audit logging settings"
     )
@@ -207,23 +202,6 @@ class ShieldFileConfig(BaseModel):
         if not v or not all(isinstance(p, str) and p for p in v):
             raise ValueError("each profile must be a non-empty string")
         return v
-
-    @field_validator("loopback_ports", mode="before")
-    @classmethod
-    def _ports_validated(cls, v: object) -> list[int]:
-        """Validate port entries: reject bools, enforce 1-65535 range."""
-        if isinstance(v, int) and not isinstance(v, bool):
-            v = [v]
-        if not isinstance(v, list):
-            raise ValueError(f"expected list of ints, got {type(v).__name__}")
-        ports: list[int] = []
-        for item in v:
-            if isinstance(item, bool) or not isinstance(item, int):
-                raise ValueError(f"expected integer port, got {type(item).__name__}: {item!r}")
-            if not (1 <= item <= 65535):
-                raise ValueError(f"port {item} out of range 1–65535")
-            ports.append(item)
-        return ports
 
 
 # ── ShieldModeBackend protocol ──────────────────────────

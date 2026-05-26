@@ -23,7 +23,7 @@ import pytest
 
 from terok_shield.resources import _oci_state, reader_hook
 
-from ..testfs import HOOK_ENTRYPOINT_PATH
+from ..testfs import HOOK_ENTRYPOINT_PATH, READER_SCRIPT_BAKED_PATH
 
 _CONTAINER_ID = "c" * 64
 _SHORT_ID = _CONTAINER_ID[:12]
@@ -77,7 +77,7 @@ class TestBridgeDispatch:
         oci = _oci_json(str(tmp_path))
         with mock.patch.object(reader_hook, "_spawn_reader") as spawn:
             _run_bridge(oci, stage="createRuntime")
-        spawn.assert_called_once_with(tmp_path, _SHORT_ID, {})
+        spawn.assert_called_once_with(tmp_path, _SHORT_ID, {}, _CONTAINER_ID)
 
     def test_createruntime_extracts_dossier_annotations(self, tmp_path: Path) -> None:
         """``dossier.*`` annotations are stripped of their prefix and passed through."""
@@ -107,6 +107,7 @@ class TestBridgeDispatch:
                 "project": "terok",
                 "meta_path": "/var/lib/terok/tasks/abc.json",
             },
+            _CONTAINER_ID,
         )
 
     def test_poststop_invokes_reap_reader(self, tmp_path: Path) -> None:
@@ -301,7 +302,7 @@ class TestSpawnReader:
             ),
             mock.patch.object(_oci_state.subprocess, "Popen", return_value=fake_proc) as popen,
         ):
-            reader_hook._spawn_reader(tmp_path, _SHORT_ID)
+            reader_hook._spawn_reader(tmp_path, _SHORT_ID, full_container_id=_CONTAINER_ID)
         assert (tmp_path / "reader.pid").read_text().strip() == "12345"
         cmd = popen.call_args[0][0]
         assert cmd[:2] == ["/usr/bin/python3", str(reader)]
@@ -310,6 +311,8 @@ class TestSpawnReader:
         assert "--emit=socket" in cmd
         # Default-empty dossier is still serialised so the reader's argparse always sees the flag.
         assert "--annotations={}" in cmd
+        # Full UUID flows through so the reader resolves the per-container hub socket.
+        assert f"--container-id={_CONTAINER_ID}" in cmd
         env = popen.call_args[1]["env"]
         assert env["DBUS_SESSION_BUS_ADDRESS"] == "unix:path=/run/user/1000/bus"
         assert popen.call_args[1]["start_new_session"] is True
@@ -331,6 +334,23 @@ class TestSpawnReader:
         cmd = popen.call_args[0][0]
         ann_arg = next(a for a in cmd if a.startswith("--annotations="))
         assert json.loads(ann_arg.removeprefix("--annotations=")) == dossier
+
+    def test_full_container_id_is_forwarded_as_container_id_argv(self, tmp_path: Path) -> None:
+        """The full UUID lands as ``--container-id=<uuid>`` so the reader can key the per-container hub socket."""
+        reader = tmp_path / "reader.py"
+        reader.touch()
+        fake_proc = mock.MagicMock(pid=12345)
+        with (
+            mock.patch.object(reader_hook, "_reader_script_path", return_value=reader),
+            mock.patch.object(
+                reader_hook, "_session_bus_address", return_value="unix:path=/run/user/1000/bus"
+            ),
+            mock.patch.object(_oci_state.subprocess, "Popen", return_value=fake_proc) as popen,
+        ):
+            reader_hook._spawn_reader(tmp_path, _SHORT_ID, full_container_id=_CONTAINER_ID)
+        cmd = popen.call_args[0][0]
+        cid_arg = next(a for a in cmd if a.startswith("--container-id="))
+        assert cid_arg.removeprefix("--container-id=") == _CONTAINER_ID
 
     def test_idempotent_when_reader_already_alive(self, tmp_path: Path) -> None:
         reader = tmp_path / "reader.py"
@@ -473,6 +493,9 @@ class TestIsOurReader:
             + b"\x00"
             + str(tmp_path).encode()
             + b"\x00cccccccccccc\x00--emit=socket\x00--annotations={}\x00"
+            + b"--container-id="
+            + _CONTAINER_ID.encode()
+            + b"\x00"
         )
         with (
             mock.patch.object(reader_hook, "_reader_script_path", return_value=reader),
@@ -661,22 +684,17 @@ class TestPidExists:
 
 
 class TestReaderScriptPath:
-    """``_reader_script_path`` honours XDG, falls back under HOME."""
+    """``_reader_script_path`` returns the installer-baked path verbatim.
 
-    def test_xdg_data_home_wins(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
-        assert reader_hook._reader_script_path() == (
-            tmp_path / "terok" / "shield" / "nflog-reader.py"
-        )
+    The hook script no longer guesses an XDG location at runtime;
+    ``terok-shield setup`` writes a templated copy with the resolved
+    [`reader_script_path()`][terok_shield.paths.reader_script_path]
+    (which honours ``paths.root``) baked into ``_READER_SCRIPT_PATH``.
+    """
 
-    def test_falls_back_to_home_local_share(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        monkeypatch.delenv("XDG_DATA_HOME", raising=False)
-        monkeypatch.setenv("HOME", str(tmp_path))
-        assert reader_hook._reader_script_path() == (
-            tmp_path / ".local" / "share" / "terok" / "shield" / "nflog-reader.py"
-        )
+    def test_returns_baked_constant(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(reader_hook, "_READER_SCRIPT_PATH", READER_SCRIPT_BAKED_PATH)
+        assert reader_hook._reader_script_path() == Path(READER_SCRIPT_BAKED_PATH)
 
 
 class TestPersistMetaPath:

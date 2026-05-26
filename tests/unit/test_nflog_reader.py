@@ -21,7 +21,12 @@ import pytest
 
 from terok_shield.resources import nflog_reader as reader
 
-from ..testfs import AUDIT_FILENAME, DNSMASQ_LOG_FILENAME, READER_EVENTS_SOCK_FILENAME
+from ..testfs import (
+    AUDIT_FILENAME,
+    DNSMASQ_LOG_FILENAME,
+    READER_EVENTS_SOCK_FILENAME,
+    RUN_USER_PREFIX,
+)
 from ..testnet import (
     DNSMASQ_DOMAIN,
     IPV6_MCAST_ALL_ROUTERS,
@@ -142,8 +147,38 @@ class TestSelectEmitter:
     def test_json_mode_returns_json_emitter(self) -> None:
         assert isinstance(reader._select_emitter("json"), reader.JsonEmitter)
 
-    def test_default_mode_returns_socket_emitter(self) -> None:
-        assert isinstance(reader._select_emitter("socket"), reader.SocketEmitter)
+    def test_default_mode_returns_socket_emitter(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+        assert isinstance(
+            reader._select_emitter("socket", container_id="c" * 64),
+            reader.SocketEmitter,
+        )
+
+    def test_socket_emitter_uses_per_container_path(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A non-empty ``container_id`` routes the socket emitter at the per-container path.
+
+        The basename uses the 12-char short ID so the path fits within
+        AF_UNIX's 108-byte ``sun_path`` limit.
+        """
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+        cid = "cafef00d" * 8
+        emitter = reader._select_emitter("socket", container_id=cid)
+        assert isinstance(emitter, reader.SocketEmitter)
+        assert emitter._path == tmp_path / "terok" / "events" / f"{cid[:12]}.sock"
+
+    def test_socket_emitter_uses_explicit_hub_socket(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """An explicit ``hub_socket`` wins over the per-container default."""
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+        override = tmp_path / "custom.sock"
+        emitter = reader._select_emitter("socket", container_id="abc", hub_socket=str(override))
+        assert isinstance(emitter, reader.SocketEmitter)
+        assert emitter._path == override
 
 
 class TestParseAnnotations:
@@ -337,18 +372,51 @@ class TestIsNoiseDest:
         assert reader._is_noise_dest("not-an-ip") is False
 
 
-class TestEventsSocketPath:
-    """``_events_socket_path`` honours XDG, falls back to /run/user/<uid>."""
+class TestResolveHubSocketPath:
+    """``_resolve_hub_socket_path`` picks the per-container path or the explicit override.
 
-    def test_xdg_runtime_dir_wins(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    Resolution order is the contract the OCI bridge hook and the
+    per-container supervisor rely on — explicit ``--hub-socket`` first,
+    then ``--container-id`` derived per-container path.  Neither
+    supplied is a programming error and must raise loudly rather than
+    silently picking a global default.
+    """
+
+    def test_explicit_hub_socket_wins(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """An explicit ``hub_socket`` is used verbatim even when a container id is also set."""
         monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
-        assert reader._events_socket_path() == tmp_path / "terok-shield-events.sock"
+        override = tmp_path / "explicit.sock"
+        assert (
+            reader._resolve_hub_socket_path(container_id="ignored", hub_socket=str(override))
+            == override
+        )
+
+    def test_container_id_builds_per_container_path(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The 12-char short ID becomes the basename — AF_UNIX path limit avoidance."""
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+        cid = "f" * 64  # full podman UUID shape
+        assert reader._resolve_hub_socket_path(container_id=cid) == (
+            tmp_path / "terok" / "events" / f"{cid[:12]}.sock"
+        )
+
+    def test_neither_raises(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """Missing both arguments must surface a clear, specific error."""
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+        with pytest.raises(SystemExit) as excinfo:
+            reader._resolve_hub_socket_path()
+        assert "neither --hub-socket nor --container-id supplied" in str(excinfo.value)
 
     def test_xdg_missing_falls_back_to_run_user(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Direct CLI invocation without ``XDG_RUNTIME_DIR`` lands under ``/run/user/<uid>``."""
         monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
-        path = reader._events_socket_path()
-        assert str(path).startswith("/run/user/")
-        assert path.name == "terok-shield-events.sock"
+        # Per-container branch still composes the path beneath /run/user/<uid>.
+        path = reader._resolve_hub_socket_path(container_id="abc")
+        assert str(path).startswith(RUN_USER_PREFIX)
+        assert path.name == "abc.sock"
 
 
 class TestResolveBinary:
