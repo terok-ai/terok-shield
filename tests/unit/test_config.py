@@ -11,7 +11,6 @@ from pydantic import ValidationError
 
 from terok_shield.config import (
     ANNOTATION_KEY,
-    ANNOTATION_LOOPBACK_PORTS_KEY,
     ANNOTATION_NAME_KEY,
     ANNOTATION_STATE_DIR_KEY,
     ANNOTATION_VERSION_KEY,
@@ -102,7 +101,6 @@ class TestAnnotationConstants:
         assert ANNOTATION_KEY == "terok.shield.profiles"
         assert ANNOTATION_NAME_KEY == "terok.shield.name"
         assert ANNOTATION_STATE_DIR_KEY == "terok.shield.state_dir"
-        assert ANNOTATION_LOOPBACK_PORTS_KEY == "terok.shield.loopback_ports"
         assert ANNOTATION_VERSION_KEY == "terok.shield.version"
 
 
@@ -117,7 +115,6 @@ class TestShieldFileConfigDefaults:
         cfg = ShieldFileConfig()
         assert cfg.mode == "auto"
         assert cfg.default_profiles == ["dev-standard"]
-        assert cfg.loopback_ports == []
         assert cfg.audit.enabled is True
 
     def test_audit_defaults(self) -> None:
@@ -133,23 +130,11 @@ class TestShieldFileConfigValid:
         cfg = ShieldFileConfig(
             mode="hook",
             default_profiles=["base", "dev-python"],
-            loopback_ports=[8080, 9090],
             audit=AuditFileConfig(enabled=False),
         )
         assert cfg.mode == "hook"
         assert cfg.default_profiles == ["base", "dev-python"]
-        assert cfg.loopback_ports == [8080, 9090]
         assert cfg.audit.enabled is False
-
-    def test_single_port_int_coerced_to_list(self) -> None:
-        """A bare integer is accepted and wrapped in a list."""
-        cfg = ShieldFileConfig(loopback_ports=1234)
-        assert cfg.loopback_ports == [1234]
-
-    def test_boundary_ports(self) -> None:
-        """Port 1 and 65535 are both valid."""
-        cfg = ShieldFileConfig(loopback_ports=[1, 65535])
-        assert cfg.loopback_ports == [1, 65535]
 
 
 class TestShieldFileConfigUnknownKeys:
@@ -165,34 +150,10 @@ class TestShieldFileConfigUnknownKeys:
         with pytest.raises(ValidationError, match="enbled"):
             ShieldFileConfig(audit={"enbled": True})  # type: ignore[arg-type]
 
-
-class TestShieldFileConfigPortValidation:
-    """Port range and type enforcement."""
-
-    def test_port_zero_rejected(self) -> None:
-        """Port 0 is out of range."""
-        with pytest.raises(ValidationError, match="out of range"):
-            ShieldFileConfig(loopback_ports=[0])
-
-    def test_port_too_high_rejected(self) -> None:
-        """Port above 65535 is rejected."""
-        with pytest.raises(ValidationError, match="out of range"):
-            ShieldFileConfig(loopback_ports=[99999])
-
-    def test_bool_in_ports_rejected(self) -> None:
-        """Booleans in port list are rejected (not silently coerced to 0/1)."""
-        with pytest.raises(ValidationError, match="bool"):
-            ShieldFileConfig(loopback_ports=[True])
-
-    def test_bare_bool_rejected(self) -> None:
-        """A bare boolean instead of a list is rejected."""
-        with pytest.raises(ValidationError, match="bool"):
-            ShieldFileConfig(loopback_ports=True)
-
-    def test_string_rejected(self) -> None:
-        """A string instead of a port list is rejected."""
-        with pytest.raises(ValidationError, match="expected list"):
-            ShieldFileConfig(loopback_ports="not-a-list")
+    def test_loopback_ports_rejected(self) -> None:
+        """``loopback_ports`` is per-container state (state bundle), not config — reject if seen."""
+        with pytest.raises(ValidationError, match="loopback_ports"):
+            ShieldFileConfig(loopback_ports=[8080])  # type: ignore[call-arg]
 
 
 class TestShieldFileConfigProfileValidation:

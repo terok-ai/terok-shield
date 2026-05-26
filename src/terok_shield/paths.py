@@ -7,23 +7,26 @@ Per-container state paths live in [`terok_shield.state`][terok_shield.state].  T
 module is the single source of truth for artifacts shared across
 containers or installed into host-wide locations:
 
-- the NFLOG reader script's canonical install path (XDG data home);
+- the NFLOG reader script's canonical install path (under
+  ``paths.root`` via [`namespace_state_dir`][terok_util.paths.namespace_state_dir]);
 - the hook entrypoint filename used both under the user's
   ``containers/oci/hooks.d/`` and inside each per-container
   ``state_dir``.
 
-The reader-script path is computed in two places: ``reader_script_path()``
-in this module, and its stdlib-only mirror ``_reader_script_path()`` in
-``resources/reader_hook.py`` — that file cannot import from this package
-at runtime, so the computation is inlined there verbatim.  When either
-definition changes, the other must be updated by hand; the synced pair
-is the contract.
+The reader-script path is computed once in this module.  The
+``resources/reader_hook.py`` script cannot import from terok_shield
+at runtime (it runs under ``/usr/bin/python3`` outside any venv); the
+installer rewrites that script's ``_READER_SCRIPT_PATH`` placeholder
+with the resolved path at install time, so the on-disk hook always
+points at wherever ``reader_script_path()`` resolved when ``terok-shield
+setup`` ran.
 """
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
+
+from terok_util.paths import namespace_state_dir
 
 HOOK_ENTRYPOINT_NAME = "terok-shield-hook"
 """Canonical filename of the shield OCI hook entrypoint script.
@@ -38,9 +41,11 @@ the same constant means renaming the entrypoint is a single edit.
 def reader_script_path() -> Path:
     """Return the on-disk path where the NFLOG reader script is installed.
 
-    Respects ``XDG_DATA_HOME`` when set, otherwise falls back to the
-    POSIX default ``~/.local/share``.  Mirrors the stdlib-only
-    ``_reader_script_path()`` inlined in ``resources/reader_hook.py``.
+    Honours the operator's ``paths.root`` config via
+    [`namespace_state_dir`][terok_util.paths.namespace_state_dir] —
+    when ``config.yml`` sets ``paths.root: /virt/terok/state`` the
+    script lands at ``/virt/terok/state/shield/nflog-reader.py``;
+    without that override it falls back to the platform-default XDG
+    data dir.
     """
-    data_home = os.environ.get("XDG_DATA_HOME") or f"{os.environ.get('HOME', '')}/.local/share"
-    return Path(data_home) / "terok" / "shield" / "nflog-reader.py"
+    return namespace_state_dir("shield") / "nflog-reader.py"

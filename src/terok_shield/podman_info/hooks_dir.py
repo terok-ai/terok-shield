@@ -13,40 +13,29 @@ from pathlib import Path
 
 from ._conf import _SYSTEM_CONF_PATHS, _user_containers_conf
 
-# Well-known system hooks directories (containers-common standard).
-# Used as fallback when containers.conf doesn't specify hooks_dir.
-_SYSTEM_HOOKS_DIRS = (
-    Path("/usr/share/containers/oci/hooks.d"),
-    Path("/etc/containers/oci/hooks.d"),
-)
-
 # Hook JSON filename used to detect terok-shield global hooks.
 HOOK_JSON_FILENAME = "terok-shield-createRuntime.json"
-
-USER_HOOKS_DIR: Path = Path("~/.local/share/containers/oci/hooks.d")
 
 
 def find_hooks_dirs() -> list[Path]:
     """Find hooks directories podman would check.
 
     Reads ``containers.conf`` (user config overrides system config).
-    Falls back to well-known system defaults if nothing is configured.
-
-    Returns directories in precedence order (last wins for podman).
+    Returns the configured directories in precedence order (last wins
+    for podman).  Empty when no ``hooks_dir`` entry is configured —
+    terok always patches ``containers.conf`` at setup time, so an
+    empty result implies setup has not run.
     """
-    # User config takes precedence over system config
     user_dirs = _parse_hooks_dir_from_conf(_user_containers_conf())
     if user_dirs:
         return [Path(d).expanduser() for d in user_dirs]
 
-    # System configs (checked in order, last found wins)
     for conf_path in reversed(_SYSTEM_CONF_PATHS):
         dirs = _parse_hooks_dir_from_conf(conf_path)
         if dirs:
             return [Path(d).expanduser() for d in dirs]
 
-    # No config → well-known system defaults (only existing ones)
-    return [d for d in _SYSTEM_HOOKS_DIRS if d.is_dir()]
+    return []
 
 
 def has_global_hooks(hooks_dirs: list[Path] | None = None) -> bool:
@@ -59,17 +48,6 @@ def has_global_hooks(hooks_dirs: list[Path] | None = None) -> bool:
     if hooks_dirs is None:
         hooks_dirs = find_hooks_dirs()
     return any((d / HOOK_JSON_FILENAME).is_file() for d in hooks_dirs)
-
-
-def system_hooks_dir() -> Path:
-    """Return the best system-level hooks directory.
-
-    Prefers existing directories; falls back to ``/etc/containers/oci/hooks.d``.
-    """
-    for d in _SYSTEM_HOOKS_DIRS:
-        if d.is_dir():
-            return d
-    return _SYSTEM_HOOKS_DIRS[-1]
 
 
 def global_hooks_hint() -> str:

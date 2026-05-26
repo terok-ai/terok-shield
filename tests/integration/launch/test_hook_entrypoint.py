@@ -71,7 +71,7 @@ class TestHookEntrypointStory:
         assert_blocked(name, BLOCKED_TARGET_HTTP)
 
         # 4. shield_up re-applies the ruleset cleanly
-        shield.up(name)
+        shield.up(name, name)
         assert "terok_shield" in shield.rules(name)
         assert_blocked(name, BLOCKED_TARGET_HTTP)
 

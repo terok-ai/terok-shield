@@ -13,10 +13,8 @@ from terok_shield.podman_info.hooks_dir import (
     find_hooks_dirs,
     global_hooks_hint,
     has_global_hooks,
-    system_hooks_dir,
 )
 from tests.testfs import (
-    NONEXISTENT_DIR,
     SINGLE_HOOKS_PATH_LITERAL,
     SYSTEM_HOOKS_DIR_LITERAL,
     USER_HOOKS_DIR_LITERAL,
@@ -42,26 +40,25 @@ class TestFindHooksDirs:
             "terok_shield.podman_info.hooks_dir._SYSTEM_CONF_PATHS",
             (tmp_path / "nonexistent",),
         )
-        monkeypatch.setattr("terok_shield.podman_info.hooks_dir._SYSTEM_HOOKS_DIRS", ())
 
         dirs = find_hooks_dirs()
         assert dirs == [Path(USER_HOOKS_DIR_LITERAL)]
 
-    def test_falls_back_to_system_dirs(
+    def test_returns_empty_when_no_config(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Falls back to existing system dirs when no config."""
+        """Returns empty when neither user nor system config has hooks_dir.
+
+        terok always patches containers.conf at setup time, so an empty
+        result implies setup has not run — the caller (e.g.
+        ``check_environment``) treats it as ``setup-needed``.
+        """
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "no-config"))
         monkeypatch.setattr(
             "terok_shield.podman_info.hooks_dir._SYSTEM_CONF_PATHS",
             (tmp_path / "nonexistent",),
         )
-        system_dir = tmp_path / "system-hooks"
-        system_dir.mkdir()
-        monkeypatch.setattr("terok_shield.podman_info.hooks_dir._SYSTEM_HOOKS_DIRS", (system_dir,))
-
-        dirs = find_hooks_dirs()
-        assert dirs == [system_dir]
+        assert find_hooks_dirs() == []
 
     def test_system_conf_used_when_no_user_conf(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -71,7 +68,6 @@ class TestFindHooksDirs:
         sys_conf = tmp_path / "system.conf"
         sys_conf.write_text(f'[engine]\nhooks_dir = ["{SYSTEM_HOOKS_DIR_LITERAL}"]\n')
         monkeypatch.setattr("terok_shield.podman_info.hooks_dir._SYSTEM_CONF_PATHS", (sys_conf,))
-        monkeypatch.setattr("terok_shield.podman_info.hooks_dir._SYSTEM_HOOKS_DIRS", ())
         dirs = find_hooks_dirs()
         assert dirs == [Path(SYSTEM_HOOKS_DIR_LITERAL)]
 
@@ -154,28 +150,6 @@ class TestParseHooksDirFromConf:
         conf = tmp_path / "containers.conf"
         conf.write_text("[engine]\nhooks_dir = 42\n")
         assert _parse_hooks_dir_from_conf(conf) == []
-
-
-# ── system_hooks_dir tests ───────────────────────────────
-
-
-class TestSystemHooksDir:
-    """Tests for system hooks directory detection."""
-
-    def test_returns_existing_dir(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Returns an existing system dir when available."""
-        d = tmp_path / "hooks.d"
-        d.mkdir()
-        monkeypatch.setattr("terok_shield.podman_info.hooks_dir._SYSTEM_HOOKS_DIRS", (d,))
-        assert system_hooks_dir() == d
-
-    def test_fallback_when_none_exist(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Falls back to last entry when no system dir exists."""
-        monkeypatch.setattr(
-            "terok_shield.podman_info.hooks_dir._SYSTEM_HOOKS_DIRS",
-            (NONEXISTENT_DIR / "a", NONEXISTENT_DIR / "b"),
-        )
-        assert system_hooks_dir() == NONEXISTENT_DIR / "b"
 
 
 # ── global_hooks_hint tests ──────────────────────────────

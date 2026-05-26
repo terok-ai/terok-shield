@@ -34,22 +34,22 @@ class TestShieldState:
     def test_state_down_after_shield_down(self, shielded_container: str) -> None:
         """State is DOWN after shield.down() (RFC1918 protection kept)."""
         shield = _shield()
-        shield.down(shielded_container)
+        shield.down(shielded_container, shielded_container)
         assert shield.state(shielded_container) == ShieldState.DOWN
 
     def test_state_disengaged_after_shield_disengaged(self, shielded_container: str) -> None:
         """State is DISENGAGED after shield.down(allow_all=True)."""
         shield = _shield()
-        shield.down(shielded_container, allow_all=True)
+        shield.down(shielded_container, shielded_container, allow_all=True)
         assert shield.state(shielded_container) == ShieldState.DISENGAGED
 
     def test_state_up_after_shield_up(self, shielded_container: str) -> None:
         """State returns to UP after shield.down() then shield.up()."""
         shield = _shield()
-        shield.down(shielded_container)
+        shield.down(shielded_container, shielded_container)
         assert shield.state(shielded_container) == ShieldState.DOWN
 
-        shield.up(shielded_container)
+        shield.up(shielded_container, shielded_container)
         assert shield.state(shielded_container) == ShieldState.UP
 
 
