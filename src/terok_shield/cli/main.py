@@ -80,7 +80,7 @@ def _dispatch(args: argparse.Namespace) -> None:
 
     # CLI-only: setup doesn't need Shield
     if cmd_name == "setup":
-        _cmd_setup(root=getattr(args, "root", False), user=getattr(args, "user", False))
+        _cmd_setup()
         return
 
     # CLI-only: logs with aggregated mode (no container -> scan all)
@@ -220,6 +220,11 @@ def _add_argdef(parser: argparse.ArgumentParser, arg: ArgDef) -> None:
         kwargs["dest"] = arg.dest
     if arg.nargs is not None:
         kwargs["nargs"] = arg.nargs
+    # argparse only accepts ``required`` on optional (``--``) arguments —
+    # positionals are required by definition.  Guard so the registry can
+    # mark optional flags like ``--container-id`` as mandatory.
+    if arg.required and arg.name.startswith("-"):
+        kwargs["required"] = True
     parser.add_argument(arg.name, **kwargs)
 
 
@@ -362,34 +367,12 @@ def _collect_all_audit_entries(state_root: Path, n: int) -> list[dict]:
     return entries[-n:]
 
 
-def _cmd_setup(*, root: bool, user: bool) -> None:
+def _cmd_setup() -> None:
     """Install global OCI hooks for podman < 5.6.0 restart persistence."""
     from ..hooks.install import HooksInstaller
-    from ..podman_info._conf import _user_containers_conf
 
-    if root and user:
-        raise ValueError("--root and --user are mutually exclusive")
-
-    if not root and not user:
-        # Interactive: present options.
-        system, user_installer = HooksInstaller.system(), HooksInstaller.user()
-        print("terok-shield setup: install global OCI hooks\n")
-        print(f"  [r] System-wide (sudo) -> {system.target_dir}")
-        print(f"  [u] User-local         -> {user_installer.target_dir}")
-        print(f"      (+ update {_user_containers_conf()})")
-        print()
-        choice = input("Choose [r/u]: ").strip().lower()
-        if choice == "r":
-            root = True
-        elif choice == "u":
-            user = True
-        else:
-            print("Cancelled.")
-            return
-
-    installer = HooksInstaller.system() if root else HooksInstaller.user()
-    scope = "sudo" if installer.use_sudo else "user"
-    print(f"Installing hooks to {installer.target_dir} ({scope})...")
+    installer = HooksInstaller()
+    print(f"Installing hooks to {installer.target_dir}...")
     installer.install()
     print("Done. Global hooks installed.")
 
@@ -425,7 +408,6 @@ def _build_config(
         state_dir=state_dir,
         mode=mode,
         default_profiles=tuple(file_cfg.default_profiles),
-        loopback_ports=tuple(file_cfg.loopback_ports),
         audit_enabled=file_cfg.audit.enabled,
         profiles_dir=profiles_dir,
     )

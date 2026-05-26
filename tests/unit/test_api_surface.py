@@ -38,9 +38,9 @@ EXPECTED_ALL = [
     "ShieldNeedsSetup",
     "ShieldRuntime",
     "ShieldState",
-    "USER_HOOKS_DIR",
     "check_firewall_binaries",
     "check_krun_binaries",
+    "ensure_user_hooks_dir_configured",
 ]
 
 

@@ -37,12 +37,10 @@ from .config import (
 )
 from .paths import HOOK_ENTRYPOINT_NAME
 from .podman_info import (
-    USER_HOOKS_DIR,
     find_hooks_dirs,
     global_hooks_hint,
     has_global_hooks,
     parse_podman_info,
-    system_hooks_dir,
 )
 from .state import StateBundle
 from .util import is_ip as _is_ip
@@ -67,6 +65,10 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "BinaryCheck": ("terok_shield.prereqs", "BinaryCheck"),
     "ExecError": ("terok_shield.run", "ExecError"),
     "HooksInstaller": ("terok_shield.hooks.install", "HooksInstaller"),
+    "ensure_user_hooks_dir_configured": (
+        "terok_shield.hooks.install",
+        "ensure_user_hooks_dir_configured",
+    ),
     "NftNotFoundError": ("terok_shield.run", "NftNotFoundError"),
     "ShieldNeedsSetup": ("terok_shield.run", "ShieldNeedsSetup"),
     "check_firewall_binaries": ("terok_shield.prereqs", "check_firewall_binaries"),
@@ -132,24 +134,36 @@ class EnvironmentCheck:
 def _read_installed_hook_version(hooks_dirs: list[Path]) -> int | None:
     """Read ``BUNDLE_VERSION`` from the installed ballast module, or ``None``.
 
-    The hooks directory contains the shared ``_oci_state.py`` ballast
-    that both role scripts import from at runtime.  ``BUNDLE_VERSION``
-    lives there as the canonical definition; reading it from a role
-    script would only see a re-import.  Returns ``None`` if the
-    ballast file is absent or unparseable.
+    The ballast (``_oci_state.py``) lives *next to* the role script, not
+    in *hooks_dirs* — for system-scope installs those happen to be the
+    same directory, but a user-scope install splits them: descriptors
+    land in *hooks_dirs* (the podman scan path), scripts and ballast
+    land under ``namespace_state_dir("shield") / "hooks"``.  The
+    installed JSON descriptor's ``path`` is the load-bearing reference
+    to the role script, so the ballast lives in its parent directory.
     """
+    import json
     import re
+
+    from .podman_info.hooks_dir import HOOK_JSON_FILENAME
 
     pattern = re.compile(r"^BUNDLE_VERSION\s*=\s*(\d+)", re.MULTILINE)
     for d in hooks_dirs:
-        ballast = d / "_oci_state.py"
-        if ballast.is_file():
-            try:
+        descriptor = d / HOOK_JSON_FILENAME
+        if not descriptor.is_file():
+            continue
+        try:
+            data = json.loads(descriptor.read_text())
+            argv = data.get("hook", {}).get("path")
+            if not isinstance(argv, str):
+                continue
+            ballast = Path(argv).parent / "_oci_state.py"
+            if ballast.is_file():
                 m = pattern.search(ballast.read_text())
                 if m:
                     return int(m.group(1))
-            except (OSError, ValueError):
-                pass
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
     return None
 
 
@@ -187,8 +201,12 @@ class Shield:
             ruleset: Ruleset builder (default: from config loopback_ports).
             hub_events: Best-effort emitter for ``shield_up`` / ``shield_down``
                 events bound for the terok-clearance hub (default: a fresh
-                [`HubEventEmitter`][terok_shield.HubEventEmitter] pointed at the canonical socket).
-                Pass a no-op stub in tests that should not touch the socket.
+                [`HubEventEmitter`][terok_shield.HubEventEmitter]).  The
+                emitter routes each event to the supervisor's
+                per-container socket using the ``container_id`` supplied
+                on every [`up`][terok_shield.Shield.up] /
+                [`down`][terok_shield.Shield.down] call.  Pass a no-op
+                stub in tests that should not touch the socket.
         """
         from ._hub_events import HubEventEmitter
         from .audit import AuditLogger
@@ -263,8 +281,7 @@ class Shield:
 
         if not info.hooks_dir_persists:
             if global_hooks:
-                sys_dir = system_hooks_dir()
-                hooks = "global-system" if has_global_hooks([sys_dir]) else "global-user"
+                hooks = "global"
                 health = "ok"
                 # Check hook version matches current package
                 hook_ver = _read_installed_hook_version(hooks_dirs)
@@ -360,26 +377,42 @@ class Shield:
         """Return current nft rules for a container."""
         return self._mode.list_rules(container)
 
-    def down(self, container: str, *, allow_all: bool = False) -> None:
-        """Switch a running container to bypass mode."""
+    def down(self, container: str, container_id: str, *, allow_all: bool = False) -> None:
+        """Switch a running container to bypass mode.
+
+        *container* is the operator-facing podman name (audit log key);
+        *container_id* is the full podman UUID — the routing key for
+        the per-container hub socket the supervisor listens on.  The
+        caller knows both at every emit site, so neither carries a
+        default.
+        """
         self._mode.shield_down(container, allow_all=allow_all)
         self.audit.log_event(
             container,
             "shield_down",
             detail="allow_all=True" if allow_all else None,
         )
-        self.hub_events.shield_down(container, allow_all=allow_all, dossier=self._read_dossier())
+        self.hub_events.shield_down(
+            container,
+            container_id,
+            allow_all=allow_all,
+            dossier=self._read_dossier(),
+        )
 
     def quarantine(self, container: str) -> None:
         """Total network blackout — drop all traffic, log dropped traffic."""
         self._mode.shield_quarantine(container)
         self.audit.log_event(container, "shield_quarantine")
 
-    def up(self, container: str) -> None:
-        """Restore normal deny-all mode for a running container."""
+    def up(self, container: str, container_id: str) -> None:
+        """Restore normal deny-all mode for a running container.
+
+        *container* / *container_id* — see
+        [`down`][terok_shield.Shield.down].
+        """
         self._mode.shield_up(container)
         self.audit.log_event(container, "shield_up")
-        self.hub_events.shield_up(container, dossier=self._read_dossier())
+        self.hub_events.shield_up(container, container_id, dossier=self._read_dossier())
 
     def _read_dossier(self) -> dict[str, str]:
         """Resolve the wire dossier for this container by reading the orchestrator's task meta.
@@ -454,7 +487,7 @@ __all__ = [
     "ShieldNeedsSetup",
     "ShieldRuntime",
     "ShieldState",
-    "USER_HOOKS_DIR",
     "check_firewall_binaries",
     "check_krun_binaries",
+    "ensure_user_hooks_dir_configured",
 ]

@@ -19,7 +19,7 @@ dynamic = ["version", "classifiers"]
 dependencies = [
     "PyYAML>=6.0",
     "pydantic>=2.0",
-    "terok-util @ https://github.com/terok-ai/terok-util/releases/download/v0.0.2a1/terok_util-0.0.2a1-py3-none-any.whl",
+    "terok-util @ git+https://github.com/sliwowitz/terok-util.git@feat/per-container-supervisor",
 ]
 
 [project.urls]
