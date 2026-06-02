@@ -132,6 +132,14 @@ layer = "core"
 depends_on = [
 ]
 
+# AppArmor confinement probe + dnsmasq-tier selection
+[[modules]]
+path = "terok_shield.dns.apparmor"
+layer = "core"
+depends_on = [
+    "terok_shield.dns.dnsmasq",
+]
+
 # hooks domain package
 [[modules]]
 path = "terok_shield.hooks"
@@ -157,6 +165,7 @@ depends_on = []
 path = "terok_shield.hooks.mode"
 layer = "core"
 depends_on = [
+    "terok_shield.dns.apparmor",
     "terok_shield.dns.dnsmasq",
     "terok_shield.hooks.install",
     "terok_shield.nft.rules",

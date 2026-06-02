@@ -14,6 +14,7 @@ import pytest
 from terok_shield.config import (
     ANNOTATION_AUDIT_ENABLED_KEY,
     ANNOTATION_STATE_DIR_KEY,
+    DnsTier,
     ShieldConfig,
     ShieldRuntime,
     ShieldState,
@@ -1442,3 +1443,28 @@ def test_shield_down_repopulates_deny_sets(
 
 
 from terok_shield.state import StateBundle
+
+
+def test_detect_dns_tier_audits_advisory_when_apparmor_blocks(
+    make_hook_mode: HookModeHarnessFactory, tmp_path: Path
+) -> None:
+    """_detect_dns_tier falls back and audits the AppArmor advisory when dnsmasq is confined."""
+    harness = make_hook_mode()
+    harness.runner.has.side_effect = lambda name: name in ("dnsmasq", "dig")
+
+    def _run(cmd: list[str], **_kw: object) -> str:
+        if "--version" in cmd:
+            return "Dnsmasq version 2.92\nCompile time options: nftset\n"
+        if "--test" in cmd:
+            raise ExecError(cmd, 3, "dnsmasq: cannot read config: Permission denied\n")
+        return ""
+
+    harness.runner.run.side_effect = _run
+
+    tier = harness.mode._detect_dns_tier("some-task", tmp_path)
+
+    assert tier is DnsTier.DIG
+    harness.audit.log_event.assert_called_once()
+    detail = harness.audit.log_event.call_args.kwargs["detail"]
+    assert "AppArmor" in detail
+    assert "dig" in detail

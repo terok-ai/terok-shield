@@ -33,7 +33,6 @@ from .config import (
     ShieldModeBackend,
     ShieldRuntime,
     ShieldState,
-    detect_dns_tier,
 )
 from .paths import HOOK_ENTRYPOINT_NAME
 from .podman_info import (
@@ -234,7 +233,7 @@ class Shield:
         Does not raise — the caller decides how to handle issues.
         """
         from . import state
-        from .dns import dnsmasq
+        from .dns import apparmor
 
         output = self.runner.run(["podman", "info", "-f", "json"], check=False)
         info = parse_podman_info(output)
@@ -244,9 +243,18 @@ class Shield:
         hooks = "per-container"
         health = "ok"
 
-        tier = detect_dns_tier(self.runner.has, lambda: dnsmasq.has_nftset_support(self.runner))
+        tier, apparmor_blocked = apparmor.detect_dns_tier_under_apparmor(
+            self.runner, self.config.state_dir
+        )
         dns_tier = tier.value
-        if tier == DnsTier.DIG:
+        if apparmor_blocked:
+            issues.append(
+                "dnsmasq is present but AppArmor confines it from the shield "
+                f"state directory — domain allowlisting falls back to static {tier.value} "
+                "resolution (no IP rotation handling). Install the terok AppArmor "
+                "profile to enable the dnsmasq tier (see docs/apparmor.md)"
+            )
+        elif tier == DnsTier.DIG:
             issues.append(
                 "dnsmasq not found — domain allowlisting uses static pre-start "
                 "resolution (no IP rotation handling). "

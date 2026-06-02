@@ -39,9 +39,8 @@ from ..config import (
     ShieldConfig,
     ShieldRuntime,
     ShieldState,
-    detect_dns_tier,
 )
-from ..dns import dnsmasq
+from ..dns import apparmor, dnsmasq
 from ..nft.constants import (
     DNSMASQ_BIND_DEFAULT,
     DNSMASQ_BIND_KRUN,
@@ -138,7 +137,7 @@ class HookMode:
         )
 
         # Detect DNS tier, upstream DNS, and gateway addresses
-        tier = self._detect_dns_tier()
+        tier = self._detect_dns_tier(container, sd)
         mode = info.network_mode or "pasta"
         upstream_dns = _upstream_dns_for_mode(mode)
         gw_v4, gw_v6 = self._gateways = _gateways_for_mode(mode)
@@ -292,9 +291,20 @@ class HookMode:
             f"host.containers.internal:{PASTA_HOST_LOOPBACK_MAP}",
         ]
 
-    def _detect_dns_tier(self) -> DnsTier:
-        """Detect the best available DNS resolution tier."""
-        return detect_dns_tier(self._runner.has, lambda: dnsmasq.has_nftset_support(self._runner))
+    def _detect_dns_tier(self, container: str, state_dir: Path) -> DnsTier:
+        """Pick the DNS tier, logging an advisory when AppArmor downgrades dnsmasq."""
+        tier, apparmor_blocked = apparmor.detect_dns_tier_under_apparmor(self._runner, state_dir)
+        if apparmor_blocked:
+            self._audit.log_event(
+                container,
+                "setup",
+                detail=(
+                    f"DNS tier fell back to {tier.value}: AppArmor confines dnsmasq "
+                    f"from {state_dir}. Install the terok AppArmor profile to keep "
+                    "the dnsmasq tier — see docs/apparmor.md."
+                ),
+            )
+        return tier
 
     def _get_podman_info(self) -> PodmanInfo:
         """Get podman info, caching the result for the lifetime of this instance."""

@@ -58,19 +58,26 @@ class DnsTier(enum.Enum):
 def detect_dns_tier(
     has: Callable[[str], bool],
     dnsmasq_nftset_ok: Callable[[], bool] = lambda: True,
+    dnsmasq_state_readable: Callable[[], bool] = lambda: True,
 ) -> DnsTier:
     """Detect the best available DNS resolution tier.
 
     Probes for executables in priority order: dnsmasq (with nftset
-    support) > dig > getent.
+    support, and able to read its config) > dig > getent.
 
     Args:
         has: Returns True if the named executable exists on PATH.
         dnsmasq_nftset_ok: Returns True if installed dnsmasq supports
             ``--nftset``.  Defaults to ``lambda: True`` (skip probe);
             production callers should pass a real capability check.
+        dnsmasq_state_readable: Returns True if dnsmasq can read its
+            config from the shield state directory.  Returns False when
+            an enforcing AppArmor profile confines dnsmasq away from it,
+            so we fall back to ``dig`` rather than fail the launch.
+            Defaults to ``lambda: True``; production callers pass a real
+            probe.
     """
-    if has("dnsmasq") and dnsmasq_nftset_ok():
+    if has("dnsmasq") and dnsmasq_nftset_ok() and dnsmasq_state_readable():
         return DnsTier.DNSMASQ
     if has("dig"):
         return DnsTier.DIG

@@ -472,6 +472,35 @@ class TestCheckEnvironment:
         assert any("dig" in i for i in env.issues)
         assert env.dns_tier == "getent"
 
+    @mock.patch("terok_shield.find_hooks_dirs", return_value=[Path("/fake/hooks")])
+    @mock.patch("terok_shield.has_global_hooks", return_value=True)
+    @mock.patch("terok_shield.system_hooks_dir", return_value=Path("/fake/hooks"))
+    def test_apparmor_confined_dnsmasq_reports_issue(
+        self,
+        _sys_dir: mock.Mock,
+        _has_hooks: mock.Mock,
+        _find_dirs: mock.Mock,
+        make_shield: ShieldHarnessFactory,
+        tmp_path: Path,
+    ) -> None:
+        """dnsmasq present but AppArmor-confined from the state dir → dig + advisory."""
+        harness = make_shield(ShieldConfig(state_dir=tmp_path))
+        harness.runner.has.side_effect = lambda cmd: cmd in ("dnsmasq", "dig")
+
+        def _run(cmd: list[str], **_kw: object) -> str:
+            if cmd[0] == "podman":
+                return _podman_info_json("5.8.0")
+            if "--version" in cmd:
+                return "Dnsmasq version 2.92\nCompile time options: nftset\n"
+            if "--test" in cmd:
+                raise ExecError(cmd, 3, "dnsmasq: cannot read config: Permission denied\n")
+            return ""
+
+        harness.runner.run.side_effect = _run
+        env = harness.shield.check_environment()
+        assert env.dns_tier == "dig"
+        assert any("AppArmor" in i for i in env.issues)
+
     @mock.patch("terok_shield.find_hooks_dirs", return_value=[])
     @mock.patch("terok_shield.has_global_hooks", return_value=False)
     def test_no_global_hooks(
