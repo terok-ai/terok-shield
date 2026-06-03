@@ -19,7 +19,7 @@ dynamic = ["version", "classifiers"]
 dependencies = [
     "PyYAML>=6.0",
     "pydantic>=2.0",
-    "terok-util @ https://github.com/terok-ai/terok-util/releases/download/v0.0.2a2/terok_util-0.0.2a2-py3-none-any.whl",
+    "terok-util>=0.1.0,<0.2.0",
 ]
 
 [project.urls]
@@ -53,7 +53,7 @@ packages = [
 include = [
   { path = "src/terok_shield/resources/nflog_reader.py", format = ["sdist", "wheel"] },
 ]
-version = "0.6.42a11"
+version = "0.7.0"
 
 [tool.poetry.group.dev.dependencies]
 ruff = ">=0.15.15"
