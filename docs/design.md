@@ -13,7 +13,7 @@ writes `profile.allowed`, pre-generates the complete nft ruleset to `ruleset.nft
 and returns podman args with annotations. On each container start, the OCI hook
 reads `state_dir` from annotations, applies the pre-generated `ruleset.nft` inside
 the container's network namespace, discovers the gateway from `/proc/{pid}/net/route`,
-and optionally starts a per-container dnsmasq instance.
+and optionally starts a per-container *dnsmasq* instance.
 
 ## Allowlisting
 
@@ -75,10 +75,10 @@ across state files are reliable regardless of input notation (e.g.
 
 ```text
 {state_dir}/
-├── hooks/
-│   ├── terok-shield-createRuntime.json
-│   └── terok-shield-poststop.json
-├── terok-shield-hook              # entrypoint script (stdlib-only Python)
+├── hooks/                                # only if per-container hooks are supported
+│   ├── terok-shield-createRuntime.json   # only if per-container hooks are supported
+│   └── terok-shield-poststop.json        # only if per-container hooks are supported
+├── terok-shield-hook              # entrypoint script (stdlib-only), for per-container hooks
 ├── ruleset.nft                    # pre-generated nft ruleset (written by pre_start)
 ├── gateway                        # discovered gateway IP (written by OCI hook)
 ├── profile.allowed                # IPs from DNS resolution (preset)
@@ -137,21 +137,22 @@ allow_ip(container, ip)
 read_effective_ips(state_dir)
 │
 ├── read_allowed_ips()
+|   |
 │   ├── profile.allowed ──┐
 │   └── live.allowed ─────┤
+│                         │
 │                         ▼
-│                    union (dedup,
-│                     profile-first)
+│              union (dedup, profile-first)
 │
 ├── read_denied_ips()
+|   |
 │   └── deny.list ──→ deny set
 │
 └── effective = allowed − denied
          │
          ▼
-    add_elements_dual()     flat IP list to nft
-    (nft.py boundary)       (deny.list already
-                             subtracted)
+  add_elements_dual()     flat IP list to nft
+  (nft.py boundary)       (deny.list already subtracted)
 ```
 
 ## Audit logging
@@ -176,9 +177,9 @@ operations.
 
 nftables log rules generate per-packet entries in dmesg/journald:
 
-- `TEROK_SHIELD_ALLOWED:` — traffic hitting the allow set (rate-limited)
-- `TEROK_SHIELD_DENIED:` — traffic rejected by the deny-all rule
-- `TEROK_SHIELD_PRIVATE:` — non-allowlisted private-range traffic rejected (RFC 1918/RFC 4193)
+- `TEROK_SHIELD_ALLOWED:` traffic hitting the allow set (rate-limited)
+- `TEROK_SHIELD_DENIED:` traffic rejected by the deny-all rule
+- `TEROK_SHIELD_PRIVATE:` non-allowlisted private-range traffic rejected (RFC 1918/RFC 4193)
 
 ## Public API
 
@@ -216,8 +217,8 @@ directly — never the CLI.
 
 | Module | Role |
 |--------|------|
-| `__init__.py` | `Shield` facade — public API entry point |
-| `nft.py` | **Security boundary** — ruleset generation, input validation, self-verification |
+| `__init__.py` | `Shield` public API entry point |
+| `nft.py` | ruleset generation, input validation, self-verification |
 | `nft_constants.py` | Shared literals (`NFT_TABLE`, `RFC1918`) — no logic |
 | `config.py` | `ShieldConfig`, `ShieldMode`, `ShieldState`, `DnsTier`, `ShieldModeBackend` protocol, annotation constants |
 | `state.py` | Per-container state bundle layout — path derivation, effective IP merging |
@@ -235,5 +236,4 @@ directly — never the CLI.
 | `resources/hook_entrypoint.py` | Stdlib-only OCI hook script — installed verbatim, no terok_shield imports |
 
 Module boundaries are enforced by [tach](https://github.com/gauge-sh/tach)
-(`tach.toml`). The critical constraint: `nft.py` may only import from
-`nft_constants.py` and stdlib.
+(`tach.toml`). `nft.py` may only import from `nft_constants.py` and stdlib.

@@ -20,12 +20,12 @@ make test-unit        # unit tests with coverage
 make check            # core local suite (lint + test-unit + tach + security + docstrings + deadcode + reuse)
 
 # Integration tests (filtered by marker)
-make test-integration-host    # -m "needs_host_features" — host-only, no containers
-make test-integration-network # -m "needs_internet and not needs_podman" — needs dig + internet
-make test-integration-podman  # -m "needs_podman" — needs podman + nft + internet
-make test-integration # all integration tests
-make test-integration-map     # generate integration test map (Markdown)
-make ci-map           # generate CI workflow map (Markdown)
+make test-integration-host     # -m "needs_host_features" — host-only, no containers
+make test-integration-network  # -m "needs_internet and not needs_podman" — needs dig + internet
+make test-integration-podman   # -m "needs_podman" — needs podman + nft + internet
+make test-integration          # all integration tests
+make test-integration-map      # generate integration test map (Markdown)
+make ci-map                    # generate CI workflow map (Markdown)
 
 # Other
 make tach             # check module boundary rules
@@ -64,9 +64,9 @@ Environment requirements are expressed via pytest markers:
 
 | Marker | What it needs | CI |
 |--------|---------------|-----|
-| `needs_host_features` | Linux kernel only (IP_RECVERR, filesystem) | Yes |
-| `needs_internet` | `dig` + outbound internet | No |
-| `needs_podman` | podman + nft (+ internet) | No |
+| needs_host_features | Linux kernel only (IP_RECVERR, filesystem) | Yes |
+| needs_internet | `dig` + outbound internet | No |
+| needs_podman | podman + nft (+ internet) | No |
 
 Directories group tests by what they test: `setup/`, `launch/`, `blocking/`,
 `allow_deny/`, `dns/`, `bypass/`, `observability/`, `safety/`, `cli/`. See
@@ -88,6 +88,6 @@ defined in
 [`tests/testnet.py`](https://github.com/terok-ai/terok-shield/blob/master/tests/testnet.py).
 No private or authenticated endpoints are contacted.
 
-**Never hardcode IP addresses, URLs, or domain names in test files.** Define
+**Do not hardcode IP addresses, URLs, or domain names in test files.** Define
 named constants in `tests/testnet.py` and import them. This centralizes
-SonarCloud suppressions and keeps network dependencies auditable in one place.
+SonarCloud suppressions and keeps test network dependencies auditable in one place.

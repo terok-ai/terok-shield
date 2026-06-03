@@ -21,7 +21,7 @@ If the config file is missing, defaults are used.  Unparseable YAML
 
 ### Mode selection
 
-Currently only hook mode is supported. Setting `mode: auto` or `mode: hook`
+Currently there is only one mode, the "hook mode". Setting `mode: auto` or `mode: hook`
 both resolve to hook mode. Future modes may be added for different network
 topologies.
 

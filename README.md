@@ -10,8 +10,7 @@ Default-deny egress firewall for rootless Podman containers.
 terok-shield enforces **default-deny outbound** network filtering on
 Podman containers using nftables.  Containers can only reach
 explicitly allowed destinations — everything else is rejected with
-an ICMP error and a per-packet audit entry.  No changes to images,
-no daemon, no host-wide rules.
+an ICMP error and a per-packet audit entry.
 
 <p align="center">
   <img src="docs/img/architecture.svg" alt="terok ecosystem — terok-shield is the security boundary at the bottom of the stack">
@@ -19,16 +18,14 @@ no daemon, no host-wide rules.
 
 ## Where it sits in the stack
 
-terok-shield is the security-boundary layer of the terok ecosystem.
+terok-shield is the firewall layer of the terok ecosystem.
 The hardened-Podman runtime
 ([terok-sandbox](https://github.com/terok-ai/terok-sandbox)) installs
 the OCI hooks at setup time; the operator-in-the-loop verdict
 service ([terok-clearance](https://github.com/terok-ai/terok-clearance))
 mutates the live ruleset on Allow / Deny decisions.  The shield
 itself is independent of all of these — it works on any rootless
-Podman container, with or without the rest of terok, and is the
-piece you would use first to evaluate the approach before adopting
-the full stack.
+Podman container, with or without the rest of terok.
 
 ## Features
 
@@ -77,15 +74,14 @@ terok-shield ships with several bundled profiles
 | `nvidia-hpc` | CUDA, NGC, NVIDIA drivers |
 
 The default profile is `dev-standard`.  To add a custom allowlist,
-create a `.txt` file with one domain or IP per line:
+create a `.txt` file in `~/.config/terok/shield/profiles` with one domain or IP per line:
 
-```bash
-mkdir -p ~/.config/terok/shield/profiles
-cat > ~/.config/terok/shield/profiles/my-project.txt << 'EOF'
+e.g. `~/.config/terok/shield/profiles/my-project.txt`
+
+```
 api.example.com
 cdn.example.com
 203.0.113.10
-EOF
 ```
 
 ### 2. Start a container with the shield

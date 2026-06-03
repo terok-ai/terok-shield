@@ -13,9 +13,9 @@ own network namespace.
 │ Container netns                          │
 │                                          │
 │  ┌────────────────────────────────────┐  │
-│  │ nftables (applied by OCI hook)    │  │
-│  │ policy: DROP                      │  │
-│  │ allow: DNS, lo, @allow_v4/v6      │  │
+│  │ nftables (applied by OCI hook)     │  │
+│  │ policy: DROP                       │  │
+│  │ allow: DNS, lo, @allow_v4/v6       │  │
 │  │ reject: RFC1918, RFC4193           │  │
 │  └────────────────────────────────────┘  │
 │                                          │
