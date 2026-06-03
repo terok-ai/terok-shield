@@ -31,7 +31,8 @@ terok-shield run my-container -- alpine:latest sh
 This single command:
 
 1. Resolves DNS domains from your allowlist profiles into cached IPs
-2. Installs OCI hooks in the container's state directory
+2. Installs the OCI hooks (see [where the hooks live](modes.md#per-container-state-bundle) —
+   per-container, or a global directory registered in podman's `containers.conf`)
 3. Launches `podman run` with all required flags (annotations, hooks-dir,
    cap-drop, security-opt)
 

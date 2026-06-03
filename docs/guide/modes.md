@@ -25,9 +25,10 @@ own network namespace.
 
 ### How it works
 
-1. `Shield.pre_start()` installs hooks into the container's state directory,
-   processes the allowlist profiles, and pre-generates the complete nft ruleset
-   to `ruleset.nft`. DNS handling differs by tier:
+1. `Shield.pre_start()` installs the OCI hooks (see
+   [Per-container state bundle](#per-container-state-bundle) for where they
+   land), processes the allowlist profiles, and pre-generates the complete nft
+   ruleset to `ruleset.nft`. DNS handling differs by tier:
    - **dnsmasq tier**: domain names are written to `profile.domains` for dnsmasq
      `--nftset` runtime resolution; only raw IP entries are resolved and written
      to `profile.allowed`. dnsmasq populates the nft allow sets at runtime as
@@ -67,8 +68,8 @@ Each container's hooks and state are isolated in its own directory:
 
 ```text
 {state_dir}/
-├── hooks/                                  # OCI hook descriptors
-├── terok-shield-hook                       # Hook entrypoint (stdlib-only Python)
+├── hooks/                                  # OCI hook descriptors (only if per-container hooks are supported)
+├── terok-shield-hook                       # Hook entrypoint (stdlib-only Python), per-container hooks only
 ├── ruleset.nft                             # Pre-generated nft ruleset
 ├── gateway                                 # Discovered gateway IP
 ├── profile.allowed                         # IPs from pre-start DNS resolution
@@ -84,6 +85,17 @@ Each container's hooks and state are isolated in its own directory:
 ├── dns.tier                                # Persisted active DNS tier
 └── audit.jsonl                             # Per-container audit log
 ```
+
+> **Where the hooks live.** The `hooks/` descriptors and the
+> `terok-shield-hook` entrypoint above are part of this per-container bundle
+> only when podman supports persistent per-container hooks. It does not today —
+> podman drops a per-container `--hooks-dir` across stop/start
+> ([containers/podman#17935](https://github.com/containers/podman/issues/17935)) —
+> so shield installs the hooks once into a **global** directory and registers it
+> in podman's `containers.conf` (`hooks_dir` under `[engine]`;
+> `~/.config/containers/containers.conf` for rootless). Run `terok-shield setup`
+> to install the global hooks and patch `containers.conf`. Everything else in
+> the bundle stays per-container.
 
 ### Running containers
 

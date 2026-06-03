@@ -95,6 +95,16 @@ across state files are reliable regardless of input notation (e.g.
 └── audit.jsonl                    # per-container audit log
 ```
 
+The `hooks/` descriptors and the `terok-shield-hook` entrypoint are part of
+the per-container bundle only when podman supports persistent per-container
+hooks. It does not today — podman drops a per-container `--hooks-dir` across
+stop/start ([containers/podman#17935](https://github.com/containers/podman/issues/17935)) —
+so shield instead installs the hooks once into a **global** directory and
+registers that directory in podman's `containers.conf` (`hooks_dir` under
+`[engine]`; `~/.config/containers/containers.conf` for rootless). `terok-shield
+setup` installs the global hooks and patches `containers.conf`; the rest of the
+bundle above stays per-container regardless.
+
 ### Data flow diagrams
 
 **`deny_ip` flow:**
