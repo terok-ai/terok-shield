@@ -2157,23 +2157,22 @@ tomli-w = ">=1.0,<2.0"
 
 [[package]]
 name = "terok-util"
-version = "0.0.2a1"
+version = "0.0.2a2"
 description = "Shared utility library for the terok-* sibling packages"
 optional = false
 python-versions = ">=3.12,<4.0"
 groups = ["main"]
-files = []
-develop = false
+files = [
+    {file = "terok_util-0.0.2a2-py3-none-any.whl", hash = "sha256:92f70ff04b108570b10a0a3822898133235c1544537f7b84cecae0450329b20f"},
+]
 
 [package.dependencies]
 platformdirs = ">=4.10.0"
 "ruamel.yaml" = ">=0.18"
 
 [package.source]
-type = "git"
-url = "https://github.com/sliwowitz/terok-util.git"
-reference = "feat/per-container-supervisor-v3"
-resolved_reference = "755b39b4d9856f5c868a855dfafaf1bd1bd1dbee"
+type = "url"
+url = "https://github.com/terok-ai/terok-util/releases/download/v0.0.2a2/terok_util-0.0.2a2-py3-none-any.whl"
 
 [[package]]
 name = "tomli"
@@ -2429,4 +2428,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "2960de4c90f31b80abd20d11e95f3b7679cd7fed502560384a111733f17dccac"
+content-hash = "1e1e650637af9d67f7df0c57035e71abed5a2e57e7ac031325412e8432bc7c31"
