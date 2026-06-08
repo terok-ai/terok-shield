@@ -56,7 +56,7 @@ include = [
 version = "0.7.0"
 
 [tool.poetry.group.dev.dependencies]
-ruff = ">=0.15.15"
+ruff = ">=0.15.16"
 bandit = ">=1.7"
 docstr-coverage = "^2.3.2"
 complexipy = ">=5.0"
