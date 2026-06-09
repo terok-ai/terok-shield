@@ -2157,14 +2157,14 @@ tomli-w = ">=1.0,<2.0"
 
 [[package]]
 name = "terok-util"
-version = "0.1.0"
+version = "0.2.0"
 description = "Shared utility library for the terok-* sibling packages"
 optional = false
 python-versions = "<4.0,>=3.12"
 groups = ["main"]
 files = [
-    {file = "terok_util-0.1.0-py3-none-any.whl", hash = "sha256:2e1dfa321bb1a574460a07caf578ed8020bb6aab01ce44158ed41528bf1ae577"},
-    {file = "terok_util-0.1.0.tar.gz", hash = "sha256:27bcb70b41fd86bc54b529120a7c53ca8bc4bf7b5d332478e80035b746526199"},
+    {file = "terok_util-0.2.0-py3-none-any.whl", hash = "sha256:74f047643962ff64e62e354958fe37caa91f04dc811eb61f6af41220f8311ef8"},
+    {file = "terok_util-0.2.0.tar.gz", hash = "sha256:8fc285c4fdcfc6a2c3aeb04236f85c49093cb60c8602fe0e43d1e8b9a6f3e7cd"},
 ]
 
 [package.dependencies]
@@ -2425,4 +2425,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "acafb6ff7a0df64a56b2cab9705cde47fab4415a4c831fe0b856cc178a4a1f94"
+content-hash = "b883be14795ffedf4168aba9f910834201cdca40a3e9576862fe2ec3cbb2aba3"
