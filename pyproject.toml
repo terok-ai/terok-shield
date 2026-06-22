@@ -56,10 +56,10 @@ include = [
 version = "0.7.1"
 
 [tool.poetry.group.dev.dependencies]
-ruff = ">=0.15.17"
+ruff = ">=0.15.18"
 bandit = ">=1.7"
 docstr-coverage = "^2.3.2"
-complexipy = ">=5.6.0"
+complexipy = ">=5.6.1"
 vulture = ">=2.12"
 reuse = "^6.2.0"
 tach = "^0.35.0"
@@ -67,7 +67,7 @@ pre-commit = ">=4.0"
 mypy = ">=2.1.0,<3.0"
 
 [tool.poetry.group.test.dependencies]
-pytest = ">=9.1.0"
+pytest = ">=9.1.1"
 pytest-cov = ">=4.0"
 
 [tool.poetry.group.docs.dependencies]
