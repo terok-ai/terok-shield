@@ -21,7 +21,7 @@ jobs:
       matrix:
         distro: [debian12, ubuntu2404, debian13, fedora43]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
