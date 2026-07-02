@@ -29,7 +29,7 @@ class TestProfileResolvePipeline:
             runner = SubprocessRunner()
             resolver = DnsResolver(runner=runner)
             entries = loader.load_profile("base")
-            cache_path = state.profile_allowed_path(Path(tmp))
+            cache_path = state.StateBundle(Path(tmp)).profile_allowed
             ips = resolver.resolve_and_cache(entries, cache_path)
             assert len(ips) > 0, "Base profile should resolve to at least one IP"
             assert cache_path.is_file(), "Cache file should be written"
@@ -41,7 +41,7 @@ class TestProfileResolvePipeline:
             runner = SubprocessRunner()
             resolver = DnsResolver(runner=runner)
             entries = loader.load_profile("dev-standard")
-            cache_path = state.profile_allowed_path(Path(tmp))
+            cache_path = state.StateBundle(Path(tmp)).profile_allowed
             ips = resolver.resolve_and_cache(entries, cache_path)
             # github.com should resolve to at least one IP
             assert len(ips) > 0
@@ -59,7 +59,7 @@ class TestProfileResolvePipeline:
             entries = loader.load_profile("custom")
             assert entries == [CLOUDFLARE_DOMAIN, TEST_IP99]
 
-            cache_path = state.profile_allowed_path(Path(tmp))
+            cache_path = state.StateBundle(Path(tmp)).profile_allowed
             ips = resolver.resolve_and_cache(entries, cache_path)
             assert TEST_IP99 in ips  # raw IP passes through
             assert len(ips) >= 2  # resolved + raw
