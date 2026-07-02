@@ -7,10 +7,12 @@ Resolves domain names from allowlist profiles via ``dig`` and caches
 the results so containers do not block on DNS at every start.  Profiles
 prefer domain names over raw IPs because CDN addresses rotate.
 
-Falls back to ``getent hosts`` when ``dig`` is not installed — fewer
-IPs are captured (no parallel A + AAAA query), but resolution still
-works.  When the dnsmasq tier is active, domain resolution happens at
-runtime via ``--nftset``; this module then only handles raw IPs.
+Falls back to ``getent hosts`` when ``dig`` is not installed, and
+per-domain when ``dig`` runs but yields nothing (some environments break
+``dig`` while glibc resolution still works) — fewer IPs are captured
+(no parallel A + AAAA query), but resolution still works.  When the
+dnsmasq tier is active, domain resolution happens at runtime via
+``--nftset``; this module then only handles raw IPs.
 """
 # WAYPOINT: Shield (__init__), HookMode (hooks.mode)
 
@@ -83,6 +85,15 @@ class DnsResolver:
                 # dig missing — degrade gracefully for the rest of this batch
                 logger.warning("dig not found — falling back to getent for DNS resolution")
                 use_getent = True
+                ips = self._resolve_one(domain, use_getent=True)
+            if not ips and not use_getent:
+                # dig ran but produced nothing.  That is usually not a dead
+                # domain: some environments break dig specifically (a DNS
+                # forwarder rejecting its EDNS options, a hardened container
+                # path) while glibc resolution still works — so retry this
+                # one domain through getent before giving up.  Per-domain,
+                # not batch-wide: one genuinely dead domain must not demote
+                # the resolver for the rest.
                 ips = self._resolve_one(domain, use_getent=True)
             if not ips:
                 logger.warning("Domain %r resolved to no IPs (typo or DNS failure?)", domain)

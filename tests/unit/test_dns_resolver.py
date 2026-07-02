@@ -114,9 +114,10 @@ def test_logs_warning_for_unresolvable(
     make_resolver: ResolverHarnessFactory,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """resolve_domains() logs a warning when a domain resolves to no IPs."""
+    """resolve_domains() warns when a domain yields no IPs from any tier."""
     harness = make_resolver()
     harness.runner.dig_all.side_effect = [[TEST_IP1], []]
+    harness.runner.getent_hosts.return_value = []
 
     with caplog.at_level("WARNING", logger="terok_shield.dns.resolver"):
         harness.resolver.resolve_domains([CLOUDFLARE_DOMAIN, NONEXISTENT_DOMAIN])
@@ -214,6 +215,31 @@ def test_resolve_domains_getent_fallback_deduplicates(
 
     result = harness.resolver.resolve_domains([CLOUDFLARE_DOMAIN, GOOGLE_DNS_DOMAIN])
     assert result == [TEST_IP1]
+
+
+def test_resolve_domains_empty_dig_retries_via_getent(
+    make_resolver: ResolverHarnessFactory,
+) -> None:
+    """A dig that runs but yields nothing retries the domain via getent."""
+    harness = make_resolver()
+    harness.runner.dig_all.return_value = []
+    harness.runner.getent_hosts.return_value = [TEST_IP1]
+
+    result = harness.resolver.resolve_domains([CLOUDFLARE_DOMAIN])
+    assert result == [TEST_IP1]
+
+
+def test_resolve_domains_empty_dig_fallback_is_per_domain(
+    make_resolver: ResolverHarnessFactory,
+) -> None:
+    """One empty dig answer does not demote later domains to getent."""
+    harness = make_resolver()
+    harness.runner.dig_all.side_effect = [[], [TEST_IP2]]
+    harness.runner.getent_hosts.return_value = [TEST_IP1]
+
+    result = harness.resolver.resolve_domains([CLOUDFLARE_DOMAIN, GOOGLE_DNS_DOMAIN])
+    assert result == [TEST_IP1, TEST_IP2]
+    harness.runner.getent_hosts.assert_called_once()
 
 
 from terok_shield.state import StateBundle
