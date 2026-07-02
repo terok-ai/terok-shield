@@ -39,6 +39,36 @@ CTR_PREFIX = "shield-itest"
 _PODMAN_RM_TIMEOUT = 60
 
 
+class ShieldedContainer(str):
+    """A container name (``str``) that also carries its real podman id.
+
+    Behaves as the operator-facing container name everywhere a plain name
+    string is expected (``.name`` mirrors the ``str`` value), while also
+    exposing the full 64-hex podman container id via ``.id`` — the
+    ``--container-id`` routing key now required by
+    [`Shield.down`][terok_shield.Shield.down] /
+    [`Shield.up`][terok_shield.Shield.up].
+    """
+
+    _cid: str
+
+    def __new__(cls, name: str, cid: str) -> "ShieldedContainer":
+        """Create the name-string carrying container id ``cid``."""
+        obj = super().__new__(cls, name)
+        obj._cid = cid
+        return obj
+
+    @property
+    def name(self) -> str:
+        """The operator-facing container name (the ``str`` value)."""
+        return str(self)
+
+    @property
+    def id(self) -> str:
+        """The full 64-hex podman container id."""
+        return self._cid
+
+
 def _podman_rm(name: str) -> None:
     """Best-effort container removal with bounded timeout.
 
@@ -301,7 +331,7 @@ def nsenter_nft(pid: str, *args: str, stdin: str | None = None) -> subprocess.Co
 def shielded_container(
     _pull_image: None,
     shield_env: Path,
-) -> Iterator[str]:
+) -> Iterator[ShieldedContainer]:
     """Start a container with firewall applied via OCI hooks.
 
     Requires OCI hooks to be available — either global hooks installed
@@ -310,11 +340,13 @@ def shielded_container(
 
     1. ``Shield.pre_start()`` installs hooks, resolves DNS, returns podman args.
     2. ``podman run`` starts the container (OCI hooks apply the ruleset).
-    3. Yields the container name.
+    3. Yields a `ShieldedContainer` — the container name, with the real
+       podman id available via ``.id`` for the ``--container-id`` /
+       ``container_id`` argument that ``Shield.down`` / ``Shield.up`` require.
     4. Cleanup: ``podman rm -f``.
 
     Yields:
-        Container name with shield firewall applied.
+        `ShieldedContainer` name (with ``.id``) with shield firewall applied.
     """
     if not _hooks_available_cached:
         pytest.skip(
@@ -334,7 +366,7 @@ def shielded_container(
 
     try:
         extra_args = shield.pre_start(name)
-        start_shielded_container(name, extra_args, IMAGE)
-        yield name
+        cid = start_shielded_container(name, extra_args, IMAGE)
+        yield ShieldedContainer(name, cid)
     finally:
         _podman_rm(name)

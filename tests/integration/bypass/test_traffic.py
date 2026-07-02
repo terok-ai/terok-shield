@@ -43,16 +43,16 @@ class TestBypassTrafficDNS:
 
     def test_dns_connectable_in_bypass(self, shielded_container: str) -> None:
         """DNS port (53) on a non-allowed target is connectable during bypass."""
-        _shield().down(shielded_container, shielded_container)
+        _shield().down(shielded_container, shielded_container.id)
         assert_connectable(shielded_container, BLOCKED_TARGET_IP, BLOCKED_TARGET_DNS_PORT)
 
     def test_dns_blocked_again_after_up(self, shielded_container: str) -> None:
         """DNS connectivity is blocked again after restoring the shield."""
         shield = _shield()
-        shield.down(shielded_container, shielded_container)
+        shield.down(shielded_container, shielded_container.id)
         assert_connectable(shielded_container, BLOCKED_TARGET_IP, BLOCKED_TARGET_DNS_PORT)
 
-        shield.up(shielded_container, shielded_container)
+        shield.up(shielded_container, shielded_container.id)
         assert_not_connectable(shielded_container, BLOCKED_TARGET_IP, BLOCKED_TARGET_DNS_PORT)
 
 
@@ -67,16 +67,16 @@ class TestBypassTrafficHTTP:
 
     def test_http_reachable_in_bypass(self, shielded_container: str) -> None:
         """HTTP (port 80) to a non-allowed target is reachable during bypass."""
-        _shield().down(shielded_container, shielded_container)
+        _shield().down(shielded_container, shielded_container.id)
         assert_reachable(shielded_container, CONNCHECK_HTTP)
 
     def test_http_blocked_again_after_up(self, shielded_container: str) -> None:
         """HTTP traffic to non-allowed target is blocked after restoring shield."""
         shield = _shield()
-        shield.down(shielded_container, shielded_container)
+        shield.down(shielded_container, shielded_container.id)
         assert_reachable(shielded_container, CONNCHECK_HTTP)
 
-        shield.up(shielded_container, shielded_container)
+        shield.up(shielded_container, shielded_container.id)
         assert_blocked(shielded_container, CONNCHECK_HTTP)
 
 
@@ -91,16 +91,16 @@ class TestBypassTrafficHTTPS:
 
     def test_https_reachable_in_bypass(self, shielded_container: str) -> None:
         """HTTPS (port 443) to a non-allowed target is reachable during bypass."""
-        _shield().down(shielded_container, shielded_container)
+        _shield().down(shielded_container, shielded_container.id)
         assert_reachable(shielded_container, CONNCHECK_HTTPS)
 
     def test_https_blocked_again_after_up(self, shielded_container: str) -> None:
         """HTTPS traffic to non-allowed target is blocked after restoring shield."""
         shield = _shield()
-        shield.down(shielded_container, shielded_container)
+        shield.down(shielded_container, shielded_container.id)
         assert_reachable(shielded_container, CONNCHECK_HTTPS)
 
-        shield.up(shielded_container, shielded_container)
+        shield.up(shielded_container, shielded_container.id)
         assert_blocked(shielded_container, CONNCHECK_HTTPS)
 
 
@@ -115,7 +115,7 @@ class TestBypassTrafficAllowed:
 
     def test_allowed_target_reachable_in_bypass(self, shielded_container: str) -> None:
         """Already-allowed HTTP target stays reachable during bypass."""
-        _shield().down(shielded_container, shielded_container)
+        _shield().down(shielded_container, shielded_container.id)
         assert_reachable(shielded_container, ALLOWED_TARGET_HTTP)
 
 
@@ -131,14 +131,14 @@ class TestBypassRuleset:
     def test_bypass_ruleset_has_log_prefix(self, shielded_container: str) -> None:
         """The bypass ruleset contains the TEROK_SHIELD_BYPASS log prefix."""
         shield = _shield()
-        shield.down(shielded_container, shielded_container)
+        shield.down(shielded_container, shielded_container.id)
         rules = shield.rules(shielded_container)
         assert BYPASS_LOG_PREFIX in rules
 
     def test_bypass_ruleset_has_accept_policy(self, shielded_container: str) -> None:
         """The bypass ruleset output chain has policy accept."""
         shield = _shield()
-        shield.down(shielded_container, shielded_container)
+        shield.down(shielded_container, shielded_container.id)
         rules = shield.rules(shielded_container)
         assert "policy accept" in rules
 
@@ -155,7 +155,7 @@ class TestBypassRFC1918:
     def test_rfc1918_rules_present_in_default_bypass(self, shielded_container: str) -> None:
         """Default bypass (no --all) keeps RFC1918 reject rules."""
         shield = _shield()
-        shield.down(shielded_container, shielded_container)
+        shield.down(shielded_container, shielded_container.id)
         rules = shield.rules(shielded_container)
         for net in RFC1918:
             assert net in rules, f"RFC1918 reject rule for {net} missing in bypass"
@@ -163,7 +163,7 @@ class TestBypassRFC1918:
     def test_rfc1918_rules_absent_in_allow_all_bypass(self, shielded_container: str) -> None:
         """Bypass with allow_all=True removes RFC1918 reject rules."""
         shield = _shield()
-        shield.down(shielded_container, shielded_container, allow_all=True)
+        shield.down(shielded_container, shielded_container.id, allow_all=True)
         rules = shield.rules(shielded_container)
         for net in RFC1918:
             assert (
@@ -178,7 +178,7 @@ class TestBypassRFC1918:
         (which guarantees ICMP admin-prohibited responses).
         """
         shield = _shield()
-        shield.down(shielded_container, shielded_container)
+        shield.down(shielded_container, shielded_container.id)
         rules = shield.rules(shielded_container)
         assert "admin-prohibited" in rules
 
@@ -195,7 +195,7 @@ class TestBypassIPv6Private:
     def test_ipv6_private_rules_present_in_default_bypass(self, shielded_container: str) -> None:
         """Default bypass keeps IPv6 private reject rules."""
         shield = _shield()
-        shield.down(shielded_container, shielded_container)
+        shield.down(shielded_container, shielded_container.id)
         rules = shield.rules(shielded_container)
         for net in IPV6_PRIVATE:
             assert net in rules, f"IPv6 private reject rule for {net} missing in bypass"
@@ -203,7 +203,7 @@ class TestBypassIPv6Private:
     def test_ipv6_private_rules_absent_in_allow_all_bypass(self, shielded_container: str) -> None:
         """Bypass with allow_all=True removes IPv6 private reject rules."""
         shield = _shield()
-        shield.down(shielded_container, shielded_container, allow_all=True)
+        shield.down(shielded_container, shielded_container.id, allow_all=True)
         rules = shield.rules(shielded_container)
         for net in IPV6_PRIVATE:
             assert (

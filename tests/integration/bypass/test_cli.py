@@ -25,24 +25,24 @@ class TestBypassCLI:
 
     def test_cli_down(self, shielded_container: str, capsys: pytest.CaptureFixture) -> None:
         """``main(["down", container])`` switches to bypass mode."""
-        main(["down", shielded_container])
+        main(["down", shielded_container, "--container-id", shielded_container.id])
         captured = capsys.readouterr()
         assert "Shield down" in captured.out
         assert _shield().state(shielded_container) == ShieldState.DOWN
 
     def test_cli_disengaged(self, shielded_container: str, capsys: pytest.CaptureFixture) -> None:
         """``main(["down", container, "--all"])`` enables full bypass."""
-        main(["down", shielded_container, "--all"])
+        main(["down", shielded_container, "--all", "--container-id", shielded_container.id])
         captured = capsys.readouterr()
         assert "all traffic" in captured.out
         assert _shield().state(shielded_container) == ShieldState.DISENGAGED
 
     def test_cli_up(self, shielded_container: str, capsys: pytest.CaptureFixture) -> None:
         """``main(["up", container])`` restores deny-all mode."""
-        main(["down", shielded_container])
+        main(["down", shielded_container, "--container-id", shielded_container.id])
         assert _shield().state(shielded_container) == ShieldState.DOWN
 
-        main(["up", shielded_container])
+        main(["up", shielded_container, "--container-id", shielded_container.id])
         captured = capsys.readouterr()
         assert "Shield up" in captured.out
         assert _shield().state(shielded_container) == ShieldState.UP
@@ -51,10 +51,10 @@ class TestBypassCLI:
         """CLI down enables traffic; CLI up blocks it again."""
         assert_blocked(shielded_container, BLOCKED_TARGET_HTTP)
 
-        main(["down", shielded_container])
+        main(["down", shielded_container, "--container-id", shielded_container.id])
         assert_connectable(shielded_container, BLOCKED_TARGET_IP, BLOCKED_TARGET_DNS_PORT)
 
-        main(["up", shielded_container])
+        main(["up", shielded_container, "--container-id", shielded_container.id])
         assert_blocked(shielded_container, BLOCKED_TARGET_HTTP)
 
     def test_cli_rules_shows_state(
@@ -65,7 +65,7 @@ class TestBypassCLI:
         captured = capsys.readouterr()
         assert "State: up" in captured.out
 
-        main(["down", shielded_container])
+        main(["down", shielded_container, "--container-id", shielded_container.id])
         capsys.readouterr()  # Clear buffer
 
         main(["rules", shielded_container])

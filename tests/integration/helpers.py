@@ -91,7 +91,7 @@ def _hook_diagnostics(extra_args: list[str]) -> str:
 
 def start_shielded_container(
     name: str, extra_args: list[str], image: str, timeout: int = 30
-) -> None:
+) -> str:
     """Start a container with shield args, providing detailed errors on failure.
 
     Unlike plain ``subprocess.run(..., check=True, capture_output=True)`` which
@@ -103,6 +103,11 @@ def start_shielded_container(
         extra_args: Extra arguments from ``Shield.pre_start()``.
         image: Container image to run.
         timeout: Podman timeout in seconds.
+
+    Returns:
+        The full 64-hex podman container id (``--container-id`` routing key
+        required by ``Shield.down`` / ``Shield.up``), read from ``podman
+        run -d`` stdout.
 
     Raises:
         RuntimeError: If podman run exits non-zero, with stderr/stdout details.
@@ -121,6 +126,7 @@ def start_shielded_container(
             f"  stdout: {result.stdout.strip()}\n"
             f"  extra_args: {extra_args}{diag}"
         )
+    return result.stdout.strip()
 
 
 def assert_connectable(container: str, ip: str, port: int = 53, timeout: int = 5) -> None:

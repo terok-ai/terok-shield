@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        distro: [debian12, ubuntu2404, debian13, fedora43, alpine]
+        distro: [debian12, ubuntu2404, debian13, fedora43, alpine, void, mageia]
     steps:
       - uses: actions/checkout@v7
         with:
