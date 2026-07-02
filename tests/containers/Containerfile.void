@@ -17,6 +17,11 @@
 # toolchain).
 FROM ghcr.io/void-linux/void-glibc:latest
 
+# Ownership label: a Containerfile LABEL propagates into every
+# intermediate layer image, so the harness teardown can prune exactly
+# its own dangling generations (value = the harness IMAGE_PREFIX).
+LABEL "io.terok.matrix-test"="terok-shield-test"
+
 # Sync + self-update xbps first (rolling release), then install deps.
 # base-devel + *-devel covers any sdist that lacks a manylinux wheel
 # (e.g. cffi/libffi); bind-utils provides dig for the DNS allowlist

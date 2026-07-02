@@ -18,6 +18,11 @@
 # pip).  The uv binary in the official image is a static musl build.
 FROM docker.io/library/alpine:3.21
 
+# Ownership label: a Containerfile LABEL propagates into every
+# intermediate layer image, so the harness teardown can prune exactly
+# its own dangling generations (value = the harness IMAGE_PREFIX).
+LABEL "io.terok.matrix-test"="terok-shield-test"
+
 # musl toolchain (build-base + *-dev) lets poetry build any dependency
 # that lacks a musllinux wheel; bind-tools provides dig for the DNS
 # allowlist probes; bash is required by the harness (busybox sh is not
