@@ -21,7 +21,7 @@ FROM docker.io/mageia:9
 # wheel; no dbus/glib build stack and no ssh client.  bind-utils provides
 # dig for the DNS allowlist probes; bash is required by the harness.
 RUN dnf install -y \
-        podman slirp4netns nftables crun \
+        podman slirp4netns nftables dnsmasq crun \
         shadow-utils \
         python3 \
         git curl ca-certificates bind-utils bash \
