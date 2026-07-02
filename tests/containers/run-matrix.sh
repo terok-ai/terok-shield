@@ -73,9 +73,9 @@ declare -A EXPECTED_VERSIONS=(
     [ubuntu2604]="5.7.0"
     [debian13]="5.4.2"
     [fedora43]="5.8.2"
-    [fedora44]="5.8.2"
+    [fedora44]="5.8.3"
     [podman]="latest"
-    [alpine]="5.3.1"
+    [alpine]="5.3.2"
 )
 
 # Print "expected podman X.Y.Z" for distros with a version pin, or
@@ -279,7 +279,7 @@ run_tests() {
                 # ── Infrastructure setup ──
                 echo \"\"
                 echo \"--- installing shield hooks ---\"
-                poetry run terok-shield setup --user
+                poetry run terok-shield setup
 
                 echo \"\"
                 echo \"--- check-environment ---\"
