@@ -388,8 +388,14 @@ done
 
 warn_keyring
 
+# A slot whose image fails to build is recorded and reported as FAILED, but
+# does NOT abort the whole matrix — so one run surfaces every distro's issues.
+declare -A BUILD_FAILED_MAP=()
 for target in "${TARGETS[@]}"; do
-    build_image "$target"
+    if ! build_image "$target"; then
+        echo -e "${C_RED}==> Build FAILED for ${C_BOLD}$target${C_RED} — recording and continuing${C_RESET}" >&2
+        BUILD_FAILED_MAP[$target]=1
+    fi
 done
 
 if $BUILD_ONLY; then
@@ -401,6 +407,11 @@ PASSED=()
 FAILED=()
 
 for target in "${TARGETS[@]}"; do
+    if [[ -n "${BUILD_FAILED_MAP[$target]:-}" ]]; then
+        echo -e "${C_RED}==> $target: FAIL (image build failed)${C_RESET}" >&2
+        FAILED+=("$target")
+        continue
+    fi
     if run_tests "$target" "$TEST_SCOPE"; then
         PASSED+=("$target")
     else
