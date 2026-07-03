@@ -17,10 +17,7 @@ keywords = ["podman", "containers", "firewall", "nftables", "security"]
 requires-python = ">=3.12,<4.0"
 dynamic = ["version", "classifiers"]
 # Dependency pins follow the policy in AGENTS.md ("Dependency Pinning &
-# pyproject.toml Hygiene").  Keep the dependency tables comment-free and
-# self-documenting -- in particular, never note here why a sibling
-# terok-* package is pinned a certain way, nor any transient dev-cycle
-# state: a comment-blind release script would ship such notes.
+# pyproject.toml Hygiene").  Keep the dependency list comment-free.
 dependencies = [
     "PyYAML~=6.0",
     "pydantic~=2.13",
