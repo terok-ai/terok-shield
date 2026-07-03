@@ -538,6 +538,26 @@ def test_poststop_escalates_to_sigkill(tmp_path: Path) -> None:
     assert any("SIGKILL" in str(c) for c in mock_log.call_args_list)
 
 
+def test_poststop_reports_failed_sigkill(tmp_path: Path) -> None:
+    """A SIGKILL that itself fails is reported, not swallowed."""
+    sd = tmp_path / "sd"
+    sd.mkdir()
+    (sd / "dnsmasq.pid").write_text("12345\n")
+
+    with (
+        mock.patch("terok_shield.resources.nft_hook._is_our_dnsmasq", return_value=True),
+        mock.patch("terok_shield.resources.nft_hook.time.sleep"),
+        mock.patch(
+            "terok_shield.resources._oci_state.os.kill",
+            side_effect=[None, OSError("EPERM")],
+        ),
+        mock.patch("terok_shield.resources._oci_state.log") as mock_log,
+    ):
+        nft_hook._poststop(sd)
+
+    assert any("SIGKILL" in str(c) and "failed" in str(c) for c in mock_log.call_args_list)
+
+
 def test_poststop_skips_stale_pid(tmp_path: Path) -> None:
     """_poststop() skips signalling and removes the stale PID file on identity mismatch."""
     sd = tmp_path / "sd"
