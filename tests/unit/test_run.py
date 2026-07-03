@@ -172,7 +172,7 @@ def test_has_uses_shutil_which(
 ) -> None:
     """has() reflects whether the executable can be found."""
     runner._has_cache.clear()
-    monkeypatch.setattr(shutil, "which", lambda _name: which_result)
+    monkeypatch.setattr(shutil, "which", lambda _name, path=None: which_result)
     assert runner.has("nft") is expected
 
 
@@ -324,7 +324,7 @@ def test_dig_all_raises_when_binary_missing(
 ) -> None:
     """dig_all() raises DigNotFoundError when dig is not on PATH."""
     runner._has_cache.clear()
-    monkeypatch.setattr(shutil, "which", lambda name: None)
+    monkeypatch.setattr(shutil, "which", lambda name, path=None: None)
     with pytest.raises(DigNotFoundError, match="dig binary not found"):
         runner.dig_all(TEST_DOMAIN)
 
@@ -346,24 +346,23 @@ def test_dig_all_uses_single_query(
 
 def test_find_nft_returns_path_from_which(monkeypatch: pytest.MonkeyPatch) -> None:
     """find_nft() returns the PATH result when shutil.which succeeds."""
-    monkeypatch.setattr(shutil, "which", lambda _name: NFT_BINARY)
+    monkeypatch.setattr(shutil, "which", lambda _name, path=None: NFT_BINARY)
     assert find_nft() == NFT_BINARY
 
 
 def test_find_nft_falls_back_to_sbin(monkeypatch: pytest.MonkeyPatch) -> None:
     """find_nft() checks /usr/sbin/nft when PATH lookup fails."""
-    monkeypatch.setattr(shutil, "which", lambda _name: None)
-
-    def _is_file(self: Path) -> bool:
-        return str(self) == NFT_SBIN
-
-    with mock.patch.object(Path, "is_file", _is_file):
-        assert find_nft() == NFT_SBIN
+    monkeypatch.setattr(
+        shutil,
+        "which",
+        lambda _name, path=None: NFT_SBIN if path and "/usr/sbin" in path else None,
+    )
+    assert find_nft() == NFT_SBIN
 
 
 def test_find_nft_returns_empty_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     """find_nft() returns empty string when nft is not found anywhere."""
-    monkeypatch.setattr(shutil, "which", lambda _name: None)
+    monkeypatch.setattr(shutil, "which", lambda _name, path=None: None)
     with mock.patch("terok_shield.run.Path.is_file", return_value=False):
         assert find_nft() == ""
 

@@ -26,6 +26,7 @@ import json
 import os
 import signal
 import sys
+import time
 from pathlib import Path
 
 # Sibling-module import: ``_oci_state.py`` lives next to this script in
@@ -218,13 +219,37 @@ def _poststop(sd: Path) -> None:
     except (ValueError, OSError):
         return
     if not _is_our_dnsmasq(pid_int, conf_path):
+        _oci_state.log(
+            f"poststop: stale dnsmasq pid file (pid {pid_int} recycled or gone) — removed",
+            sd / "hook-error.log",
+        )
         with contextlib.suppress(OSError):
             pid_file.unlink()
         return
+    # Escalate and report: a silently-leaked dnsmasq per container stop is
+    # invisible to the operator, and EPERM here (userns mismatch) would
+    # otherwise vanish into a bare except.
     try:
         os.kill(pid_int, signal.SIGTERM)
-    except OSError:
-        pass
+    except OSError as exc:
+        _oci_state.log(
+            f"poststop: SIGTERM dnsmasq[{pid_int}] failed: {exc}", sd / "hook-error.log"
+        )
+        return
+    for _ in range(20):  # up to 2s for dnsmasq to exit on its own
+        if not _is_our_dnsmasq(pid_int, conf_path):
+            return
+        time.sleep(0.1)
+    try:
+        os.kill(pid_int, signal.SIGKILL)
+        _oci_state.log(
+            f"poststop: dnsmasq[{pid_int}] survived SIGTERM — sent SIGKILL",
+            sd / "hook-error.log",
+        )
+    except OSError as exc:
+        _oci_state.log(
+            f"poststop: SIGKILL dnsmasq[{pid_int}] failed: {exc}", sd / "hook-error.log"
+        )
 
 
 def _our_dnsmasq_alive(pid_file: Path, conf_path: Path) -> bool:

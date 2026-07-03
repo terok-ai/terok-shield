@@ -25,7 +25,7 @@ import signal
 from pathlib import Path
 
 from ..nft.constants import DNSMASQ_BIND_DEFAULT, NFT_TABLE_NAME
-from ..run import CommandRunner
+from ..run import CommandRunner, which_sbin_aware
 from ..state import StateBundle
 
 logger = logging.getLogger(__name__)
@@ -286,7 +286,8 @@ def has_nftset_support(runner: CommandRunner) -> bool:
     feature flag.  Returns False if dnsmasq is not installed or its
     output contains ``no-nftset`` (explicitly disabled).
     """
-    out = runner.run(["dnsmasq", "--version"], check=False)
+    dnsmasq_bin = which_sbin_aware("dnsmasq") or "dnsmasq"
+    out = runner.run([dnsmasq_bin, "--version"], check=False)
     return bool(re.search(r"\bnftset\b", out)) and not bool(re.search(r"\bno-nftset\b", out))
 
 

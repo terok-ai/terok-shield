@@ -125,9 +125,14 @@ class SubprocessRunner:
         return r.stdout or ""
 
     def has(self, name: str) -> bool:
-        """Return True if an executable is on PATH (cached per name)."""
+        """Return True if an executable is on PATH or a sbin dir (cached).
+
+        sbin-aware for the same reason as [`find_nft`][terok_shield.run.find_nft]: Debian-family login
+        shells omit /usr/sbin, and a plain which() there would silently
+        downgrade the DNS tier by "missing" dnsmasq.
+        """
         if name not in self._has_cache:
-            self._has_cache[name] = shutil.which(name) is not None
+            self._has_cache[name] = bool(which_sbin_aware(name))
         return self._has_cache[name]
 
     # ── nft ─────────────────────────────────────────────
@@ -255,17 +260,25 @@ class ShieldNeedsSetup(RuntimeError):
 _SBIN_DIRS = ("/usr/sbin", "/sbin")
 
 
+def which_sbin_aware(name: str) -> str:
+    """Resolve *name* like ``shutil.which``, falling back to the sbin dirs.
+
+    Login shells on the Debian family exclude ``/usr/sbin`` from PATH, so
+    a plain which() misses sbin-installed daemons (dnsmasq) — and the DNS
+    tier silently downgrades to dig.  ``shutil.which`` with an explicit
+    ``path=`` keeps the executability check identical to PATH resolution.
+    """
+    for search_path in (None, *_SBIN_DIRS):
+        found = shutil.which(name, path=search_path)
+        if found:
+            return found
+    return ""
+
+
 def find_nft() -> str:
     """Locate the nft binary, checking PATH then common sbin directories.
 
     sbin directories are checked explicitly because rootless users often
     lack them in PATH.  Returns empty string if not found.
     """
-    found = shutil.which("nft")
-    if found:
-        return found
-    for d in _SBIN_DIRS:
-        candidate = Path(d) / "nft"
-        if candidate.is_file():
-            return str(candidate)
-    return ""
+    return which_sbin_aware("nft")

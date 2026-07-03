@@ -252,6 +252,7 @@ run_tests() {
             su - $test_user -c '
                 set -e
                 export XDG_RUNTIME_DIR=/run/user/\$(id -u)
+                export TEROK_MATRIX=1
 
                 cd $WORKSPACE_DIR
 

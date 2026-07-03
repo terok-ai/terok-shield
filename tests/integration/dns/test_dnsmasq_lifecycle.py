@@ -14,6 +14,7 @@ real containers and verify actual DNS/nft behavior — no mocking.
 import shutil as _shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from unittest import mock
 
@@ -23,7 +24,9 @@ from terok_shield import Shield, ShieldConfig
 from terok_shield.config import DnsTier, detect_dns_tier
 from terok_shield.dns.dnsmasq import generate_config, nftset_entry, read_domains
 from terok_shield.nft.constants import DNSMASQ_BIND_DEFAULT, PASTA_DNS
+from terok_shield.run import which_sbin_aware
 from tests.testnet import (
+    ALLOWED_TARGET_DOMAIN,
     ALLOWED_TARGET_HTTP,
     BLOCKED_TARGET_HTTP,
     GOOGLE_DNS_DOMAIN,
@@ -46,12 +49,27 @@ from ..helpers import (
 )
 
 dnsmasq_missing = pytest.mark.skipif(
-    _shutil.which("dnsmasq") is None,
+    not which_sbin_aware("dnsmasq"),
     reason="dnsmasq not installed",
 )
 
 
 # ── Helpers ──────────────────────────────────────────────
+
+
+def _wait_pid_gone(pid: str, timeout: float = 10.0) -> bool:
+    """Wait for a PID to leave /proc — poststop hooks run asynchronously.
+
+    ``podman stop`` returns when the container is down; the runtime delete
+    that fires the poststop hook happens in podman's background cleanup,
+    so an immediate assertion races it.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not Path(f"/proc/{pid}").exists():
+            return True
+        time.sleep(0.2)
+    return not Path(f"/proc/{pid}").exists()
 
 
 def _extract_annotation(args: list[str], key: str) -> str | None:
@@ -288,8 +306,16 @@ class TestDnsmasqInContainer:
         assert "timeout" in r.stdout
 
     def test_allowed_domain_resolves_and_is_reachable(self, dnsmasq_container) -> None:
-        """Traffic to allowed domains works through dnsmasq resolution."""
-        name, _sd, _shield = dnsmasq_container
+        """An allow()ed domain becomes reachable once dnsmasq resolves it.
+
+        allow() registers the domain's nftset line and the in-container
+        lookup drives dnsmasq, whose reply populates the allow sets — the
+        dnsmasq tier's whole point.  A raw-IP fetch with nothing allowed
+        would bypass DNS and assert an unpopulated set.
+        """
+        name, _sd, shield = dnsmasq_container
+        shield.allow(name, ALLOWED_TARGET_DOMAIN)
+        exec_in_container(name, "nslookup", ALLOWED_TARGET_DOMAIN)
         assert_reachable(name, ALLOWED_TARGET_HTTP)
 
     def test_blocked_target_is_denied(self, dnsmasq_container) -> None:
@@ -310,7 +336,7 @@ class TestDnsmasqInContainer:
             ["podman", "stop", "--time=5", name], capture_output=True, check=True, timeout=30
         )
 
-        assert not Path(f"/proc/{pid_str}").exists(), (
+        assert _wait_pid_gone(pid_str), (
             f"dnsmasq PID {pid_str} still in /proc after container stop — "
             "poststop hook may not have run"
         )
@@ -481,7 +507,7 @@ class TestRestartWithReusedStateDir:
             subprocess.run(["podman", "stop", "--time=5", name], capture_output=True, timeout=30)
             subprocess.run(["podman", "rm", name], capture_output=True, timeout=15)
 
-            assert not Path(f"/proc/{first_pid}").exists(), (
+            assert _wait_pid_gone(first_pid), (
                 "dnsmasq should be gone after container stop"
             )
 

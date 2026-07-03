@@ -117,6 +117,46 @@ nft_missing = pytest.mark.skipif(not find_nft(), reason="nft not installed")
 dig_missing = pytest.mark.skipif(not _has("dig"), reason="dig not installed")
 
 
+def _dig_functional() -> bool:
+    """Whether dig can execute at all — present-but-crashing builds exist.
+
+    Mageia's aarch64 bind (jemalloc built for 4K pages) SIGABRTs on
+    64K-page kernels before sending a single query; dig-tier tests must
+    skip there with the real reason, not fail on empty output.
+    """
+    if not _has("dig"):
+        return False
+    try:
+        return (
+            subprocess.run(
+                ["dig", "+short", ".", "NS"], capture_output=True, timeout=10
+            ).returncode
+            == 0
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+dig_broken = pytest.mark.skipif(
+    _has("dig") and not _dig_functional(),
+    reason="dig present but non-functional on this host",
+)
+
+
+def _infra_problem(message: str) -> None:
+    """Broken container infrastructure: skip locally, fail in the matrix.
+
+    The matrix images guarantee working nested podman, so a failed
+    pre-check there is a real finding that must turn the slot red —
+    skipping let a collapsed slot report green (95 skips in 5 seconds).
+    Outside the matrix (TEROK_MATRIX unset) a missing capability is a
+    legitimate host limitation and skipping stays correct.
+    """
+    if os.environ.get("TEROK_MATRIX"):
+        pytest.fail(message, pytrace=False)
+    pytest.skip(message)
+
+
 def _hooks_available() -> bool:
     """Return True if OCI hooks will fire on container start.
 
@@ -243,9 +283,10 @@ def nft_in_netns(_pull_image: None, _verify_connectivity: None) -> None:
             timeout=10,
         )
         if r.returncode != 0:
-            pytest.skip(f"nft not usable inside container netns: {r.stderr.strip()}")
+            _infra_problem(f"nft not usable inside container netns: {r.stderr.strip()}")
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
-        pytest.skip(f"nft pre-check failed: {e}")
+        stderr = getattr(e, "stderr", b"") or b""
+        _infra_problem(f"nft pre-check failed: {e}: {stderr.decode(errors='replace').strip()}")
     finally:
         _podman_rm(name)
 
@@ -255,12 +296,20 @@ def container(_pull_image: None) -> Iterator[str]:
     """Start a disposable Alpine container, yield its name, clean up after."""
     name = f"{CTR_PREFIX}-{os.getpid()}"
     _podman_rm(name)
-    subprocess.run(
-        ["podman", "run", "-d", "--name", name, IMAGE, "sleep", "120"],
-        check=True,
-        capture_output=True,
-        timeout=30,
-    )
+    try:
+        subprocess.run(
+            ["podman", "run", "-d", "--name", name, IMAGE, "sleep", "120"],
+            check=True,
+            capture_output=True,
+            timeout=30,
+        )
+    except subprocess.CalledProcessError as e:
+        # CalledProcessError hides stderr — surface the runtime's actual
+        # complaint (this exact blindness cost a full matrix round).
+        raise RuntimeError(
+            f"podman run failed for {name}: "
+            f"{(e.stderr or b'').decode(errors='replace').strip()}"
+        ) from e
     yield name
     _podman_rm(name)
 

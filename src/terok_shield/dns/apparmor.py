@@ -17,7 +17,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..config import DnsTier, detect_dns_tier
-from ..run import CommandRunner, ExecError
+from ..run import CommandRunner, ExecError, which_sbin_aware
 from . import dnsmasq
 
 # Throwaway config dnsmasq --test reads to probe state-dir access.
@@ -56,7 +56,7 @@ def dnsmasq_can_read_state_dir(runner: CommandRunner, state_dir: Path) -> bool:
         return True
     try:
         runner.run(
-            ["dnsmasq", "--test", f"--conf-file={probe}"],
+            [which_sbin_aware("dnsmasq") or "dnsmasq", "--test", f"--conf-file={probe}"],
             check=True,
             timeout=_PROBE_TIMEOUT_S,
         )

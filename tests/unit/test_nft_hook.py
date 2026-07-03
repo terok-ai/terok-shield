@@ -509,12 +509,33 @@ def test_poststop_sends_sigterm_to_dnsmasq(tmp_path: Path) -> None:
     (sd / "dnsmasq.pid").write_text("12345\n")
 
     with (
-        mock.patch("terok_shield.resources.nft_hook._is_our_dnsmasq", return_value=True),
+        mock.patch(
+            "terok_shield.resources.nft_hook._is_our_dnsmasq",
+            side_effect=[True, False],  # identity check passes; first poll sees it gone
+        ),
         mock.patch("terok_shield.resources._oci_state.os.kill") as mock_kill,
     ):
         nft_hook._poststop(sd)
 
     mock_kill.assert_called_once_with(12345, 15)
+
+
+def test_poststop_escalates_to_sigkill(tmp_path: Path) -> None:
+    """_poststop() SIGKILLs (and reports) a dnsmasq that survives SIGTERM."""
+    sd = tmp_path / "sd"
+    sd.mkdir()
+    (sd / "dnsmasq.pid").write_text("12345\n")
+
+    with (
+        mock.patch("terok_shield.resources.nft_hook._is_our_dnsmasq", return_value=True),
+        mock.patch("terok_shield.resources.nft_hook.time.sleep"),
+        mock.patch("terok_shield.resources._oci_state.os.kill") as mock_kill,
+        mock.patch("terok_shield.resources._oci_state.log") as mock_log,
+    ):
+        nft_hook._poststop(sd)
+
+    assert mock_kill.call_args_list == [mock.call(12345, 15), mock.call(12345, 9)]
+    assert any("SIGKILL" in str(c) for c in mock_log.call_args_list)
 
 
 def test_poststop_skips_stale_pid(tmp_path: Path) -> None:
