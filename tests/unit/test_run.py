@@ -6,7 +6,6 @@
 import shutil
 import subprocess
 from collections.abc import Iterator
-from pathlib import Path
 from unittest import mock
 
 import pytest
@@ -363,8 +362,7 @@ def test_find_nft_falls_back_to_sbin(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_find_nft_returns_empty_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     """find_nft() returns empty string when nft is not found anywhere."""
     monkeypatch.setattr(shutil, "which", lambda _name, path=None: None)
-    with mock.patch("terok_shield.run.Path.is_file", return_value=False):
-        assert find_nft() == ""
+    assert find_nft() == ""
 
 
 def test_subprocess_runner_raises_when_nft_missing() -> None:

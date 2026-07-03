@@ -507,9 +507,7 @@ class TestRestartWithReusedStateDir:
             subprocess.run(["podman", "stop", "--time=5", name], capture_output=True, timeout=30)
             subprocess.run(["podman", "rm", name], capture_output=True, timeout=15)
 
-            assert _wait_pid_gone(first_pid), (
-                "dnsmasq should be gone after container stop"
-            )
+            assert _wait_pid_gone(first_pid), "dnsmasq should be gone after container stop"
 
             # Second run with the same state dir — pre_start is idempotent
             extra_args2 = shield.pre_start(name)

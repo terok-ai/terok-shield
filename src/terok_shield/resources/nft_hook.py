@@ -232,9 +232,7 @@ def _poststop(sd: Path) -> None:
     try:
         os.kill(pid_int, signal.SIGTERM)
     except OSError as exc:
-        _oci_state.log(
-            f"poststop: SIGTERM dnsmasq[{pid_int}] failed: {exc}", sd / "hook-error.log"
-        )
+        _oci_state.log(f"poststop: SIGTERM dnsmasq[{pid_int}] failed: {exc}", sd / "hook-error.log")
         return
     for _ in range(20):  # up to 2s for dnsmasq to exit on its own
         if not _is_our_dnsmasq(pid_int, conf_path):
@@ -247,9 +245,7 @@ def _poststop(sd: Path) -> None:
             sd / "hook-error.log",
         )
     except OSError as exc:
-        _oci_state.log(
-            f"poststop: SIGKILL dnsmasq[{pid_int}] failed: {exc}", sd / "hook-error.log"
-        )
+        _oci_state.log(f"poststop: SIGKILL dnsmasq[{pid_int}] failed: {exc}", sd / "hook-error.log")
 
 
 def _our_dnsmasq_alive(pid_file: Path, conf_path: Path) -> bool:

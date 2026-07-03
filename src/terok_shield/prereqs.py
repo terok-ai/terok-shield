@@ -16,7 +16,6 @@ No subprocess invocation, no side effects.
 from __future__ import annotations
 
 import shutil
-
 from dataclasses import dataclass
 
 from .run import which_sbin_aware
@@ -79,5 +78,3 @@ def check_krun_binaries() -> tuple[BinaryCheck, ...]:
             "in-netns IP assignment for the krun runtime",
         ),
     )
-
-

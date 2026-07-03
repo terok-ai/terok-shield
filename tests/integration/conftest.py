@@ -128,9 +128,7 @@ def _dig_functional() -> bool:
         return False
     try:
         return (
-            subprocess.run(
-                ["dig", "+short", ".", "NS"], capture_output=True, timeout=10
-            ).returncode
+            subprocess.run(["dig", "+short", ".", "NS"], capture_output=True, timeout=10).returncode
             == 0
         )
     except (OSError, subprocess.TimeoutExpired):
@@ -214,14 +212,11 @@ def pytest_sessionstart(session: pytest.Session) -> None:
         return
     unknown = expected - _CAPABILITY_PROBES.keys()
     if unknown:
-        pytest.exit(
-            f"TEROK_EXPECT names unknown capabilities: {sorted(unknown)}", returncode=3
-        )
+        pytest.exit(f"TEROK_EXPECT names unknown capabilities: {sorted(unknown)}", returncode=3)
     missing = sorted(cap for cap in expected if not _CAPABILITY_PROBES[cap]())
     if missing:
         pytest.exit(
-            "matrix capability contract broken — expected but missing: "
-            + ", ".join(missing),
+            "matrix capability contract broken — expected but missing: " + ", ".join(missing),
             returncode=3,
         )
 
@@ -357,8 +352,7 @@ def container(_pull_image: None) -> Iterator[str]:
         # CalledProcessError hides stderr — surface the runtime's actual
         # complaint (this exact blindness cost a full matrix round).
         raise RuntimeError(
-            f"podman run failed for {name}: "
-            f"{(e.stderr or b'').decode(errors='replace').strip()}"
+            f"podman run failed for {name}: {(e.stderr or b'').decode(errors='replace').strip()}"
         ) from e
     yield name
     _podman_rm(name)

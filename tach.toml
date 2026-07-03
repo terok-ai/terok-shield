@@ -67,12 +67,13 @@ path = "terok_shield.run"
 layer = "foundation"
 depends_on = []
 
-# Host binary prerequisite probes — zero internal deps, exported for
-# higher layers (terok-sandbox aggregator, operator diagnostics)
+# Host binary prerequisite probes — exported for higher layers
+# (terok-sandbox aggregator, operator diagnostics).  Depends on run for
+# the canonical sbin-aware binary lookup.
 [[modules]]
 path = "terok_shield.prereqs"
 layer = "foundation"
-depends_on = []
+depends_on = ["terok_shield.run"]
 
 # Hub event emitter — stdlib-only client for the terok-clearance unix ingester
 [[modules]]
