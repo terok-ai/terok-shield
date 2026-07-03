@@ -253,7 +253,9 @@ run_tests() {
                 set -e
                 export XDG_RUNTIME_DIR=/run/user/\$(id -u)
                 export TEROK_MATRIX=1
-                export TEROK_EXPECT=podman,nft,dnsmasq,dig,getent,internet,hooks
+                # Image-capability contract only: hooks are phase state,
+                # appended below once setup has installed them.
+                export TEROK_EXPECT=podman,nft,dnsmasq,dig,getent,internet
 
                 cd $WORKSPACE_DIR
 
@@ -297,6 +299,7 @@ run_tests() {
                 echo \"\"
                 echo \"--- installing shield hooks ---\"
                 poetry run terok-shield setup
+                export TEROK_EXPECT=\${TEROK_EXPECT},hooks
 
                 echo \"\"
                 echo \"--- check-environment ---\"
