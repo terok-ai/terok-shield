@@ -17,19 +17,20 @@ keywords = ["podman", "containers", "firewall", "nftables", "security"]
 requires-python = ">=3.12,<4.0"
 dynamic = ["version", "classifiers"]
 # ── Dependency pinning policy (see AGENTS.md) ───────────────────────
-# Third-party runtime deps at major 0 (0.y.z) are pinned to an exact
-# patch: pre-1.0 packages guarantee nothing across minors OR patches.
-# Major >= 1 deps use ranges (semver).  Sibling terok-* deps are exempt
-# — we guarantee patch-level API stability, so they keep ranges (or a
-# release-wheel URL pin).  Dev/test/docs groups are exempt.  This is the
-# ONLY comment permitted in this file — never add dev-cycle notes here,
-# and never mention temporary git-branch pins or the multi-repo PR chain
-# (a merge script rewrites deps and would leak such comments into a
-# production release).
+# Runtime deps use compatible-release pins at the tested baseline:
+# third-party major 0 → exact (==0.y.z; pre-1.0 guarantees nothing);
+# third-party major >= 1 → ~=X.Y (locked-minor floor, next-major cap;
+# ~=X.Y.Z patch-series only where a specific patch floor is required);
+# sibling terok-* → ~=0.y.z or a release-wheel URL pin (patch-level API
+# stability is guaranteed across siblings).  Dev/test/docs groups keep
+# simple floors.  This is the ONLY comment permitted in this file —
+# never add dev-cycle notes here, and never mention temporary git-branch
+# pins or the multi-repo PR chain (a merge script rewrites deps and
+# would leak such comments into a production release).
 dependencies = [
-    "PyYAML>=6.0",
-    "pydantic>=2.0",
-    "terok-util>=0.2.0,<0.3.0",
+    "PyYAML~=6.0",
+    "pydantic~=2.13",
+    "terok-util~=0.2.0",
 ]
 
 [project.urls]
