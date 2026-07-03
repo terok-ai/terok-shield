@@ -253,6 +253,7 @@ run_tests() {
                 set -e
                 export XDG_RUNTIME_DIR=/run/user/\$(id -u)
                 export TEROK_MATRIX=1
+                export TEROK_EXPECT=podman,nft,dnsmasq,dig,getent,internet,hooks
 
                 cd $WORKSPACE_DIR
 
