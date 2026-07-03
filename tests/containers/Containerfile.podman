@@ -25,7 +25,7 @@ RUN mkdir -p /run/user/$(id -u podman) && chown podman:podman /run/user/$(id -u 
 RUN mkdir -p /etc/containers/containers.conf.d \
     && printf '[containers]\nkeyring = false\n' \
         > /etc/containers/containers.conf.d/00-no-keyring.conf \
-    && printf '# pasta-created netns rejects nsenter here (EPERM; host passt\n# AppArmor profile suspected) — the seven distro slots on slirp4netns\n# pass the same pre-check.\n[network]\ndefault_rootless_network_cmd = "slirp4netns"\n' \
-        > /etc/containers/containers.conf.d/01-slirp4netns.conf
+    && printf '# Align this image with the distro slots: its stock config uses\n# userns = "auto", which puts every container in its own sub-userns —\n# nsenter -n from podman unshare then fails with EPERM (the nft-in-netns\n# pre-check). userns = "host" matches how all other slots run.\n[containers]\nuserns = "host"\n\n[network]\ndefault_rootless_network_cmd = "slirp4netns"\n' \
+        > /etc/containers/containers.conf.d/01-matrix.conf
 
 WORKDIR /src
