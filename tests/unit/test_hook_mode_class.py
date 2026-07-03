@@ -1109,7 +1109,7 @@ class TestPreStartDnsTierBranches:
         _set_euid(monkeypatch, 0)
         harness = make_hook_mode()
         harness.runner.run.side_effect = lambda cmd, **_kw: (
-            _DNSMASQ_VERSION_NFTSET if cmd[0] == "dnsmasq" else _MODERN_PODMAN_INFO
+            _DNSMASQ_VERSION_NFTSET if Path(cmd[0]).name == "dnsmasq" else _MODERN_PODMAN_INFO
         )
         harness.runner.has.return_value = True  # dnsmasq available (nftset probed via run)
         harness.profiles.compose_profiles.return_value = [TEST_DOMAIN, TEST_IP1]
@@ -1158,7 +1158,7 @@ class TestPreStartDnsTierBranches:
         _set_euid(monkeypatch, 0)
         harness = make_hook_mode(config=make_config(runtime=ShieldRuntime.KRUN))
         harness.runner.run.side_effect = lambda cmd, **_kw: (
-            _DNSMASQ_VERSION_NFTSET if cmd[0] == "dnsmasq" else _MODERN_PODMAN_INFO
+            _DNSMASQ_VERSION_NFTSET if Path(cmd[0]).name == "dnsmasq" else _MODERN_PODMAN_INFO
         )
         harness.runner.has.return_value = True
         harness.profiles.compose_profiles.return_value = [TEST_DOMAIN]

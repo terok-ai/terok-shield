@@ -209,7 +209,7 @@ run_tests() {
     # install ALL infrastructure, run ALL tests as a rootless user.
     # Privileged mode gives the outer container the capabilities needed
     # for nested podman, but tests run as uid 1000 (rootless podman).
-    podman run --rm --name "$ctr_name" \
+    podman run --rm --replace --name "$ctr_name" \
         -e TERM=xterm \
         --privileged \
         --security-opt label=disable \

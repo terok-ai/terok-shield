@@ -76,7 +76,7 @@ def test_which_sbin_aware_skips_non_executable_files(
     with a mode-0o644 ``/usr/sbin/nft`` (rpm gone wrong, chmod
     accident) must probe as missing, not as present-but-broken.
     """
-    monkeypatch.setattr("terok_shield.prereqs._SBIN_DIRS", (str(tmp_path),))
+    monkeypatch.setattr("terok_shield.run._SBIN_DIRS", (str(tmp_path),))
     # Isolated empty PATH so the real ``shutil.which`` can't find ``nft``
     # on the host — otherwise the assertion depends on /usr/bin being
     # clean, which CI runners often aren't.

@@ -446,7 +446,7 @@ def _run_side_effect(podman_version: str = "5.8.0"):
     """
 
     def _effect(cmd: list[str], **_kw: object) -> str:
-        if cmd[0] == "dnsmasq":
+        if Path(cmd[0]).name == "dnsmasq":
             return "Dnsmasq version 2.92\nCompile time options: nftset\n"
         return _podman_info_json(podman_version)
 

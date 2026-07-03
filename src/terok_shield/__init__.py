@@ -286,9 +286,10 @@ class Shield:
             )
         elif tier == DnsTier.DIG:
             issues.append(
-                "dnsmasq not found — domain allowlisting uses static pre-start "
-                "resolution (no IP rotation handling). "
-                "Install dnsmasq for dynamic domain-based egress control"
+                "dnsmasq unavailable (not installed, or without nftset support) — "
+                "domain allowlisting uses static pre-start resolution "
+                "(no IP rotation handling). "
+                "Install an nftset-capable dnsmasq for dynamic domain-based egress control"
             )
         elif tier == DnsTier.GETENT:
             issues.append(
