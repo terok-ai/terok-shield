@@ -79,7 +79,7 @@ mkdocstrings = {extras = ["python"], version = ">=0.26"}
 mkdocs-literate-nav = ">=0.6"
 mkdocs-section-index = ">=0.3"
 mkdocs-gen-files = ">=0.5"
-mkdocs-terok = "^0.7.2"
+mkdocs-terok = "^0.7.3"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

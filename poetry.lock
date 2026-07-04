@@ -1194,14 +1194,14 @@ properdocs = ">=1.6.5"
 
 [[package]]
 name = "mkdocs-terok"
-version = "0.7.2"
+version = "0.7.3"
 description = "Shared ProperDocs documentation generators for terok projects"
 optional = false
 python-versions = "<4.0,>=3.12"
 groups = ["docs"]
 files = [
-    {file = "mkdocs_terok-0.7.2-py3-none-any.whl", hash = "sha256:699429790abccd79189a99ff4f2e576ae8b8bf890e91d38da29fd10fe5f270cc"},
-    {file = "mkdocs_terok-0.7.2.tar.gz", hash = "sha256:bde77d4568c87eb3b3eab19a5989688dee44df1662619fa3e95c778d2e8190ef"},
+    {file = "mkdocs_terok-0.7.3-py3-none-any.whl", hash = "sha256:3c628aecc2201e86c5573b0e19d412b602f2534ab49a4c745f2fdd1304b4af04"},
+    {file = "mkdocs_terok-0.7.3.tar.gz", hash = "sha256:67129d19a623dfe6c8acdcef4b2bf8485ea7a38e8de9abf0d51c8f59e9f5a2a4"},
 ]
 
 [package.dependencies]
@@ -2441,4 +2441,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "badfd8d983e724b3ff9e2daa493b298340919c480d42d26c83d90d0062f5a508"
+content-hash = "81d30a8efadf64c45f40f4a9d474c5105a4aa1f1a900de5c1bec8c5c6a54782b"
