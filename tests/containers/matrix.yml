@@ -6,9 +6,10 @@
 # the repo root (or `make test-matrix`).
 #
 # Shield needs only the podman + nft egress stack (no dbus, no ssh) — the
-# shared nested-podman image family fits as-is.  The fragments/ overlays
-# carry shield's slot-specific containers.conf quirks (userns and
-# rootless-network alignment for the nft-in-netns pre-checks).
+# shared nested-podman image family fits as-is (incl. the AppArmor
+# slirp4netns workaround on alpine/void).  The fragments/ overlay carries
+# the one genuinely shield-specific quirk: the podman slot's userns=host
+# drop-in for the nft-in-netns pre-check.
 
 image-prefix: terok-shield-test
 flavor: podman
