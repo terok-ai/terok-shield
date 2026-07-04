@@ -27,6 +27,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from terok_util.matrix import check_capability_contract, tcp_reachable
 
 from terok_shield.podman_info import has_global_hooks, parse_podman_info
 from terok_shield.run import find_nft, which_sbin_aware
@@ -192,33 +193,14 @@ _CAPABILITY_PROBES = {
     "dig": lambda: _has("dig"),
     "getent": lambda: _has("getent"),
     "hooks": _hooks_available,
-    "internet": lambda: _tcp_reachable(ALLOWED_TARGET_IPS[0], 53),
+    "internet": lambda: tcp_reachable(ALLOWED_TARGET_IPS[0], 53),
 }
-
-
-def _tcp_reachable(ip: str, port: int, timeout: float = 5.0) -> bool:
-    """Whether a TCP connection to ``ip:port`` succeeds within *timeout*."""
-    try:
-        with socket.create_connection((ip, port), timeout=timeout):
-            return True
-    except OSError:
-        return False
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:
     """Fail the whole session when the matrix capability contract is broken."""
-    expected = {c for c in os.environ.get("TEROK_EXPECT", "").split(",") if c}
-    if not expected:
-        return
-    unknown = expected - _CAPABILITY_PROBES.keys()
-    if unknown:
-        pytest.exit(f"TEROK_EXPECT names unknown capabilities: {sorted(unknown)}", returncode=3)
-    missing = sorted(cap for cap in expected if not _CAPABILITY_PROBES[cap]())
-    if missing:
-        pytest.exit(
-            "matrix capability contract broken — expected but missing: " + ", ".join(missing),
-            returncode=3,
-        )
+    if broken := check_capability_contract(_CAPABILITY_PROBES):
+        pytest.exit(broken, returncode=3)
 
 
 _hooks_available_cached = _hooks_available()
