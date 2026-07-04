@@ -21,7 +21,7 @@ dynamic = ["version", "classifiers"]
 dependencies = [
     "PyYAML~=6.0",
     "pydantic~=2.13",
-    "terok-util @ git+https://github.com/terok-ai/terok-util.git@879265e4808f1bdb8bdd7b21d71508021b9e90dd",
+    "terok-util~=0.2.1",
 ]
 
 [project.urls]
