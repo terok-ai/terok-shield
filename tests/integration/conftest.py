@@ -178,7 +178,7 @@ def _hooks_available() -> bool:
 # On a dev machine a missing binary is a host limitation, and the skip
 # guards above are the right degradation.  Inside the matrix the harness
 # BUILT the image, so every capability it declares (TEROK_EXPECT,
-# exported by run-matrix.sh) is a contract: absence means the slot is
+# exported by the matrix engine) is a contract: absence means the slot is
 # broken and must fail at session start — not dissolve into skips that
 # read as green (a collapsed slot once reported PASS on 95 skips).
 # Presence-level probes only: host-dependent dysfunction (dig_broken on

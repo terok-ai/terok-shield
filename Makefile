@@ -64,19 +64,20 @@ test-integration:
 	mkdir -p $(REPORTS_DIR)
 	poetry run pytest tests/integration/ -v --junitxml=$(INTEGRATION_JUNIT_XML) -o junit_family=legacy
 
-# Multi-distro integration test matrix (Debian 12/13, Ubuntu 24.04/26.04, Fedora 43/44, Alpine (non-systemd), podman:stable)
+# Multi-distro integration test matrix — slots declared in
+# tests/containers/matrix.yml, engine provided by terok-util (terok-matrix).
 # Options (env vars):
 #   NO_CACHE=1    Rebuild images from scratch (ignore layer cache)
 #   BUILD_ONLY=1  Build images without running tests
 #   SCOPE=unit    Run only unit tests (or: integ)
-#   DISTROS="fedora43 debian13"  Run specific distros only
+#   SLOTS="fedora43 debian13"  Run specific slots only
 test-matrix:
-	./tests/containers/run-matrix.sh \
+	poetry run terok-matrix \
 		$(if $(NO_CACHE),--no-cache) \
 		$(if $(BUILD_ONLY),--build-only) \
 		$(if $(filter unit,$(SCOPE)),--unit-only) \
 		$(if $(filter integ,$(SCOPE)),--integ-only) \
-		$(DISTROS)
+		$(SLOTS)
 
 # Generate integration test map (Markdown table grouped by directory)
 test-integration-map:

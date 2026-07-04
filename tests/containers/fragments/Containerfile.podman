@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: 2026 Jiri Vyskocil
+# SPDX-License-Identifier: Apache-2.0
+
+# Align this image with the distro slots: its stock config uses
+# userns = "auto", which puts every container in its own sub-userns —
+# nsenter -n from podman unshare then fails with EPERM (the nft-in-netns
+# pre-check).  userns = "host" matches how all other slots run; the
+# slirp4netns rootless-network default mirrors the AppArmor workaround
+# on the alpine/void slots.
+RUN printf '[containers]\nuserns = "host"\n\n[network]\ndefault_rootless_network_cmd = "slirp4netns"\n' \
+        > /etc/containers/containers.conf.d/01-matrix.conf

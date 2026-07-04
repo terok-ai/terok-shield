@@ -1194,20 +1194,20 @@ properdocs = ">=1.6.5"
 
 [[package]]
 name = "mkdocs-terok"
-version = "0.7.3"
+version = "0.7.1"
 description = "Shared ProperDocs documentation generators for terok projects"
 optional = false
 python-versions = "<4.0,>=3.12"
 groups = ["docs"]
 files = [
-    {file = "mkdocs_terok-0.7.3-py3-none-any.whl", hash = "sha256:3c628aecc2201e86c5573b0e19d412b602f2534ab49a4c745f2fdd1304b4af04"},
-    {file = "mkdocs_terok-0.7.3.tar.gz", hash = "sha256:67129d19a623dfe6c8acdcef4b2bf8485ea7a38e8de9abf0d51c8f59e9f5a2a4"},
+    {file = "mkdocs_terok-0.7.1-py3-none-any.whl", hash = "sha256:71f51c8d2d241a808e527ede731983157e817864ab6065a7e74cf84021215e2e"},
+    {file = "mkdocs_terok-0.7.1.tar.gz", hash = "sha256:cdb5715dfa82395bcd61c005603091910924a7609178c6dca26eea814cdf6667"},
 ]
 
 [package.dependencies]
-properdocs = ">=1.6.7,<1.7.0"
-PyYAML = ">=6.0,<7.0"
-squarify = "0.4.4"
+properdocs = ">=1.6.7"
+PyYAML = ">=6.0"
+squarify = ">=0.4"
 
 [[package]]
 name = "mkdocstrings"
@@ -2176,16 +2176,20 @@ name = "terok-util"
 version = "0.2.0"
 description = "Shared utility library for the terok-* sibling packages"
 optional = false
-python-versions = "<4.0,>=3.12"
+python-versions = ">=3.12,<4.0"
 groups = ["main"]
-files = [
-    {file = "terok_util-0.2.0-py3-none-any.whl", hash = "sha256:74f047643962ff64e62e354958fe37caa91f04dc811eb61f6af41220f8311ef8"},
-    {file = "terok_util-0.2.0.tar.gz", hash = "sha256:8fc285c4fdcfc6a2c3aeb04236f85c49093cb60c8602fe0e43d1e8b9a6f3e7cd"},
-]
+files = []
+develop = false
 
 [package.dependencies]
-platformdirs = ">=4.10.0"
-"ruamel.yaml" = ">=0.18"
+platformdirs = ">=4.10,<5.0"
+"ruamel.yaml" = "0.19.1"
+
+[package.source]
+type = "git"
+url = "https://github.com/sliwowitz/terok-util.git"
+reference = "feat/matrix-engine"
+resolved_reference = "60fa1229b238ab4941ea1f07a34cca0f4121db89"
 
 [[package]]
 name = "tomli"
@@ -2441,4 +2445,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "81d30a8efadf64c45f40f4a9d474c5105a4aa1f1a900de5c1bec8c5c6a54782b"
+content-hash = "5d448c9f0ff353eaf884a5fd9353a48190b38650450d041f0a8b2d734fa9f0dd"

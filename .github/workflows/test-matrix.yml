@@ -2,28 +2,49 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Multi-distro integration test matrix.
-# Requires a self-hosted runner with podman and --privileged support.
-# Will NOT work on GitHub-hosted runners (no nested containers).
+# Requires a self-hosted runner with podman, --privileged support, and
+# poetry.  Will NOT work on GitHub-hosted runners (no nested containers).
+#
+# The slot list is derived from tests/containers/matrix.yml (the single
+# source of truth the local runs use) via `terok-matrix --slots-json`.
 name: Test Matrix
 
 on:
   workflow_dispatch:
+    inputs:
+      slots:
+        description: Space-separated slot subset (default = all declared)
+        required: false
+        default: ""
 
 permissions:
   contents: read
 
 jobs:
-  matrix:
+  slots:
     if: github.repository == 'terok-ai/terok-shield'
+    runs-on: self-hosted
+    outputs:
+      matrix: ${{ steps.gen.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install the matrix engine (terok-util via poetry)
+        run: poetry install --only main --no-root
+      - id: gen
+        run: echo "matrix=$(poetry run terok-matrix --slots-json ${{ inputs.slots }})" >> "$GITHUB_OUTPUT"
+
+  matrix:
+    needs: slots
     runs-on: self-hosted
     strategy:
       fail-fast: false
       matrix:
-        distro: [debian12, ubuntu2404, debian13, fedora43, alpine, void, mageia]
+        slot: ${{ fromJSON(needs.slots.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-
-      - name: Run test matrix (${{ matrix.distro }})
-        run: ./tests/containers/run-matrix.sh ${{ matrix.distro }}
+      - name: Install the matrix engine (terok-util via poetry)
+        run: poetry install --only main --no-root
+      - name: Run test matrix (${{ matrix.slot }})
+        run: poetry run terok-matrix ${{ matrix.slot }}

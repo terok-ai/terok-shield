@@ -1,0 +1,45 @@
+# SPDX-FileCopyrightText: 2026 Jiri Vyskocil
+# SPDX-License-Identifier: Apache-2.0
+#
+# Multi-distro test matrix for terok-shield — declarative input to the
+# shared engine in terok-util.  Run with `poetry run terok-matrix` from
+# the repo root (or `make test-matrix`).
+#
+# Shield needs only the podman + nft egress stack (no dbus, no ssh) — the
+# shared nested-podman image family fits as-is.  The fragments/ overlays
+# carry shield's slot-specific containers.conf quirks (userns and
+# rootless-network alignment for the nft-in-netns pre-checks).
+
+image-prefix: terok-shield-test
+flavor: podman
+expect: [podman, nft, dnsmasq, dig, getent, internet]
+poetry-groups: [test]
+
+slots:
+  debian12:
+  ubuntu2404:
+  ubuntu2604:
+  debian13:
+  fedora43:
+  fedora44:
+  podman:
+    extra-packages: [slirp4netns]
+  alpine:
+  void:
+  mageia:
+
+phases:
+  - name: installing shield hooks
+    run:
+      - poetry run terok-shield setup
+    expect-add: [hooks]
+  - name: check-environment
+    run:
+      - poetry run terok-shield check-environment 2>&1
+    tolerate-failure: true
+  - name: unit tests
+    scope: unit
+    pytest: tests/unit/ -v --tb=short
+  - name: integration tests (all markers)
+    scope: integ
+    pytest: tests/integration/ -v --tb=short
