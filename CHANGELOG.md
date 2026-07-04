@@ -1,4 +1,10 @@
 # Changelog
+## v0.7.2 — The Celestial Temple
+
+Test, build, and docs infrastructure changes only.
+
+**Full Changelog**: https://github.com/terok-ai/terok-shield/compare/v0.7.1...v0.7.2
+
 ## v0.7.1 — Emissary, Part II
 
 Added PyPI version badge and logo, https://github.com/terok-ai/terok-shield/pull/347, homepage URL, terok cross-link, and docs https://github.com/terok-ai/terok-shield/pull/348, and updated dependencies.
