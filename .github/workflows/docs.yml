@@ -68,6 +68,6 @@ jobs:
       contents: write
       pages: write
       id-token: write
-    uses: terok-ai/mkdocs-terok/.github/workflows/publish-versioned-docs.yml@v0.8.0a3
+    uses: terok-ai/mkdocs-terok/.github/workflows/publish-versioned-docs.yml@v0.8.1
     with:
       release: ${{ inputs.release == true }}
