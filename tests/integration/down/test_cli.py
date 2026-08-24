@@ -20,21 +20,21 @@ from ..helpers import assert_blocked, assert_connectable, disposable_shield as _
 @podman_missing
 @nft_missing
 @pytest.mark.usefixtures("nft_in_netns")
-class TestBypassCLI:
+class TestDownCLI:
     """End-to-end CLI down/up tests with a real shielded container."""
 
     def test_cli_down(self, shielded_container: str, capsys: pytest.CaptureFixture) -> None:
-        """``main(["down", container])`` switches to bypass mode."""
+        """``main(["down", container])`` switches to the DOWN posture."""
         main(["down", shielded_container, "--container-id", shielded_container.id])
         captured = capsys.readouterr()
         assert "Shield down" in captured.out
         assert _shield().state(shielded_container) == ShieldState.DOWN
 
     def test_cli_disengaged(self, shielded_container: str, capsys: pytest.CaptureFixture) -> None:
-        """``main(["down", container, "--all"])`` enables full bypass."""
-        main(["down", shielded_container, "--all", "--container-id", shielded_container.id])
+        """``main(["down", container, "--disengage"])`` switches to DISENGAGED."""
+        main(["down", shielded_container, "--disengage", "--container-id", shielded_container.id])
         captured = capsys.readouterr()
-        assert "all traffic" in captured.out
+        assert "disengaged" in captured.out
         assert _shield().state(shielded_container) == ShieldState.DISENGAGED
 
     def test_cli_up(self, shielded_container: str, capsys: pytest.CaptureFixture) -> None:
@@ -75,25 +75,25 @@ class TestBypassCLI:
 
 @pytest.mark.needs_host_features
 @pytest.mark.usefixtures("shield_env")
-class TestBypassPreviewCLI:
+class TestDownPreviewCLI:
     """Verify ``terok-shield preview --down`` without a running container."""
 
     def test_preview_down(self, capsys: pytest.CaptureFixture) -> None:
-        """``preview --down`` shows bypass ruleset with accept policy."""
+        """``preview --down`` shows the down ruleset with accept policy."""
         main(["preview", "--down"])
         captured = capsys.readouterr()
         assert "policy accept" in captured.out
         assert BYPASS_LOG_PREFIX in captured.out
 
     def test_preview_disengaged(self, capsys: pytest.CaptureFixture) -> None:
-        """``preview --down --all`` omits private-range rules."""
-        main(["preview", "--down", "--all"])
+        """``preview --down --disengage`` omits private-range rules."""
+        main(["preview", "--down", "--disengage"])
         captured = capsys.readouterr()
         assert "policy accept" in captured.out
         assert "TEROK_SHIELD_PRIVATE" not in captured.out
 
-    def test_preview_all_without_down_fails(self, capsys: pytest.CaptureFixture) -> None:
-        """``preview --all`` without ``--down`` exits with error."""
+    def test_preview_disengage_without_down_fails(self, capsys: pytest.CaptureFixture) -> None:
+        """``preview --disengage`` without ``--down`` exits with error."""
         with pytest.raises(SystemExit) as exc_info:
-            main(["preview", "--all"])
+            main(["preview", "--disengage"])
         assert exc_info.value.code == 1

@@ -22,13 +22,13 @@ class TestRulesetBuilderInit:
     def test_custom_dns(self) -> None:
         """Accept a custom DNS address."""
         builder = RulesetBuilder(dns=LINK_LOCAL_DNS)
-        rs = builder.build_hook()
+        rs = builder.build_up()
         assert LINK_LOCAL_DNS in rs
 
     def test_with_loopback_ports(self) -> None:
         """Accept loopback ports."""
         builder = RulesetBuilder(loopback_ports=(8080, 9090))
-        rs = builder.build_hook()
+        rs = builder.build_up()
         assert "tcp dport 8080" in rs
         assert "tcp dport 9090" in rs
 
@@ -49,40 +49,40 @@ class TestRulesetBuilderInit:
 
 
 class TestRulesetBuilderBuildHook:
-    """Test RulesetBuilder.build_hook()."""
+    """Test RulesetBuilder.build_up()."""
 
     def test_produces_drop_policy(self) -> None:
         """Hook ruleset has drop policy."""
         builder = RulesetBuilder()
-        rs = builder.build_hook()
+        rs = builder.build_up()
         assert "policy drop" in rs
 
     def test_includes_deny_log(self) -> None:
         """Hook ruleset includes deny nflog prefix."""
         builder = RulesetBuilder()
-        rs = builder.build_hook()
+        rs = builder.build_up()
         assert "TEROK_SHIELD_DENIED" in rs
 
 
-class TestRulesetBuilderBuildBypass:
-    """Test RulesetBuilder.build_bypass()."""
+class TestRulesetBuilderBuildDown:
+    """Test RulesetBuilder.build_down()."""
 
     def test_produces_accept_policy(self) -> None:
-        """Bypass ruleset has accept policy."""
+        """Down ruleset has accept policy."""
         builder = RulesetBuilder()
-        rs = builder.build_bypass()
+        rs = builder.build_down()
         assert "policy accept" in rs
 
     def test_includes_bypass_log(self) -> None:
-        """Bypass ruleset includes bypass nflog prefix."""
+        """Down ruleset includes the bypass nflog prefix."""
         builder = RulesetBuilder()
-        rs = builder.build_bypass()
+        rs = builder.build_down()
         assert BYPASS_LOG_PREFIX in rs
 
-    def test_allow_all(self) -> None:
-        """Bypass with allow_all omits private-range rules."""
+    def test_disengaged(self) -> None:
+        """Down with disengaged=True omits every reject, private ranges included."""
         builder = RulesetBuilder()
-        rs = builder.build_bypass(allow_all=True)
+        rs = builder.build_down(disengaged=True)
         assert EXPECTED_PRIVATE_RANGES[0] not in rs  # 10.0.0.0/8
 
 
@@ -121,35 +121,35 @@ class TestRulesetBuilderVerify:
     def test_verify_quarantine_fails_on_hook(self) -> None:
         """verify_quarantine fails on hook ruleset (has allow sets)."""
         builder = RulesetBuilder()
-        rs = builder.build_hook()
+        rs = builder.build_up()
         assert len(builder.verify_quarantine(rs)) > 0
 
-    def test_verify_hook_passes(self) -> None:
-        """verify_hook returns empty for valid hook ruleset."""
+    def test_verify_up_passes(self) -> None:
+        """verify_up returns empty for valid hook ruleset."""
         builder = RulesetBuilder()
-        rs = builder.build_hook()
-        errors = builder.verify_hook(rs)
+        rs = builder.build_up()
+        errors = builder.verify_up(rs)
         assert errors == []
 
-    def test_verify_hook_fails_on_bypass(self) -> None:
-        """verify_hook fails on bypass ruleset."""
+    def test_verify_up_fails_on_down(self) -> None:
+        """verify_up fails on a down ruleset."""
         builder = RulesetBuilder()
-        rs = builder.build_bypass()
-        errors = builder.verify_hook(rs)
+        rs = builder.build_down()
+        errors = builder.verify_up(rs)
         assert len(errors) > 0
 
-    def test_verify_bypass_passes(self) -> None:
-        """verify_bypass returns empty for valid bypass ruleset."""
+    def test_verify_down_passes(self) -> None:
+        """verify_down returns empty for a valid down ruleset."""
         builder = RulesetBuilder()
-        rs = builder.build_bypass()
-        errors = builder.verify_bypass(rs)
+        rs = builder.build_down()
+        errors = builder.verify_down(rs)
         assert errors == []
 
-    def test_verify_bypass_fails_on_hook(self) -> None:
-        """verify_bypass fails on hook ruleset."""
+    def test_verify_down_fails_on_up(self) -> None:
+        """verify_down fails on an up ruleset."""
         builder = RulesetBuilder()
-        rs = builder.build_hook()
-        errors = builder.verify_bypass(rs)
+        rs = builder.build_up()
+        errors = builder.verify_down(rs)
         assert len(errors) > 0
 
 

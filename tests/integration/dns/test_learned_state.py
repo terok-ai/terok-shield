@@ -140,11 +140,11 @@ class TestLearnedStateLifecycle:
         assert_reachable(name, ALLOWED_TARGET_DOMAIN_HTTP)
 
     def test_learned_state_survives_down_up_round_trip(self, learned_container) -> None:
-        """A bypass round trip must never forget what the workload learned.
+        """A down/up round trip must never forget what the workload learned.
 
         After ``shield up``, the learned IP is still in the allow set and a
         raw-IP fetch succeeds **without** a fresh DNS query — exactly the
-        situation of a client that cached its answer across the bypass.
+        situation of a client that cached its answer across the down window.
         """
         name, _sd, shield, cid = learned_container
         pid = _container_pid(name)

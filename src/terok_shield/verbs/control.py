@@ -44,16 +44,16 @@ def _handle_down(
     container: str,
     *,
     container_id: str,
-    allow_all: bool = False,
+    disengaged: bool = False,
 ) -> None:
-    """Switch container to bypass mode.
+    """Switch container to the DOWN posture.
 
     *container_id* — full podman UUID; supplied by the orchestrator at
     the call site, used to route the hub event to the supervisor's
     per-container socket.  Required, no default.
     """
-    shield.down(container, container_id, allow_all=allow_all)
-    label = " (all traffic)" if allow_all else ""
+    shield.down(container, container_id, disengaged=disengaged)
+    label = " (disengaged)" if disengaged else ""
     print(f"Shield down for {container}{label}")
 
 
@@ -89,14 +89,12 @@ def _handle_rules(shield: Shield, container: str) -> None:
         print(f"No rules found for {container}")
 
 
-def _handle_preview(shield: Shield, *, down: bool = False, allow_all: bool = False) -> None:
+def _handle_preview(shield: Shield, *, down: bool = False, disengaged: bool = False) -> None:
     """Show ruleset that would be applied."""
-    if allow_all and not down:
-        raise ValueError("--all requires --down")
-    ruleset = shield.preview(down=down, allow_all=allow_all)
-    label = "bypass" if down else "enforce"
-    if allow_all:
-        label += " (all traffic)"
+    if disengaged and not down:
+        raise ValueError("--disengage requires --down")
+    ruleset = shield.preview(down=down, disengaged=disengaged)
+    label = ("disengaged" if disengaged else "down") if down else "up"
     print(f"# Ruleset preview ({label}):")
     print(ruleset)
 
@@ -119,17 +117,17 @@ DENY = CommandDef(
 
 DOWN = CommandDef(
     name="down",
-    help="Switch container to bypass mode (accept-all + log)",
+    help="Switch container to the DOWN posture (accept + log; private ranges still rejected)",
     handler=_handle_down,
     extras=NEEDS_CTR,
     args=(
         CONTAINER_ARG,
         CONTAINER_ID_ARG,
         ArgDef(
-            name="--all",
+            name="--disengage",
             action="store_true",
-            dest="allow_all",
-            help="Also allow private-range traffic",
+            dest="disengaged",
+            help="Enforce nothing — lift the deny set and every range reject (DISENGAGED posture)",
         ),
     ),
 )
@@ -171,12 +169,12 @@ PREVIEW = CommandDef(
     help="Show ruleset that would be applied",
     handler=_handle_preview,
     args=(
-        ArgDef(name="--down", action="store_true", help="Show bypass ruleset"),
+        ArgDef(name="--down", action="store_true", help="Show the DOWN-posture ruleset"),
         ArgDef(
-            name="--all",
+            name="--disengage",
             action="store_true",
-            dest="allow_all",
-            help="Omit private-range reject rules (requires --down)",
+            dest="disengaged",
+            help="Show the DISENGAGED ruleset: no deny set, no range rejects (requires --down)",
         ),
     ),
 )

@@ -154,16 +154,16 @@ class TestHubEventEmitter:
         assert json.loads(line) == {"type": "shield_up", "container": _CONTAINER}
 
     def test_shield_down_default_is_plain_down(self, hub_socket: _SocketRecorder) -> None:
-        """``shield_down`` without ``allow_all`` maps to ``shield_down``."""
+        """``shield_down`` without ``disengaged`` maps to ``shield_down``."""
         HubEventEmitter().shield_down(_CONTAINER, _CONTAINER_ID)
         assert json.loads(_received_one_line(hub_socket)) == {
             "type": "shield_down",
             "container": _CONTAINER,
         }
 
-    def test_shield_down_allow_all_maps_to_disengaged(self, hub_socket: _SocketRecorder) -> None:
-        """``allow_all=True`` flips the event type to ``shield_disengaged``."""
-        HubEventEmitter().shield_down(_CONTAINER, _CONTAINER_ID, allow_all=True)
+    def test_shield_down_disengaged_maps_to_disengaged(self, hub_socket: _SocketRecorder) -> None:
+        """``disengaged=True`` flips the event type to ``shield_disengaged``."""
+        HubEventEmitter().shield_down(_CONTAINER, _CONTAINER_ID, disengaged=True)
         assert json.loads(_received_one_line(hub_socket)) == {
             "type": "shield_disengaged",
             "container": _CONTAINER,
@@ -179,7 +179,7 @@ class TestHubEventEmitter:
         # the connect must fail silently rather than propagate the OSError.
         absent_id = "f" * 16
         emitter.shield_up(_CONTAINER, absent_id)  # must not raise
-        emitter.shield_down(_CONTAINER, absent_id, allow_all=True)
+        emitter.shield_down(_CONTAINER, absent_id, disengaged=True)
 
     def test_dossier_is_attached_when_present(self, hub_socket: _SocketRecorder) -> None:
         """A non-empty dossier rides under the ``dossier`` key on the wire.

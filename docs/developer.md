@@ -69,7 +69,7 @@ Environment requirements are expressed via pytest markers:
 | needs_podman | podman + nft (+ internet) | No |
 
 Directories group tests by what they test: `setup/`, `launch/`, `blocking/`,
-`allow_deny/`, `dns/`, `bypass/`, `observability/`, `safety/`, `cli/`. See
+`allow_deny/`, `dns/`, `down/`, `observability/`, `safety/`, `cli/`. See
 the [Integration Test Map](test-map.md) for a full listing. See the
 [CI Workflow Map](ci-map.md) for the generated workflow/job inventory.
 

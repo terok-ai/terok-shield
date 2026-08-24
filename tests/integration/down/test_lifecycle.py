@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""Integration tests: full bypass lifecycle and edge cases.
+"""Integration tests: full down/up lifecycle and edge cases.
 
 Exercises every combination of state transitions a user might attempt,
 verifying that the shield behaves predictably and safely at all times.
@@ -46,7 +46,7 @@ from ..helpers import (
 @podman_missing
 @nft_missing
 @pytest.mark.usefixtures("nft_in_netns")
-class TestBypassBasicLifecycle:
+class TestDownBasicLifecycle:
     """Basic down/up cycle with traffic verification."""
 
     def test_up_down_up_cycle(self, shielded_container: str) -> None:
@@ -67,9 +67,9 @@ class TestBypassBasicLifecycle:
         assert_blocked(shielded_container, BLOCKED_TARGET_HTTP)
 
     def test_up_disengaged_up_cycle(self, shielded_container: str) -> None:
-        """Full cycle with allow_all: UP -> DISENGAGED -> UP."""
+        """Full cycle with disengaged: UP -> DISENGAGED -> UP."""
         shield = _shield()
-        shield.down(shielded_container, shielded_container.id, allow_all=True)
+        shield.down(shielded_container, shielded_container.id, disengaged=True)
         assert shield.state(shielded_container) == ShieldState.DISENGAGED
 
         rules = shield.rules(shielded_container)
@@ -87,7 +87,7 @@ class TestBypassBasicLifecycle:
 @podman_missing
 @nft_missing
 @pytest.mark.usefixtures("nft_in_netns")
-class TestBypassIdempotency:
+class TestDownIdempotency:
     """Verify repeated operations are safe and idempotent."""
 
     def test_down_twice_stays_down(self, shielded_container: str) -> None:
@@ -123,16 +123,16 @@ class TestBypassIdempotency:
 @podman_missing
 @nft_missing
 @pytest.mark.usefixtures("nft_in_netns")
-class TestBypassModeSwitch:
-    """Verify switching between bypass modes (DOWN <-> DISENGAGED)."""
+class TestDownPostureSwitch:
+    """Verify switching between the accept postures (DOWN <-> DISENGAGED)."""
 
     def test_down_to_disengaged(self, shielded_container: str) -> None:
-        """Switch from protected bypass to full bypass."""
+        """Switch from DOWN to DISENGAGED."""
         shield = _shield()
         shield.down(shielded_container, shielded_container.id)
         assert shield.state(shielded_container) == ShieldState.DOWN
 
-        shield.down(shielded_container, shielded_container.id, allow_all=True)
+        shield.down(shielded_container, shielded_container.id, disengaged=True)
         assert shield.state(shielded_container) == ShieldState.DISENGAGED
 
         # Private-range rules should be gone
@@ -140,9 +140,9 @@ class TestBypassModeSwitch:
         assert "TEROK_SHIELD_PRIVATE" not in rules
 
     def test_disengaged_to_down(self, shielded_container: str) -> None:
-        """Switch from full bypass back to protected bypass."""
+        """Switch from DISENGAGED back to DOWN."""
         shield = _shield()
-        shield.down(shielded_container, shielded_container.id, allow_all=True)
+        shield.down(shielded_container, shielded_container.id, disengaged=True)
         assert shield.state(shielded_container) == ShieldState.DISENGAGED
 
         shield.down(shielded_container, shielded_container.id)
@@ -159,11 +159,11 @@ class TestBypassModeSwitch:
 @podman_missing
 @nft_missing
 @pytest.mark.usefixtures("nft_in_netns")
-class TestBypassWithAllowDeny:
-    """Verify allow/deny interactions during bypass."""
+class TestDownWithAllowDeny:
+    """Verify allow/deny interactions while the shield is down."""
 
-    def test_allow_during_bypass_persists_via_overlay(self, shielded_container: str) -> None:
-        """IPs added via allow during bypass survive shield.up() via the runtime overlay.
+    def test_allow_while_down_persists_via_overlay(self, shielded_container: str) -> None:
+        """IPs added via allow while down survive shield.up() via the runtime overlay.
 
         allow_ip() records +ip in policy/live, and shield.up() reads
         it back via state.read_effective_ips(). The IP survives the
@@ -172,7 +172,7 @@ class TestBypassWithAllowDeny:
         shield = _shield()
         shield.down(shielded_container, shielded_container.id)
 
-        # Add IP to allow set during bypass — persists to live.allowed
+        # Add IP to allow set while down — persists to live.allowed
         shield.allow(shielded_container, BLOCKED_TARGET_IP)
 
         # Restore shield — the IP is re-added from live.allowed
@@ -181,10 +181,10 @@ class TestBypassWithAllowDeny:
         # Verify the IP is still allowed
         assert_connectable(shielded_container, BLOCKED_TARGET_IP, BLOCKED_TARGET_DNS_PORT)
 
-    def test_deny_during_bypass_blocks_traffic(self, shielded_container: str) -> None:
-        """Deny is enforced even in bypass mode — deny sets shadow the accept policy.
+    def test_deny_while_down_blocks_traffic(self, shielded_container: str) -> None:
+        """Deny is enforced even in the down posture — deny sets shadow the accept policy.
 
-        The bypass ruleset retains the ``t20_security_deny_v4``/``t20_security_deny_v6`` sets so an
+        The down ruleset retains the ``t20_security_deny_v4``/``t20_security_deny_v6`` sets so an
         operator-driven deny still drops matching traffic.  See PR #230.
         """
         shield = _shield()
@@ -201,7 +201,7 @@ class TestBypassWithAllowDeny:
 @hooks_unavailable
 @pytest.mark.needs_hooks
 @pytest.mark.usefixtures("nft_in_netns")
-class TestBypassIPRestoration:
+class TestDownIPRestoration:
     """Verify cached IPs are restored when going back up."""
 
     def test_cached_ips_restored_on_shield_up(self, shield_env: Path, _pull_image: None) -> None:
@@ -210,7 +210,7 @@ class TestBypassIPRestoration:
         Full lifecycle: pre_start (populates cache) -> run ->
         allow -> verify reachable -> down -> up -> verify still reachable.
         """
-        name = f"{CTR_PREFIX}-bypass-cache-{os.getpid()}-{os.urandom(4).hex()}"
+        name = f"{CTR_PREFIX}-down-cache-{os.getpid()}-{os.urandom(4).hex()}"
         sd = shield_env / "containers" / name
         shield = Shield(ShieldConfig(state_dir=sd))
 
@@ -247,8 +247,8 @@ class TestBypassIPRestoration:
 @podman_missing
 @nft_missing
 @pytest.mark.usefixtures("nft_in_netns")
-class TestBypassAuditTrail:
-    """Verify audit log events for bypass operations."""
+class TestDownAuditTrail:
+    """Verify audit log events for down/up operations."""
 
     def test_down_up_audit_events(self, shielded_container: str, shield_env: Path) -> None:
         """shield.down and shield.up produce audit log entries."""
@@ -268,14 +268,14 @@ class TestBypassAuditTrail:
         assert down_idx < up_idx
 
     def test_disengaged_logs_detail(self, shielded_container: str, shield_env: Path) -> None:
-        """shield.down(allow_all=True) logs the allow_all detail."""
+        """shield.down(disengaged=True) logs the disengaged detail."""
         sd = shield_env / "containers" / shielded_container
         shield = Shield(ShieldConfig(state_dir=sd))
-        shield.down(shielded_container, shielded_container.id, allow_all=True)
+        shield.down(shielded_container, shielded_container.id, disengaged=True)
 
         events = list(shield.tail_log())
         down_events = [e for e in events if e["action"] == "shield_down"]
-        assert any(e.get("detail") == "allow_all=True" for e in down_events)
+        assert any(e.get("detail") == "disengaged=True" for e in down_events)
 
 
 @pytest.mark.needs_podman
@@ -285,12 +285,12 @@ class TestBypassAuditTrail:
 @hooks_unavailable
 @pytest.mark.needs_hooks
 @pytest.mark.usefixtures("nft_in_netns")
-class TestBypassFullE2E:
+class TestDownFullE2E:
     """End-to-end test exercising the full user journey.
 
     Simulates a realistic workflow: user starts a shielded container,
-    discovers they need to find which domains to allowlist, toggles
-    bypass to discover traffic, then re-enables the shield.
+    discovers they need to find which domains to allowlist, drops the
+    shield to discover traffic, then re-enables it.
     """
 
     def test_discovery_workflow(self, shield_env: Path, _pull_image: None) -> None:
@@ -303,7 +303,7 @@ class TestBypassFullE2E:
         5. Verify blocked target is blocked again
         6. Audit trail has the complete story
         """
-        name = f"{CTR_PREFIX}-bypass-e2e-{os.getpid()}-{os.urandom(4).hex()}"
+        name = f"{CTR_PREFIX}-down-e2e-{os.getpid()}-{os.urandom(4).hex()}"
         sd = shield_env / "containers" / name
         shield = Shield(ShieldConfig(state_dir=sd))
 
@@ -333,12 +333,12 @@ class TestBypassFullE2E:
             assert_reachable(name, ALLOWED_TARGET_HTTP)
             assert_connectable(name, BLOCKED_TARGET_IP, BLOCKED_TARGET_DNS_PORT)
 
-            # Step 4: Switch to full bypass to also check RFC1918 destinations
-            shield.down(name, cid, allow_all=True)
+            # Step 4: Disengage to also check RFC1918 destinations
+            shield.down(name, cid, disengaged=True)
             assert shield.state(name) == ShieldState.DISENGAGED
             assert_connectable(name, BLOCKED_TARGET_IP, BLOCKED_TARGET_DNS_PORT)
 
-            # Step 5: Back to protected bypass
+            # Step 5: Back to the protected DOWN posture
             shield.down(name, cid)
             assert shield.state(name) == ShieldState.DOWN
             assert_connectable(name, BLOCKED_TARGET_IP, BLOCKED_TARGET_DNS_PORT)
@@ -380,7 +380,7 @@ class TestBypassFullE2E:
         shield.down(shielded_container, shielded_container.id)
         shield.up(shielded_container, shielded_container.id)
         shield.down(shielded_container, shielded_container.id)
-        shield.down(shielded_container, shielded_container.id, allow_all=True)
+        shield.down(shielded_container, shielded_container.id, disengaged=True)
         shield.up(shielded_container, shielded_container.id)
         shield.up(shielded_container, shielded_container.id)
 
@@ -393,20 +393,20 @@ class TestBypassFullE2E:
         assert "policy drop" in rules
         assert "terok_shield" in rules
 
-    def test_allow_before_and_after_bypass(self, shielded_container: str) -> None:
-        """IPs allowed before bypass survive the bypass cycle via the runtime overlay.
+    def test_allow_before_and_after_down(self, shielded_container: str) -> None:
+        """IPs allowed before going down survive the down/up cycle via the runtime overlay.
 
         allow_ip() records +ip in policy/live, and shield_up() reads
         it back via state.read_effective_ips(), so they survive the
         down/up cycle without needing to re-allow.
         """
         shield = _shield()
-        # Allow before bypass — persists to live.allowed
+        # Allow before going down — persists to live.allowed
         for ip in ALLOWED_TARGET_IPS:
             shield.allow(shielded_container, ip)
         assert_reachable(shielded_container, ALLOWED_TARGET_HTTP)
 
-        # Bypass cycle
+        # Down/up cycle
         shield.down(shielded_container, shielded_container.id)
         shield.up(shielded_container, shielded_container.id)
 

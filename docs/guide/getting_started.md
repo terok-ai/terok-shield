@@ -92,7 +92,7 @@ terok-shield deny my-container example.com
 
 Changes take effect immediately — no container restart needed. Allow and deny
 decisions are persisted to the `policy/live` overlay (as `+` and `-` lines),
-so both survive `down`/`up` bypass cycles and container restarts.
+so both survive `down`/`up` posture cycles and container restarts.
 
 ## Inspect the firewall
 
@@ -107,15 +107,15 @@ watch terok-shield rules my-container
 terok-shield logs --container my-container -n 10
 ```
 
-## Bypass mode
+## Shield down
 
-Temporarily disable the firewall for debugging or traffic discovery:
+Temporarily drop the shield for debugging or traffic discovery:
 
 ```bash
-terok-shield down my-container          # bypass (private ranges still blocked)
-terok-shield down my-container --all    # bypass everything
+terok-shield down my-container               # DOWN (private ranges still blocked)
+terok-shield down my-container --disengage   # DISENGAGED (nothing enforced: deny set + private ranges open)
 
-terok-shield up my-container            # restore deny-all
+terok-shield up my-container                 # restore deny-all
 ```
 
 ## Next steps

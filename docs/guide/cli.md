@@ -146,7 +146,7 @@ terok-shield allow my-container 203.0.113.10
 
 If `target` is a domain name, it is resolved to IPs automatically.
 Changes take effect immediately. The allow is persisted to the `policy/live`
-overlay (as a `+` line) and survives `down`/`up` bypass cycles. If the target
+overlay (as a `+` line) and survives `down`/`up` posture cycles. If the target
 was previously denied, the allow flips that verdict automatically.
 
 ## deny
@@ -175,20 +175,29 @@ flips any prior allow of the same target.
 
 ## down
 
-Switch a container to bypass mode. Public traffic is accepted with logging;
-private ranges (RFC 1918/RFC 4193) remain blocked unless `--all` is used.
+Switch a container to the DOWN posture. Public traffic is accepted with
+logging; private ranges (RFC 1918/RFC 4193) remain blocked unless
+`--disengage` is used.
 
 ```bash
-terok-shield down <container> [--all]
+terok-shield down <container> [--disengage]
 ```
 
 | Argument | Description |
 |----------|-------------|
 | `container` | Container name or ID |
-| `--all` | Also allow private-range traffic (RFC 1918/RFC 4193) |
+| `--disengage` | Enforce nothing — lift the deny set and every range reject (DISENGAGED posture) |
 
-By default, private ranges (RFC 1918 and RFC 4193) are still rejected in
-bypass mode. Use `--all` to allow everything.
+Plain DOWN keeps three rejects: the hard-deny floor (link-local, IMDS),
+the security-deny set, and the private ranges (RFC 1918, RFC 4193).
+`--disengage` lifts all three. The DISENGAGED posture accepts every
+destination and logs each new connection.
+
+A t10 override opens one private host or one private range in every
+enforcing posture. Shield logs a CIDR override as a warning. The
+private-range reject sits above the allow tiers, so an allowlist entry does
+not open a private address. The hard-deny floor sits above t10, so no
+override reaches a link-local or IMDS address.
 
 ## up
 
@@ -224,13 +233,13 @@ overlay entries. The workload re-earns its state on its next DNS queries.
 Show the nftables ruleset that would be applied.
 
 ```bash
-terok-shield preview [--down] [--all]
+terok-shield preview [--down] [--disengage]
 ```
 
 | Option | Description |
 |--------|-------------|
-| `--down` | Show bypass ruleset instead of default deny-all |
-| `--all` | Omit private-range reject rules (requires `--down`) |
+| `--down` | Show the DOWN-posture ruleset instead of default deny-all |
+| `--disengage` | Show the DISENGAGED ruleset: no deny set, no range rejects (requires `--down`) |
 
 ## rules
 

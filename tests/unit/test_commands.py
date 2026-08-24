@@ -181,11 +181,11 @@ class TestHandlers:
         assert "test-ctr" in output
 
     def test_handle_preview_all_without_down_raises(self) -> None:
-        """_handle_preview raises ValueError when allow_all without down."""
+        """_handle_preview raises ValueError when disengaged without down."""
         shield = mock.MagicMock()
         with pytest.raises(ValueError) as ctx:
-            _handle_preview(shield, allow_all=True)
-        assert "--all requires --down" in str(ctx.value)
+            _handle_preview(shield, disengaged=True)
+        assert "--disengage requires --down" in str(ctx.value)
 
 
 class TestPrintEnvHint:

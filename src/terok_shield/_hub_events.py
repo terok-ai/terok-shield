@@ -105,7 +105,7 @@ class HubEventEmitter:
         container: str,
         container_id: str,
         *,
-        allow_all: bool = False,
+        disengaged: bool = False,
         dossier: dict[str, str] | None = None,
     ) -> None:
         """Emit a ``shield_down`` (or ``shield_disengaged``) event for *container*.
@@ -116,7 +116,7 @@ class HubEventEmitter:
         *dossier* — see
         [`shield_up`][terok_shield._hub_events.HubEventEmitter.shield_up].
         """
-        event_type = "shield_disengaged" if allow_all else "shield_down"
+        event_type = "shield_disengaged" if disengaged else "shield_down"
         self._send(container_id, {"type": event_type, "container": container}, dossier)
 
     def _send(

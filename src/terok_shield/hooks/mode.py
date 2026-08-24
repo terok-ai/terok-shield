@@ -145,17 +145,16 @@ class HookMode:
             project_allow: Hosts/IPs authored by the orchestrator for the t40
                 project-allow tier (git remote, custom domains) — merged with
                 the composed profiles.
-            override: Hosts/IPs authored for the t10 break-glass override tier,
-                which sits *above* the security-deny.  Single host/IP only (no
-                CIDR); statically resolved and seeded into a separate nft set.
-                Shield owns writing every tier, so callers pass data, never
-                touch the bundle.
+            override: Hosts/IPs/CIDRs authored for the t10 break-glass override
+                tier, which sits *above* the security-deny; statically resolved
+                and seeded into a separate nft set.  A CIDR opens a whole
+                subnet above the deny — accepted, but logged as a warning and
+                an ``override_range`` audit event.  Shield owns writing every
+                tier, so callers pass data, never touch the bundle.
 
         Raises:
             ShieldNeedsSetup: When global hooks are not installed
                 (see ``WORKAROUND(hooks-dir-persist)``).
-            ValueError: When an *override* entry is a CIDR/range (a break-glass
-                override must name one host, never widen access to a subnet).
         """
         sd = self._config.state_dir.resolve()
         info = self._get_podman_info()
@@ -183,6 +182,7 @@ class HookMode:
         bundle.network_mode.write_text(f"{mode}\n")
         bundle.loopback_ports.write_text("".join(f"{p}\n" for p in self._config.loopback_ports))
         self._author_policy(
+            container,
             sd,
             profiles,
             tier,
@@ -254,6 +254,7 @@ class HookMode:
 
     def refresh(
         self,
+        container: str,
         profiles: list[str],
         *,
         security_deny: Sequence[str] = (),
@@ -279,8 +280,6 @@ class HookMode:
             RuntimeError: When the bundle carries no persisted DNS tier /
                 upstream DNS / network mode (``pre_start`` never ran for this
                 state dir).
-            ValueError: When an *override* entry is a CIDR/range (same
-                validation as ``pre_start``).
         """
         sd = self._config.state_dir.resolve()
         bundle = StateBundle(sd)
@@ -294,6 +293,7 @@ class HookMode:
             )
         self._gateways = _gateways_for_mode(mode)
         self._author_policy(
+            container,
             sd,
             profiles,
             DnsTier(tier_str),
@@ -307,6 +307,7 @@ class HookMode:
 
     def _author_policy(
         self,
+        container: str,
         sd: Path,
         profiles: list[str],
         tier: DnsTier,
@@ -327,7 +328,7 @@ class HookMode:
         neither path can miss it.
         """
         entries = self._profiles.compose_profiles(profiles) + list(project_allow)
-        self._write_generated_tiers(sd, security_deny, provider_allow, override)
+        self._write_generated_tiers(container, sd, security_deny, provider_allow, override)
         self._write_policy_and_resolve(sd, entries, tier)
         self._resolve_override(sd)
         self._resolve_security_deny(sd)
@@ -336,6 +337,7 @@ class HookMode:
 
     def _write_generated_tiers(
         self,
+        container: str,
         sd: Path,
         security_deny: Sequence[str],
         provider_allow: Sequence[str],
@@ -354,7 +356,21 @@ class HookMode:
         bundle = StateBundle(sd)
         bundle.write_tier("security_deny", "".join(f"-{h}\n" for h in security_deny))
         bundle.write_tier("provider_allow", "".join(f"+{h}\n" for h in provider_allow))
-        bundle.write_tier("override", "".join(f"+{h}\n" for h in _validate_override(override)))
+        self._log_override_ranges(container, override)
+        bundle.write_tier("override", "".join(f"+{h}\n" for h in override))
+
+    def _log_override_ranges(self, container: str, override: Sequence[str]) -> None:
+        """Warn about every CIDR in the t10 override tier — a subnet opened above the deny.
+
+        A break-glass override sits above the security-deny, so a range widens
+        a whole subnet straight through the firewall.  Opening the agent to
+        several local services is a legitimate way to run, so the launch goes
+        ahead — but each range lands in the log and the audit trail, so the
+        widening never passes unnoticed.
+        """
+        for net in (h for h in override if "/" in h):
+            logger.warning("t10 override opens a whole range above the security-deny: %s", net)
+            self._audit.log_event(container, "override_range", detail=net)
 
     def _resolve_override(self, sd: Path) -> None:
         """Statically resolve the t10 break-glass targets into the override seed cache.
@@ -373,7 +389,7 @@ class HookMode:
         """Statically resolve the t20 security-deny targets into the deny seed cache.
 
         Denied domains must deny by *address*: the deny set is enforced even
-        in the shield-down posture (bypass repopulates it from
+        in the shield-down posture (the down transition repopulates it from
         [`read_denied_ips`][terok_shield.state.StateBundle.read_denied_ips]),
         and an address-level deny also catches direct-IP access that never
         consults the DNS plane.  Resolved statically on every DNS tier —
@@ -435,7 +451,7 @@ class HookMode:
         ips = StateBundle(sd).read_effective_ips()
         override_ips = list(StateBundle(sd).read_override_ips())
         denied_ips = list(StateBundle(sd).read_denied_ips())
-        ruleset = ruleset_builder.build_hook()
+        ruleset = ruleset_builder.build_up()
         ruleset += ruleset_builder.add_elements_dual(ips)
         if override_ips:
             ruleset += add_override_elements_dual(override_ips)
@@ -680,11 +696,16 @@ class HookMode:
 
     # ── State transitions ───────────────────────────────
 
-    def shield_down(self, container: str, *, allow_all: bool = False) -> None:
-        """Switch a running container to shield-down (accept-all + deny.list)."""
+    def shield_down(self, container: str, *, disengaged: bool = False) -> None:
+        """Switch a running container to the DOWN posture (DISENGAGED when *disengaged*).
+
+        Plain DOWN accepts by default but keeps the deny set and both range
+        floors; DISENGAGED enforces nothing, so its deny sets are left empty —
+        the next ``shield up`` repopulates them from the composed policy.
+        """
         sd = self._config.state_dir.resolve()
         ruleset = self._container_ruleset(container)
-        rs = ruleset.build_bypass(allow_all=allow_all)
+        rs = ruleset.build_down(disengaged=disengaged)
         current = self.shield_state(container)
         if current == ShieldState.OFFLINE:
             stdin = rs
@@ -694,14 +715,16 @@ class HookMode:
         self._runner.nft_via_nsenter(container, stdin=stdin)
 
         # Carry the allow-set contents (seeds + dnsmasq-learned IPs) across
-        # the rebuild — bypass mode does not evaluate them, but the later
+        # the rebuild — the down posture does not evaluate them, but the later
         # ``shield up`` snapshots this table, so dropping them here would
         # forget every learned IP after one down/up round trip.
         self._restore_allow_sets(container, snapshot, skip=())
 
         # Repopulate deny sets so the deny policy is enforced even when shield
         # is down, and the t10 override set so break-glass hosts stay above it.
-        self._reseed_deny_and_override(container, sd)
+        # DISENGAGED references neither set, so there is nothing to reseed.
+        if not disengaged:
+            self._reseed_deny_and_override(container, sd)
 
         output = self._runner.nft_via_nsenter(
             container,
@@ -710,7 +733,7 @@ class HookMode:
             "inet",
             NFT_TABLE_NAME,
         )
-        errors = ruleset.verify_bypass(output, allow_all=allow_all)
+        errors = ruleset.verify_down(output, disengaged=disengaged)
         if errors:
             raise RuntimeError(f"Shield-down ruleset verification failed: {'; '.join(errors)}")
 
@@ -742,15 +765,15 @@ class HookMode:
         """Restore normal deny-all mode for a running container.
 
         The rebuild is ``delete table`` + re-apply, which would forget every
-        dnsmasq-learned allow-set element — a container coming out of a bypass
-        window would suddenly lose IPs its workload already resolved (clients
+        dnsmasq-learned allow-set element — a container coming out of the down
+        posture would suddenly lose IPs its workload already resolved (clients
         cache answers, so they do not necessarily re-query).  The allow sets
         are therefore snapshotted before the rebuild and restored after it.
         """
         sd = self._config.state_dir.resolve()
 
         ruleset = self._container_ruleset(container)
-        rs = ruleset.build_hook()
+        rs = ruleset.build_up()
         current = self.shield_state(container)
         if current == ShieldState.OFFLINE:
             stdin = rs
@@ -772,7 +795,7 @@ class HookMode:
         # Restore the snapshot, minus everything the rebuild already re-added
         # (a duplicate/overlapping element would abort the nft transaction)
         # and minus denied entries (deny_ip() removed them from the allow set
-        # deliberately — a bypass round trip must not resurrect them).
+        # deliberately — a down/up round trip must not resurrect them).
         self._restore_allow_sets(container, snapshot, skip=[*unique_ips, *denied_ips])
 
         # Gateway addresses are baked into the ruleset — no repopulation needed.
@@ -784,7 +807,7 @@ class HookMode:
             "inet",
             NFT_TABLE_NAME,
         )
-        errors = ruleset.verify_hook(output)
+        errors = ruleset.verify_up(output)
         if errors:
             raise RuntimeError(f"Ruleset verification failed: {'; '.join(errors)}")
 
@@ -857,7 +880,7 @@ class HookMode:
         channels — restoring one of those would collide inside the nft
         transaction (a duplicate or overlapping interval aborts the whole
         batch).  Restore failure is logged, never raised: coming up with a
-        cold allow set beats staying in bypass.
+        cold allow set beats staying stuck in the down posture.
         """
         keep = [row for row in rows if not _covered(row[1], skip)]
         if not keep:
@@ -950,12 +973,12 @@ class HookMode:
         if not self._ruleset.verify_quarantine(output):
             return ShieldState.QUARANTINE
 
-        if not self._ruleset.verify_bypass(output, allow_all=False):
+        if not self._ruleset.verify_down(output, disengaged=False):
             return ShieldState.DOWN
-        if not self._ruleset.verify_bypass(output, allow_all=True):
+        if not self._ruleset.verify_down(output, disengaged=True):
             return ShieldState.DISENGAGED
 
-        if not self._ruleset.verify_hook(output):
+        if not self._ruleset.verify_up(output):
             return ShieldState.UP
 
         return ShieldState.ERROR
@@ -974,27 +997,14 @@ class HookMode:
         except ExecError:
             return ""
 
-    def preview(self, *, down: bool = False, allow_all: bool = False) -> str:
+    def preview(self, *, down: bool = False, disengaged: bool = False) -> str:
         """Generate the ruleset that would be applied to a container."""
         if down:
-            return self._ruleset.build_bypass(allow_all=allow_all)
-        return self._ruleset.build_hook()
+            return self._ruleset.build_down(disengaged=disengaged)
+        return self._ruleset.build_up()
 
 
 # ── Module-level helpers ────────────────────────────────
-
-
-def _validate_override(override: Sequence[str]) -> list[str]:
-    """Return the override hosts, rejecting CIDR/range entries.
-
-    A t10 break-glass override sits above the security-deny tier, so widening
-    it to a subnet would punch a whole range straight through the firewall.
-    Each entry must name a single host or IP; a ``/`` (CIDR) is a caller
-    contract violation and fails the launch closed.
-    """
-    if bad := [h for h in override if "/" in h]:
-        raise ValueError(f"t10 override entries must be single hosts/IPs, not CIDR: {bad}")
-    return list(override)
 
 
 def _dnsmasq_bind(runtime: ShieldRuntime) -> str:

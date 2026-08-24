@@ -63,7 +63,9 @@ The mechanism:
   Authored (non-runtime) denies live in `policy/20-security-deny`.
 - Denied IPs also go into dedicated nft deny sets (`t20_security_deny_v4` /
   `t20_security_deny_v6`), rejected and logged with the `DENIED` prefix; the
-  deny sets are enforced even in bypass mode (`shield down`)
+  deny sets are enforced even in the DOWN posture (`shield down`); only
+  DISENGAGED (`shield down --disengage`) lifts them, together with every
+  range reject
 - On deny: remove from the `t40_project_allow` set, add to the
   `t20_security_deny` set, upsert `-target` into `policy/live`
 - On allow: un-deny from the `t20_security_deny` set if currently denied,
@@ -201,7 +203,7 @@ lifecycle step logs a separate entry — actions are `setup`, `allowed`,
 ```json
 {"ts":"...","container":"myproj-1","action":"setup","detail":"profiles=dev-standard"}
 {"ts":"...","container":"myproj-1","action":"allowed","dest":"93.184.216.34","detail":"target=example.com"}
-{"ts":"...","container":"myproj-1","action":"shield_down","detail":"allow_all=True"}
+{"ts":"...","container":"myproj-1","action":"shield_down","detail":"disengaged=True"}
 ```
 
 Audit logging is best-effort — write failures are logged as warnings and
@@ -218,7 +220,7 @@ to the kernel log and delivered over netlink to userspace consumers
 - `TEROK_SHIELD_DENIED:` traffic rejected by the explicit deny set (operator refused)
 - `TEROK_SHIELD_PRIVATE:` non-allowlisted private-range traffic rejected (RFC 1918 + RFC 4193/4291)
 - `TEROK_SHIELD_BLOCKED:` traffic rejected by the terminal default-deny rule (unclassified)
-- `TEROK_SHIELD_BYPASS:` traffic passing while the shield is bypassed
+- `TEROK_SHIELD_BYPASS:` traffic passing through the bypass window or while the shield is down
 
 ## Public API
 
@@ -237,7 +239,7 @@ shield = Shield(ShieldConfig(state_dir=Path("/path/to/state")))
 | `pre_start(container, profiles)` | Install hooks, resolve DNS, return extra podman args |
 | `allow(container, target)` | Live-allow a domain/IP for a running container |
 | `deny(container, target)` | Live-deny a domain/IP (best-effort) |
-| `down(container, container_id, allow_all=False)` | Switch to bypass mode (accept-all + log) |
+| `down(container, container_id, *, disengaged=False)` | Switch to DOWN: accept and log; keep the hard-deny floor, the security-deny set, and the private-range reject. `disengaged=True` enforces nothing |
 | `up(container, container_id)` | Restore deny-all mode |
 | `quarantine(container)` | Total network blackout (drop all, log dropped traffic) |
 | `state(container)` | Query container shield state (`QUARANTINE`, `UP`, `DOWN`, `DISENGAGED`, `OFFLINE`, `ERROR`) |
@@ -245,7 +247,7 @@ shield = Shield(ShieldConfig(state_dir=Path("/path/to/state")))
 | `resolve(profiles, force=False)` | Resolve DNS profiles and cache results |
 | `status()` | Return mode, profiles, audit config |
 | `check_environment()` | Probe podman/hooks/DNS-tier health for consumers |
-| `preview(down, allow_all)` | Show ruleset that would be applied |
+| `preview(*, down=False, disengaged=False)` | Show ruleset that would be applied |
 
 `container_id` on `up` / `down` is the full podman UUID; it routes the
 best-effort shield_up/shield_down hub events to the supervisor's

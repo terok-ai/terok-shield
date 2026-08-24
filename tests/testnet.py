@@ -98,7 +98,7 @@ BLOCKED_TARGET_HTTP = (
 BLOCKED_TARGET_DNS_PORT = 53  # DNS port (always open on BLOCKED_TARGET_IP)
 
 # ── Connectivity check targets (non-allowed, respond on HTTP/HTTPS) ──
-# Purpose-built endpoints for internet reachability testing during bypass.
+# Purpose-built endpoints for internet reachability testing while the shield is down.
 # They resolve to IPs NOT in the default allow set.
 
 CONNCHECK_HTTP = "http://connectivitycheck.gstatic.com/generate_204"  # Google, HTTP 204

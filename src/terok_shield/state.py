@@ -372,7 +372,7 @@ class StateBundle:
         """Derived per-container cache of resolved security-deny IPs (the t20 set seed).
 
         Denied domains must reach the packet filter as addresses: the deny
-        set is what survives a ``shield down`` (bypass keeps enforcing it),
+        set is what survives a ``shield down`` (the down posture keeps enforcing it),
         and an address-level deny also catches direct-IP access that never
         consults the DNS plane.  Statically resolved at pre_start on every
         DNS tier, cached apart from the allow-side ``resolved.ips`` so the
@@ -494,7 +494,7 @@ class StateBundle:
         [`deny_resolved`][terok_shield.state.StateBundle.deny_resolved]
         cache.  This is what ``shield down``/``up`` repopulate the deny set
         from — a denied *domain* must keep denying by address across every
-        rebuild, or the bypass posture would silently un-deny it.
+        rebuild, or the down posture would silently un-deny it.
         """
         return set(self.read_effective().deny_ips()) | set(_read_cached_ips(self.deny_resolved))
 

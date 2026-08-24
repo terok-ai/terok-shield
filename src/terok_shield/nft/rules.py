@@ -131,7 +131,7 @@ class RulesetBuilder:
 
     # ── Ruleset generation ─────────────────────────────
 
-    def build_hook(self) -> str:
+    def build_up(self) -> str:
         """Generate the UP (deny-all + ordered tiers) ruleset.
 
         Applied by the OCI hook into the container's own netns.  Dual-stack.
@@ -152,26 +152,35 @@ class RulesetBuilder:
         )
         return self._table(self._set_decls(), body, policy="drop")
 
-    def build_bypass(self, *, allow_all: bool = False) -> str:
-        """Generate the bypass-mode (manual ``shield down``) ruleset.
+    def build_down(self, *, disengaged: bool = False) -> str:
+        """Generate the DOWN-posture (manual ``shield down``) ruleset.
 
-        Output policy is ``accept``, but the hard-deny floor and the
-        security-deny tier (deny set + private ranges) are still enforced, and
-        every new connection is logged with the bypass prefix.  The t10
-        override keeps its place *above* the deny — a break-glass host must
-        stay reachable in every posture that enforces the deny.
+        Output policy is ``accept`` and every new connection is logged with
+        the bypass prefix.  Plain DOWN still enforces the hard-deny floor and
+        the security-deny tier (deny set + private ranges), with the t10
+        override kept *above* the deny — a break-glass host must stay
+        reachable in every posture that enforces the deny.
 
         Args:
-            allow_all: If True (DISENGAGED), drop the hard-deny and private-range
-                rejects too — a deliberate, total disengage.
+            disengaged: If True (DISENGAGED), enforce nothing: no hard-deny
+                floor, no deny set, no private-range rejects — every
+                destination is accepted and logged.  The tier sets stay
+                declared (unreferenced) so allow-set contents survive the
+                round trip back to ``shield up``.  Private addresses below
+                the deny are reachable in the other postures through a t10
+                override — a host, or a whole CIDR (logged as a warning);
+                DISENGAGED opens everything without one.
         """
         sections = [self._preamble_lines()]
-        if not allow_all:
-            sections.append(self._range_reject(HARD_DENY_RANGES, PRIVATE_LOG_PREFIX))
-        sections.append(self._match(TIER_OVERRIDE, "accept", BYPASS_LOG_PREFIX))
-        sections.append(self._match(TIER_SECURITY_DENY, _REJECT, DENIED_LOG_PREFIX))
-        if not allow_all:
-            sections.append(self._range_reject(PRIVATE_RANGES, PRIVATE_LOG_PREFIX))
+        if not disengaged:
+            sections.extend(
+                (
+                    self._range_reject(HARD_DENY_RANGES, PRIVATE_LOG_PREFIX),
+                    self._match(TIER_OVERRIDE, "accept", BYPASS_LOG_PREFIX),
+                    self._match(TIER_SECURITY_DENY, _REJECT, DENIED_LOG_PREFIX),
+                    self._range_reject(PRIVATE_RANGES, PRIVATE_LOG_PREFIX),
+                )
+            )
         sections.append(
             f'        ct state new log group {NFLOG_GROUP} prefix "{BYPASS_LOG_PREFIX}: " counter'
         )
@@ -206,7 +215,7 @@ class RulesetBuilder:
 
     # ── Verification ───────────────────────────────────
 
-    def verify_hook(self, nft_output: str) -> list[str]:
+    def verify_up(self, nft_output: str) -> list[str]:
         """Check applied UP ruleset invariants.  Returns errors (empty = OK).
 
         Expects output from ``nft list table inet terok_shield`` (scoped to the
@@ -234,12 +243,14 @@ class RulesetBuilder:
         errors.extend(self._verify_ranges(nft_output, PRIVATE_RANGES, "Private-range"))
         return errors
 
-    def verify_bypass(self, nft_output: str, *, allow_all: bool = False) -> list[str]:
-        """Check applied bypass ruleset invariants.  Returns errors (empty = OK).
+    def verify_down(self, nft_output: str, *, disengaged: bool = False) -> list[str]:
+        """Check applied DOWN-posture ruleset invariants.  Returns errors (empty = OK).
 
         Verifies the table header, ``policy accept`` on output / ``drop`` on
-        input, both chains, every tier set, the bypass nflog prefix, and (unless
-        *allow_all*) both range-reject floors.
+        input, both chains, every tier set, and the bypass nflog prefix.
+        Plain DOWN must carry both range-reject floors; DISENGAGED must carry
+        neither floor nor the deny-set reject — a partially applied ruleset
+        that keeps any reject must not pass as DISENGAGED.
         """
         errors: list[str] = []
         if f"table {NFT_TABLE}" not in nft_output:
@@ -248,12 +259,18 @@ class RulesetBuilder:
             errors.append("output policy is not accept")
         if "policy drop" not in nft_output:
             errors.append("input policy is not drop")
-        errors.extend(self._verify_common(nft_output))
+        errors.extend(self._verify_common(nft_output, expect_reject=not disengaged))
         if BYPASS_LOG_PREFIX not in nft_output:
             errors.append("bypass nflog prefix missing")
-        if not allow_all:
-            errors.extend(self._verify_ranges(nft_output, HARD_DENY_RANGES, "Hard-deny"))
-            errors.extend(self._verify_ranges(nft_output, PRIVATE_RANGES, "Private-range"))
+        floors = ((HARD_DENY_RANGES, "Hard-deny"), (PRIVATE_RANGES, "Private-range"))
+        if disengaged:
+            for nets, label in floors:
+                errors.extend(self._verify_ranges_absent(nft_output, nets, label))
+            if re.search(rf"@{TIER_SECURITY_DENY}_v[46]\b.*\breject\b", nft_output):
+                errors.append("deny-set reject rule present in DISENGAGED ruleset")
+        else:
+            for nets, label in floors:
+                errors.extend(self._verify_ranges(nft_output, nets, label))
         return errors
 
     @staticmethod
@@ -391,13 +408,13 @@ class RulesetBuilder:
         return f'        log group {NFLOG_GROUP} prefix "{BLOCKED_LOG_PREFIX}: " counter {_REJECT}'
 
     @staticmethod
-    def _verify_common(nft_output: str) -> list[str]:
-        """Check the chains, reject type, and every tier set are present."""
+    def _verify_common(nft_output: str, *, expect_reject: bool = True) -> list[str]:
+        """Check the chains, every tier set, and (when *expect_reject*) the reject type."""
         errors: list[str] = []
         for chain in ("output", "input"):
             if f"chain {chain}" not in nft_output:
                 errors.append(f"{chain} chain missing")
-        if "admin-prohibited" not in nft_output:
+        if expect_reject and "admin-prohibited" not in nft_output:
             errors.append("reject type missing")
         for base in _TIER_SETS:
             for fam in ("v4", "v6"):
@@ -413,6 +430,16 @@ class RulesetBuilder:
             selector = "ip" if _is_v4(net) else "ip6"
             if not re.search(rf"{selector} daddr {re.escape(net)}.*reject", nft_output):
                 errors.append(f"{label} reject rule for {net} missing")
+        return errors
+
+    @staticmethod
+    def _verify_ranges_absent(nft_output: str, nets: tuple[str, ...], label: str) -> list[str]:
+        """Check no range carries a reject rule — the DISENGAGED invariant."""
+        errors: list[str] = []
+        for net in nets:
+            selector = "ip" if _is_v4(net) else "ip6"
+            if re.search(rf"{selector} daddr {re.escape(net)}.*reject", nft_output):
+                errors.append(f"{label} reject rule for {net} present in DISENGAGED ruleset")
         return errors
 
     @staticmethod

@@ -136,7 +136,7 @@ def test_is_v4_returns_false_for_garbage() -> None:
     assert _is_v4("not-an-ip") is False
 
 
-# ── build_hook() ------------------------------------------------------
+# ── build_up() ------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -157,19 +157,19 @@ def test_is_v4_returns_false_for_garbage() -> None:
 )
 def test_hook_ruleset_contains_required_fragments(fragment: str) -> None:
     """The enforcing ruleset contains the expected top-level invariants."""
-    assert fragment in RulesetBuilder().build_hook()
+    assert fragment in RulesetBuilder().build_up()
 
 
 def test_hook_ruleset_blocks_all_private_and_hard_deny_ranges() -> None:
     """Every hard-deny (link-local/IMDS) and private (RFC1918/ULA) range is rejected."""
-    rs = RulesetBuilder().build_hook()
+    rs = RulesetBuilder().build_up()
     for net in HARD_DENY_RANGES + PRIVATE_RANGES:
         assert net in rs, f"Range {net!r} missing from hook ruleset"
 
 
 def test_hook_ruleset_accepts_dns_to_the_configured_forwarder() -> None:
     """Only the configured DNS forwarder is granted the DNS exception."""
-    ruleset = RulesetBuilder(dns=LINK_LOCAL_DNS).build_hook()
+    ruleset = RulesetBuilder(dns=LINK_LOCAL_DNS).build_up()
     assert _dns_accept_rules(ruleset) == {
         f"udp dport 53 ip daddr {LINK_LOCAL_DNS} accept",
         f"tcp dport 53 ip daddr {LINK_LOCAL_DNS} accept",
@@ -179,7 +179,7 @@ def test_hook_ruleset_accepts_dns_to_the_configured_forwarder() -> None:
 def test_hook_ruleset_default_tcp_rules_are_dns_only() -> None:
     """Without loopback ports, TCP port rules must be limited to DNS."""
     tcp_rules = [
-        line.strip() for line in RulesetBuilder().build_hook().splitlines() if "tcp dport" in line
+        line.strip() for line in RulesetBuilder().build_up().splitlines() if "tcp dport" in line
     ]
     assert tcp_rules
     assert all(line.startswith("tcp dport 53 ") for line in tcp_rules)
@@ -208,7 +208,7 @@ def test_hook_ruleset_emits_one_rule_per_loopback_port(
     expected_rules: list[str],
 ) -> None:
     """Each configured loopback port gets its own accept rule before private-range reject."""
-    ruleset = RulesetBuilder(loopback_ports=ports).build_hook()
+    ruleset = RulesetBuilder(loopback_ports=ports).build_up()
     for rule in expected_rules:
         assert rule in ruleset
         # Loopback port rules must fire before the 169.254.0.0/16 private-range reject
@@ -223,7 +223,7 @@ def test_hook_ruleset_tier_order_is_authority_order() -> None:
     security-deny); and the hard-deny floor (link-local/IMDS) sits above the
     override — absolute, not even override-able.
     """
-    rs = RulesetBuilder().build_hook()
+    rs = RulesetBuilder().build_up()
     hard_deny = rs.index(HARD_DENY_RANGES[0])  # 169.254.0.0/16
     override = rs.index("@t10_override_v4")
     deny = rs.index("@t20_security_deny_v4")
@@ -240,7 +240,7 @@ def test_v6_imds_floor_is_absolute() -> None:
     would reach the v6 metadata service and the absolute-IMDS guarantee
     would be v4-only.
     """
-    rs = RulesetBuilder().build_hook()
+    rs = RulesetBuilder().build_up()
     imds = rs.index(f"ip6 daddr {AWS_IMDS_V6} ")
     assert imds < rs.index("@t10_override_v4")
     # Bare-address form: nft strips /128 on listing, so verification
@@ -253,13 +253,13 @@ def test_v6_imds_floor_is_absolute() -> None:
 
 def test_hook_ruleset_uses_blocked_prefix() -> None:
     """Terminal deny rule uses the BLOCKED prefix for unclassified connections."""
-    ruleset = RulesetBuilder().build_hook()
+    ruleset = RulesetBuilder().build_up()
     assert _BLOCKED_LOG_PREFIX in ruleset
 
 
 def test_hook_ruleset_terminal_rule_is_standalone_log_reject() -> None:
     """Terminal deny rule is a standalone log+reject (no daddr selector)."""
-    lines = RulesetBuilder().build_hook().splitlines()
+    lines = RulesetBuilder().build_up().splitlines()
     terminal = [
         ln.strip()
         for ln in lines
@@ -270,7 +270,7 @@ def test_hook_ruleset_terminal_rule_is_standalone_log_reject() -> None:
 
 def test_hook_ruleset_deny_sets_use_denied_prefix() -> None:
     """Deny set rules use the DENIED prefix (not BLOCKED)."""
-    ruleset = RulesetBuilder().build_hook()
+    ruleset = RulesetBuilder().build_up()
     assert "@t20_security_deny_v4" in ruleset, "t20_security_deny_v4 set rule missing from ruleset"
     assert "@t20_security_deny_v6" in ruleset, "t20_security_deny_v6 set rule missing from ruleset"
     # Deny set rules have a daddr selector + DENIED prefix
@@ -285,7 +285,7 @@ def test_hook_ruleset_deny_sets_use_denied_prefix() -> None:
 
 def test_hook_ruleset_has_no_queued_prefix() -> None:
     """Hook ruleset must not contain the legacy QUEUED log prefix."""
-    assert "QUEUED" not in RulesetBuilder().build_hook()
+    assert "QUEUED" not in RulesetBuilder().build_up()
 
 
 def test_verify_ruleset_checks_deny_sets() -> None:
@@ -296,7 +296,7 @@ def test_verify_ruleset_checks_deny_sets() -> None:
         f"t40_project_allow_v4 t40_project_allow_v6 {_OUTPUT_CHAIN} {_INPUT_CHAIN}\n"
         f"{_private_reject_rules()}"
     )
-    errors = RulesetBuilder().verify_hook(minimal)
+    errors = RulesetBuilder().verify_up(minimal)
     assert "t20_security_deny_v4 set missing" in errors
     assert "t20_security_deny_v6 set missing" in errors
 
@@ -539,14 +539,14 @@ def test_disarm_bypass_window_flushes_both_families() -> None:
     assert f"flush set {NFT_TABLE} bypass_window_v6" in cmd
 
 
-# ── verify_hook() -----------------------------------------------------
+# ── verify_up() -----------------------------------------------------
 
 _builder = RulesetBuilder()
 
 
-def test_verify_hook_accepts_the_generated_hook_ruleset() -> None:
-    """verify_hook() accepts the enforcing ruleset generated by RulesetBuilder."""
-    assert _builder.verify_hook(_builder.build_hook()) == []
+def test_verify_up_accepts_the_generated_hook_ruleset() -> None:
+    """verify_up() accepts the enforcing ruleset generated by RulesetBuilder."""
+    assert _builder.verify_up(_builder.build_up()) == []
 
 
 @pytest.mark.parametrize(
@@ -579,28 +579,28 @@ def test_verify_hook_accepts_the_generated_hook_ruleset() -> None:
         ),
     ],
 )
-def test_verify_hook_reports_missing_top_level_invariants(
+def test_verify_up_reports_missing_top_level_invariants(
     nft_output: str,
     expected_error: str,
 ) -> None:
-    """verify_hook() names the missing high-level enforce-mode invariant."""
-    assert expected_error in _builder.verify_hook(nft_output)
+    """verify_up() names the missing high-level up-posture invariant."""
+    assert expected_error in _builder.verify_up(nft_output)
 
 
-def test_verify_hook_reports_each_missing_private_range_rule() -> None:
+def test_verify_up_reports_each_missing_private_range_rule() -> None:
     """Every missing private-range reject rule should produce its own error."""
-    errors = _builder.verify_hook(
+    errors = _builder.verify_up(
         f"policy drop {_ADMIN_PROHIBITED} {_DENY_LOG_PREFIX} t40_project_allow_v4 t40_project_allow_v6 {_OUTPUT_CHAIN} {_INPUT_CHAIN}"
     )
     range_errors = [error for error in errors if "Private-range" in error]
     assert len(range_errors) == len(PRIVATE_RANGES)
 
 
-def test_verify_hook_reports_missing_ipv6_private_ranges_independently() -> None:
+def test_verify_up_reports_missing_ipv6_private_ranges_independently() -> None:
     """Missing IPv6 private-range rejects are reported separately from IPv4 ones."""
     ipv4_private = tuple(n for n in PRIVATE_RANGES if "." in n)
     ipv6_private = tuple(n for n in PRIVATE_RANGES if ":" in n)
-    errors = _builder.verify_hook(
+    errors = _builder.verify_up(
         "chain output { type filter hook output priority filter; policy drop;\n"
         "chain input { policy drop;\n"
         f"{_DENY_LOG_PREFIX} {_ADMIN_PROHIBITED} t40_project_allow_v4 t40_project_allow_v6\n"
@@ -610,57 +610,57 @@ def test_verify_hook_reports_missing_ipv6_private_ranges_independently() -> None
     assert len(ipv6_errors) == len(ipv6_private)
 
 
-def test_verify_hook_rejects_a_bypass_ruleset() -> None:
-    """Bypass mode must not satisfy enforce-mode verification."""
-    errors = _builder.verify_hook(_builder.build_bypass())
+def test_verify_up_rejects_a_down_ruleset() -> None:
+    """A down ruleset must not satisfy up-posture verification."""
+    errors = _builder.verify_up(_builder.build_down())
     assert errors
     assert any("terminal reject-all rule" in error for error in errors)
 
 
-def test_verify_hook_rejects_silent_drop_terminal() -> None:
+def test_verify_up_rejects_silent_drop_terminal() -> None:
     """A BLOCKED terminal that silently drops (no reject) fails verification."""
-    ruleset = _builder.build_hook()
+    ruleset = _builder.build_up()
     silent = ruleset.replace(
         f'prefix "{_BLOCKED_LOG_PREFIX}: " counter reject with icmpx {_ADMIN_PROHIBITED}',
         f'prefix "{_BLOCKED_LOG_PREFIX}: " counter drop',
     )
     assert silent != ruleset  # sanity: the terminal reject was rewritten to drop
-    assert "terminal reject-all rule missing" in _builder.verify_hook(silent)
+    assert "terminal reject-all rule missing" in _builder.verify_up(silent)
 
 
-def test_verify_hook_accepts_prefix_before_group_ordering() -> None:
-    """verify_hook() handles nft output where prefix appears before group.
+def test_verify_up_accepts_prefix_before_group_ordering() -> None:
+    """verify_up() handles nft output where prefix appears before group.
 
     Newer nft versions reorder log statement attributes: ``log prefix "..." group N``
     instead of ``log group N prefix "..."``.  The terminal deny-all check must
     accept both orderings.
     """
-    ruleset = _builder.build_hook()
+    ruleset = _builder.build_up()
     # Simulate newer nft output ordering: swap group/prefix in log lines
     reordered = ruleset.replace(
-        f'log group 100 prefix "{_DENY_LOG_PREFIX}',
-        f'log prefix "{_DENY_LOG_PREFIX}: " group 100',
+        f'log group 100 prefix "{_BLOCKED_LOG_PREFIX}: "',
+        f'log prefix "{_BLOCKED_LOG_PREFIX}: " group 100',
     )
     assert reordered != ruleset  # sanity: replacement happened
-    assert _builder.verify_hook(reordered) == []
+    assert _builder.verify_up(reordered) == []
 
 
-def test_verify_hook_checks_private_ranges_by_rule_not_by_position() -> None:
+def test_verify_up_checks_private_ranges_by_rule_not_by_position() -> None:
     """Private-range rejects pass verification even if moved after the allow-set match."""
     ruleset = (
         f"policy drop {_ADMIN_PROHIBITED} {_DENY_LOG_PREFIX} @t40_project_allow_v4 accept t40_project_allow_v6\n"
         f"{_private_reject_rules()}"
     )
-    range_errors = [error for error in _builder.verify_hook(ruleset) if "Private-range" in error]
+    range_errors = [error for error in _builder.verify_up(ruleset) if "Private-range" in error]
     assert range_errors == []
 
 
-def test_verify_hook_reports_errors_for_empty_input() -> None:
-    """Empty nft output should fail enforce-mode verification."""
-    assert _builder.verify_hook("")
+def test_verify_up_reports_errors_for_empty_input() -> None:
+    """Empty nft output should fail up-posture verification."""
+    assert _builder.verify_up("")
 
 
-# ── build_bypass() ----------------------------------------------------
+# ── build_down() ----------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -674,37 +674,40 @@ def test_verify_hook_reports_errors_for_empty_input() -> None:
         pytest.param("ct state new log group", id="logs-new-connections"),
     ],
 )
-def test_bypass_ruleset_contains_required_fragments(fragment: str) -> None:
-    """The bypass ruleset preserves the expected top-level invariants."""
-    assert fragment in RulesetBuilder().build_bypass()
+def test_down_ruleset_contains_required_fragments(fragment: str) -> None:
+    """The down ruleset preserves the expected top-level invariants."""
+    assert fragment in RulesetBuilder().build_down()
 
 
-def test_bypass_ruleset_blocks_all_private_ranges_by_default() -> None:
-    """Bypass mode still rejects all private-range traffic unless allow_all=True."""
-    rs = RulesetBuilder().build_bypass()
+def test_down_ruleset_blocks_all_private_ranges_by_default() -> None:
+    """The down posture still rejects all private-range traffic unless disengaged=True."""
+    rs = RulesetBuilder().build_down()
     for net in PRIVATE_RANGES:
-        assert net in rs, f"Private range {net!r} missing from bypass ruleset"
+        assert net in rs, f"Private range {net!r} missing from down ruleset"
 
 
-def test_bypass_ruleset_allow_all_removes_all_private_range_rejects() -> None:
-    """allow_all=True removes every RFC1918 and IPv6 private-range reject rule."""
-    rs = RulesetBuilder().build_bypass(allow_all=True)
-    for net in PRIVATE_RANGES:
-        assert net not in rs, f"Private range {net!r} should be absent when allow_all=True"
+def test_down_ruleset_disengaged_enforces_nothing() -> None:
+    """disengaged=True drops every reject: hard-deny floor, private ranges, and the deny set."""
+    rs = RulesetBuilder().build_down(disengaged=True)
+    for net in HARD_DENY_RANGES + PRIVATE_RANGES:
+        assert net not in rs, f"Range {net!r} should be absent when disengaged=True"
+    assert _DENY_LOG_PREFIX not in rs
+    assert "reject" not in rs
+    assert BYPASS_LOG_PREFIX in rs  # still logs every new connection
 
 
-def test_bypass_ruleset_includes_deny_sets() -> None:
+def test_down_ruleset_includes_deny_sets() -> None:
     """Shield-down ruleset includes deny sets so deny.list is enforced."""
-    rs = RulesetBuilder().build_bypass()
+    rs = RulesetBuilder().build_down()
     assert "t20_security_deny_v4" in rs
     assert "t20_security_deny_v6" in rs
     assert _DENY_LOG_PREFIX in rs
 
 
-def test_bypass_ruleset_keeps_override_above_deny() -> None:
-    """Bypass mode keeps the t10 override match above the deny — a break-glass
+def test_down_ruleset_keeps_override_above_deny() -> None:
+    """The down posture keeps the t10 override match above the deny — a break-glass
     host must stay reachable in every posture that enforces the deny."""
-    rs = RulesetBuilder().build_bypass()
+    rs = RulesetBuilder().build_down()
     assert rs.index("@t10_override_v4") < rs.index("@t20_security_deny_v4")
 
 
@@ -716,45 +719,45 @@ def _rule_for(ruleset: str, set_name: str) -> str:
 def test_override_accept_is_audited_in_both_postures() -> None:
     """A break-glass accept carries an NFLOG tag — it is terminal, so nothing else logs it.
 
-    The t10 verdict ends evaluation before the tiers (and, in bypass, before
+    The t10 verdict ends evaluation before the tiers (and, in the down posture, before
     the catch-all ``ct state new`` log), so an untagged accept would make
     exactly the traffic an auditor cares about most the only traffic that
     leaves no trace.
     """
-    assert _ALLOWED_LOG_PREFIX in _rule_for(RulesetBuilder().build_hook(), "t10_override_v4")
-    assert _BYPASS_LOG_PREFIX in _rule_for(RulesetBuilder().build_bypass(), "t10_override_v4")
+    assert _ALLOWED_LOG_PREFIX in _rule_for(RulesetBuilder().build_up(), "t10_override_v4")
+    assert _BYPASS_LOG_PREFIX in _rule_for(RulesetBuilder().build_down(), "t10_override_v4")
 
 
-def test_bypass_ruleset_emits_loopback_port_rules() -> None:
-    """Host-loopback-proxy port exceptions survive in bypass mode, before private-range reject."""
-    ruleset = RulesetBuilder(loopback_ports=(9418,)).build_bypass()
+def test_down_ruleset_emits_loopback_port_rules() -> None:
+    """Host-loopback-proxy port exceptions survive in the down posture, before private-range reject."""
+    ruleset = RulesetBuilder(loopback_ports=(9418,)).build_down()
     accept_rule = f"tcp dport 9418 ip daddr {PASTA_HOST_LOOPBACK_MAP} accept"
     assert accept_rule in ruleset
     assert ruleset.index(accept_rule) < ruleset.index("169.254.0.0/16")
 
 
-def test_bypass_ruleset_accepts_dns_to_the_configured_forwarder() -> None:
-    """Bypass mode retains the explicit DNS exception for the configured forwarder."""
-    ruleset = RulesetBuilder(dns=LINK_LOCAL_DNS).build_bypass()
+def test_down_ruleset_accepts_dns_to_the_configured_forwarder() -> None:
+    """The down posture retains the explicit DNS exception for the configured forwarder."""
+    ruleset = RulesetBuilder(dns=LINK_LOCAL_DNS).build_down()
     assert _dns_accept_rules(ruleset) == {
         f"udp dport 53 ip daddr {LINK_LOCAL_DNS} accept",
         f"tcp dport 53 ip daddr {LINK_LOCAL_DNS} accept",
     }
 
 
-# ── verify_bypass() ---------------------------------------------------
+# ── verify_down() ---------------------------------------------------
 
 
 @pytest.mark.parametrize(
-    ("ruleset", "allow_all"),
+    ("ruleset", "disengaged"),
     [
-        pytest.param(_builder.build_bypass(), False, id="default-bypass"),
-        pytest.param(_builder.build_bypass(allow_all=True), True, id="allow-all-bypass"),
+        pytest.param(_builder.build_down(), False, id="down"),
+        pytest.param(_builder.build_down(disengaged=True), True, id="disengaged"),
     ],
 )
-def test_verify_bypass_accepts_generated_bypass_rulesets(ruleset: str, allow_all: bool) -> None:
-    """verify_bypass() accepts bypass rulesets produced by RulesetBuilder."""
-    assert _builder.verify_bypass(ruleset, allow_all=allow_all) == []
+def test_verify_down_accepts_generated_down_rulesets(ruleset: str, disengaged: bool) -> None:
+    """verify_down() accepts down rulesets produced by RulesetBuilder."""
+    assert _builder.verify_down(ruleset, disengaged=disengaged) == []
 
 
 @pytest.mark.parametrize(
@@ -795,43 +798,81 @@ def test_verify_bypass_accepts_generated_bypass_rulesets(ruleset: str, allow_all
         ),
     ],
 )
-def test_verify_bypass_reports_missing_top_level_invariants(
+def test_verify_down_reports_missing_top_level_invariants(
     nft_output: str,
     expected_error: str,
 ) -> None:
-    """verify_bypass() names the missing high-level bypass invariant."""
-    assert expected_error in _builder.verify_bypass(nft_output)
+    """verify_down() names the missing high-level down-posture invariant."""
+    assert expected_error in _builder.verify_down(nft_output)
 
 
-def test_verify_bypass_reports_private_ranges_when_allow_all_is_false() -> None:
-    """Private-range reject rules remain mandatory in default bypass mode."""
-    errors = _builder.verify_bypass(
+def test_verify_down_reports_private_ranges_when_disengaged_is_false() -> None:
+    """Private-range reject rules remain mandatory in the default down posture."""
+    errors = _builder.verify_down(
         f"{_OUTPUT_CHAIN} policy accept {_INPUT_CHAIN} policy drop {BYPASS_LOG_PREFIX} t40_project_allow_v4 t40_project_allow_v6"
     )
     range_errors = [error for error in errors if "Private-range" in error]
     assert len(range_errors) == len(PRIVATE_RANGES)
 
 
-def test_verify_bypass_skips_private_range_checks_in_allow_all_mode() -> None:
-    """allow_all=True disables private-range verification in bypass mode."""
-    errors = _builder.verify_bypass(
+def test_verify_down_accepts_absent_private_ranges_in_disengaged_mode() -> None:
+    """disengaged=True treats absent private-range rejects as correct."""
+    errors = _builder.verify_down(
         f"{_OUTPUT_CHAIN} policy accept {_INPUT_CHAIN} policy drop {BYPASS_LOG_PREFIX} t40_project_allow_v4 t40_project_allow_v6",
-        allow_all=True,
+        disengaged=True,
     )
     range_errors = [error for error in errors if "Private-range" in error]
     assert range_errors == []
 
 
-def test_verify_bypass_rejects_an_enforcing_hook_ruleset() -> None:
-    """Enforce mode must not satisfy bypass-mode verification."""
-    errors = _builder.verify_bypass(_builder.build_hook())
+def test_verify_down_tells_down_and_disengaged_apart() -> None:
+    """The reject invariants are mutually exclusive: each posture fails the other's verifier."""
+    down, disengaged = _builder.build_down(), _builder.build_down(disengaged=True)
+    assert _builder.verify_down(down, disengaged=True)
+    assert _builder.verify_down(disengaged, disengaged=False)
+
+
+@pytest.mark.parametrize(
+    ("leaked_rule", "expected_error"),
+    [
+        pytest.param(
+            f'ip daddr {PRIVATE_RANGES[0]} log group 100 prefix "X: " reject with icmpx admin-prohibited',
+            f"Private-range reject rule for {PRIVATE_RANGES[0]} present",
+            id="private-range",
+        ),
+        pytest.param(
+            f'ip daddr {HARD_DENY_RANGES[0]} log group 100 prefix "X: " reject with icmpx admin-prohibited',
+            f"Hard-deny reject rule for {HARD_DENY_RANGES[0]} present",
+            id="hard-deny",
+        ),
+        pytest.param(
+            'ip daddr @t20_security_deny_v4 log group 100 prefix "X: " counter reject with icmpx admin-prohibited',
+            "deny-set reject rule present",
+            id="deny-set",
+        ),
+    ],
+)
+def test_verify_down_disengaged_flags_a_retained_reject(
+    leaked_rule: str, expected_error: str
+) -> None:
+    """A single reject left behind must fail DISENGAGED verification, not pass as disengaged."""
+    marker = "        ct state new log"
+    leaked = _builder.build_down(disengaged=True).replace(
+        marker, f"        {leaked_rule}\n{marker}", 1
+    )
+    assert any(expected_error in error for error in _builder.verify_down(leaked, disengaged=True))
+
+
+def test_verify_down_rejects_an_up_ruleset() -> None:
+    """An up ruleset must not satisfy down-posture verification."""
+    errors = _builder.verify_down(_builder.build_up())
     assert errors
     assert any("accept" in error for error in errors)
 
 
-def test_verify_bypass_reports_errors_for_empty_input() -> None:
-    """Empty nft output should fail bypass-mode verification."""
-    assert _builder.verify_bypass("")
+def test_verify_down_reports_errors_for_empty_input() -> None:
+    """Empty nft output should fail down-posture verification."""
+    assert _builder.verify_down("")
 
 
 # ── build_quarantine() ─────────────────────────────────────────
@@ -896,14 +937,14 @@ def test_verify_quarantine_accepts_generated_block_ruleset() -> None:
 
 def test_verify_quarantine_rejects_hook_ruleset() -> None:
     """Hook (deny-all with allowlists) must not satisfy block verification."""
-    errors = RulesetBuilder.verify_quarantine(_builder.build_hook())
+    errors = RulesetBuilder.verify_quarantine(_builder.build_up())
     assert errors
     assert any("t40_project_allow_v4" in e for e in errors)
 
 
-def test_verify_quarantine_rejects_bypass_ruleset() -> None:
-    """Bypass (accept-all) must not satisfy block verification."""
-    errors = RulesetBuilder.verify_quarantine(_builder.build_bypass())
+def test_verify_quarantine_rejects_down_ruleset() -> None:
+    """A down (accept-by-default) ruleset must not satisfy blackout verification."""
+    errors = RulesetBuilder.verify_quarantine(_builder.build_down())
     assert errors
 
 
@@ -947,35 +988,35 @@ class TestGatewayPortRules:
         )
 
     def test_hook_ruleset_contains_literal_gateway_ips(self) -> None:
-        """build_hook() with gateway params contains literal IP accept rules."""
-        rs = self._gw_builder().build_hook()
+        """build_up() with gateway params contains literal IP accept rules."""
+        rs = self._gw_builder().build_up()
         assert f"tcp dport 9418 ip daddr {self._GW_V4} accept" in rs
         assert f"tcp dport 9418 ip6 daddr {self._GW_V6} accept" in rs
 
-    def test_bypass_ruleset_contains_literal_gateway_ips(self) -> None:
-        """build_bypass() with gateway params contains literal IP accept rules."""
-        rs = self._gw_builder().build_bypass()
+    def test_down_ruleset_contains_literal_gateway_ips(self) -> None:
+        """build_down() with gateway params contains literal IP accept rules."""
+        rs = self._gw_builder().build_down()
         assert f"tcp dport 9418 ip daddr {self._GW_V4} accept" in rs
         assert f"tcp dport 9418 ip6 daddr {self._GW_V6} accept" in rs
 
     def test_gateway_rules_before_private_range(self) -> None:
         """Gateway accept rules appear before private-range reject rules."""
-        rs = self._gw_builder().build_hook()
+        rs = self._gw_builder().build_up()
         gw_pos = rs.index(f"ip daddr {self._GW_V4} accept")
         private_pos = rs.index(PRIVATE_RANGES[0])
         assert gw_pos < private_pos
 
     def test_gateway_multiple_ports(self) -> None:
         """Literal gateway IP rules are generated for each loopback port."""
-        rs = self._gw_builder(ports=(9418, 8080)).build_hook()
+        rs = self._gw_builder(ports=(9418, 8080)).build_up()
         assert f"tcp dport 9418 ip daddr {self._GW_V4} accept" in rs
         assert f"tcp dport 8080 ip daddr {self._GW_V4} accept" in rs
         assert f"tcp dport 9418 ip6 daddr {self._GW_V6} accept" in rs
         assert f"tcp dport 8080 ip6 daddr {self._GW_V6} accept" in rs
 
     def test_no_gateway_rules_without_ports(self) -> None:
-        """build_hook() with no loopback_ports produces no gateway rules."""
-        rs = RulesetBuilder(dns=SLIRP4NETNS_DNS, loopback_ports=()).build_hook()
+        """build_up() with no loopback_ports produces no gateway rules."""
+        rs = RulesetBuilder(dns=SLIRP4NETNS_DNS, loopback_ports=()).build_up()
         assert f"ip daddr {self._GW_V4} accept" not in rs
 
     def test_swapped_gateway_families_rejected(self) -> None:
@@ -1035,18 +1076,18 @@ class TestSetTimeout:
         elements expire to close the timed allow-all window — so a blanket
         "timeout absent" assertion no longer holds.)
         """
-        rs = RulesetBuilder().build_hook()
+        rs = RulesetBuilder().build_up()
         assert "set t40_project_allow_v4 { type ipv4_addr; flags interval; }" in rs
         assert "timeout 30m" not in rs  # no dnsmasq-tier default element timeout
 
     def test_hook_ruleset_with_timeout(self) -> None:
         """With set_timeout, sets get interval+timeout flags."""
-        rs = RulesetBuilder(set_timeout="30m").build_hook()
+        rs = RulesetBuilder(set_timeout="30m").build_up()
         assert "flags interval, timeout; timeout 30m;" in rs
 
-    def test_bypass_ruleset_with_timeout(self) -> None:
-        """Bypass rulesets also support set_timeout."""
-        rs = RulesetBuilder(set_timeout="1h").build_bypass()
+    def test_down_ruleset_with_timeout(self) -> None:
+        """Down rulesets also support set_timeout."""
+        rs = RulesetBuilder(set_timeout="1h").build_down()
         assert "flags interval, timeout; timeout 1h;" in rs
 
     def test_builder_rejects_invalid_timeout(self) -> None:

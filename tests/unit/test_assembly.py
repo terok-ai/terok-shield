@@ -169,9 +169,9 @@ def test_shield_up_reads_runtime_allows(
     # Mock DNS reading so _container_ruleset returns the mock ruleset
     harness.mode._container_ruleset = lambda _c: harness.ruleset
     harness.runner.nft_via_nsenter.return_value = ""
-    harness.ruleset.build_hook.return_value = "table inet terok_shield {}"
+    harness.ruleset.build_up.return_value = "table inet terok_shield {}"
     harness.ruleset.add_elements_dual.return_value = "add element ..."
-    harness.ruleset.verify_hook.return_value = []
+    harness.ruleset.verify_up.return_value = []
 
     harness.mode.shield_up("test-ctr")
     harness.ruleset.add_elements_dual.assert_called_once_with([TEST_IP1, TEST_IP2])

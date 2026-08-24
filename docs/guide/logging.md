@@ -23,7 +23,7 @@ Each line is a JSON object:
 | `setup` | Firewall setup step (ruleset applied, IPs loaded, verification) |
 | `allowed` | Domain/IP added to allow set at runtime |
 | `denied` | Domain/IP removed from allow set at runtime |
-| `shield_down` | Container switched to bypass mode |
+| `shield_down` | Container switched to the DOWN posture |
 | `shield_up` | Container restored to deny-all mode |
 | `note` | Advisory event (e.g. private-range address allowlisted — RFC 1918/RFC 4193) |
 | `error` | Something failed |
@@ -59,7 +59,7 @@ prefixes:
 | `TEROK_SHIELD_DENIED:` | Packet rejected by the explicit deny set (operator refused) |
 | `TEROK_SHIELD_PRIVATE:` | Packet rejected by private-range rule (RFC 1918 + RFC 4193/4291) |
 | `TEROK_SHIELD_BLOCKED:` | Packet rejected by the terminal default-deny rule (unclassified) |
-| `TEROK_SHIELD_BYPASS:` | Packet accepted while the shield is bypassed |
+| `TEROK_SHIELD_BYPASS:` | Packet accepted through the bypass window or while the shield is down |
 
 View with:
 

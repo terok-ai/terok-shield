@@ -34,7 +34,7 @@ class TestFirewallAllowing:
 
     def test_allowed_ip_reachable_http(self, container: str, container_pid: str) -> None:
         """HTTP traffic to an allowed IP is permitted."""
-        r = nsenter_nft(container_pid, stdin=RulesetBuilder().build_hook())
+        r = nsenter_nft(container_pid, stdin=RulesetBuilder().build_up())
         assert r.returncode == 0, f"Ruleset apply failed: {r.stderr}"
         r = nsenter_nft(
             container_pid, stdin=add_elements("t40_project_allow_v4", ALLOWED_TARGET_IPS)
@@ -46,7 +46,7 @@ class TestFirewallAllowing:
 
     def test_allowed_ip_reachable_https(self, container: str, container_pid: str) -> None:
         """HTTPS traffic to an allowed IP is permitted."""
-        r = nsenter_nft(container_pid, stdin=RulesetBuilder().build_hook())
+        r = nsenter_nft(container_pid, stdin=RulesetBuilder().build_up())
         assert r.returncode == 0, f"Ruleset apply failed: {r.stderr}"
         r = nsenter_nft(
             container_pid, stdin=add_elements("t40_project_allow_v4", ALLOWED_TARGET_IPS)
@@ -58,7 +58,7 @@ class TestFirewallAllowing:
 
     def test_non_allowed_ip_still_blocked(self, container: str, container_pid: str) -> None:
         """IPs not in the allow set remain blocked after adding others."""
-        r = nsenter_nft(container_pid, stdin=RulesetBuilder().build_hook())
+        r = nsenter_nft(container_pid, stdin=RulesetBuilder().build_up())
         assert r.returncode == 0, f"Ruleset apply failed: {r.stderr}"
         r = nsenter_nft(
             container_pid, stdin=add_elements("t40_project_allow_v4", ALLOWED_TARGET_IPS)
@@ -70,7 +70,7 @@ class TestFirewallAllowing:
 
     def test_allow_then_block_different_targets(self, container: str, container_pid: str) -> None:
         """One IP allowed, another blocked — in the same container."""
-        r = nsenter_nft(container_pid, stdin=RulesetBuilder().build_hook())
+        r = nsenter_nft(container_pid, stdin=RulesetBuilder().build_up())
         assert r.returncode == 0, f"Ruleset apply failed: {r.stderr}"
         r = nsenter_nft(
             container_pid, stdin=add_elements("t40_project_allow_v4", ALLOWED_TARGET_IPS)
@@ -104,7 +104,7 @@ class TestRFC1918Allow:
         """An RFC1918 host in the override set precedes (and so bypasses) the RFC1918 reject."""
         from terok_shield.nft.constants import PRIVATE_RANGES
 
-        applied = nsenter_nft(container_pid, stdin=RulesetBuilder().build_hook())
+        applied = nsenter_nft(container_pid, stdin=RulesetBuilder().build_up())
         assert applied.returncode == 0, f"Ruleset apply failed: {applied.stderr}"
         added = nsenter_nft(container_pid, stdin=add_elements("t10_override_v4", [RFC1918_HOST]))
         assert added.returncode == 0, f"Add elements failed: {added.stderr}"

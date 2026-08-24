@@ -364,21 +364,22 @@ def test_list_rules_returns_empty_on_exec_error(make_hook_mode: HookModeHarnessF
 
 
 @pytest.mark.parametrize(
-    ("allow_all", "verify_errors", "expected_message"),
+    ("disengaged", "verify_errors", "expected_message"),
     [
         pytest.param(False, [], None, id="success"),
+        pytest.param(True, [], None, id="disengaged"),
         pytest.param(
             False, ["error: missing policy"], "verification failed", id="verification-failure"
         ),
     ],
 )
-def test_shield_down_builds_bypass_ruleset(
+def test_shield_down_builds_down_ruleset(
     make_hook_mode: HookModeHarnessFactory,
-    allow_all: bool,
+    disengaged: bool,
     verify_errors: list[str],
     expected_message: str | None,
 ) -> None:
-    """shield_down() applies bypass mode and verifies the resulting ruleset."""
+    """shield_down() applies the down posture and verifies the resulting ruleset."""
     harness = make_hook_mode()
     # Mock DNS reading so _container_ruleset returns the mock ruleset
     harness.mode._container_ruleset = lambda _c: harness.ruleset
@@ -387,20 +388,24 @@ def test_shield_down_builds_bypass_ruleset(
         "table inet terok_shield {}",  # shield_state() → list_rules
         "",  # snapshot t40_project_allow_v4 (empty)
         "",  # snapshot t40_project_allow_v6 (empty)
-        "",  # apply bypass ruleset
+        "",  # apply down ruleset
         "bad output" if verify_errors else "valid output",  # verify
     ]
-    harness.ruleset.build_bypass.return_value = "bypass ruleset"
-    harness.ruleset.verify_bypass.return_value = verify_errors
-    # shield_state() uses verify_bypass/verify_hook to classify
-    harness.ruleset.verify_hook.return_value = []
+    harness.ruleset.build_down.return_value = "down ruleset"
+    harness.ruleset.verify_down.return_value = verify_errors
+    # shield_state() uses verify_down/verify_up to classify
+    harness.ruleset.verify_up.return_value = []
 
     if expected_message is None:
-        harness.mode.shield_down("test-ctr", allow_all=allow_all)
+        harness.mode.shield_down("test-ctr", disengaged=disengaged)
         assert harness.runner.nft_via_nsenter.call_count == 5
+        harness.ruleset.build_down.assert_called_once_with(disengaged=disengaged)
+        assert harness.ruleset.verify_down.call_args == mock.call(
+            "valid output", disengaged=disengaged
+        )
     else:
         with pytest.raises(RuntimeError, match=expected_message):
-            harness.mode.shield_down("test-ctr", allow_all=allow_all)
+            harness.mode.shield_down("test-ctr", disengaged=disengaged)
 
 
 @pytest.mark.parametrize(
@@ -437,13 +442,13 @@ def test_shield_up_reapplies_hook_ruleset(
         *[""] * (expected_calls - 4),  # apply + optional elements
         "valid output" if not verify_errors else "bad output",  # verify
     ]
-    harness.ruleset.build_hook.return_value = "hook ruleset"
-    harness.ruleset.verify_hook.return_value = verify_errors
+    harness.ruleset.build_up.return_value = "up ruleset"
+    harness.ruleset.verify_up.return_value = verify_errors
     harness.ruleset.add_elements_dual.return_value = (
         f"add element {TEST_IP1}" if allowed_ips else ""
     )
     # For shield_state() classification — report UP so delete table is prepended
-    harness.ruleset.verify_bypass.return_value = ["not bypass"]
+    harness.ruleset.verify_down.return_value = ["not down"]
 
     if verify_errors:
         with pytest.raises(RuntimeError):
@@ -486,7 +491,7 @@ def test_shield_up_restores_learned_elements(
     harness = make_hook_mode(config=make_config())
     bundle = StateBundle(harness.config.state_dir)
     write_lines(bundle.resolved_cache, [TEST_IP1])  # effective seed
-    bundle.overlay_set("-", TEST_IP4)  # denied during bypass
+    bundle.overlay_set("-", TEST_IP4)  # denied while down
     harness.mode._container_ruleset = lambda _c: harness.ruleset
     harness.runner.nft_via_nsenter.side_effect = [
         "table inet terok_shield {}",  # shield_state()
@@ -500,9 +505,9 @@ def test_shield_up_restores_learned_elements(
         "",  # restore learned elements
         "valid output",  # verify
     ]
-    harness.ruleset.build_hook.return_value = "hook ruleset"
-    harness.ruleset.verify_hook.return_value = []
-    harness.ruleset.verify_bypass.return_value = ["not bypass"]
+    harness.ruleset.build_up.return_value = "up ruleset"
+    harness.ruleset.verify_up.return_value = []
+    harness.ruleset.verify_down.return_value = ["not down"]
     harness.ruleset.add_elements_dual.return_value = f"add element {TEST_IP1}"
 
     harness.mode.shield_up("test-ctr")
@@ -513,13 +518,13 @@ def test_shield_up_restores_learned_elements(
     assert TEST_IP4 not in restore  # denied stays evicted
 
 
-def test_shield_down_carries_allow_sets_into_bypass(
+def test_shield_down_carries_allow_sets_into_down_table(
     make_hook_mode: HookModeHarnessFactory,
     make_config: ConfigFactory,
 ) -> None:
-    """shield_down() replays the full allow-set snapshot into the bypass table.
+    """shield_down() replays the full allow-set snapshot into the down table.
 
-    Bypass mode does not evaluate the sets, but the later ``shield up``
+    The down posture does not evaluate the sets, but the later ``shield up``
     snapshots this table — dropping them here would forget every learned IP
     after one down/up round trip.
     """
@@ -529,13 +534,13 @@ def test_shield_down_carries_allow_sets_into_bypass(
         "table inet terok_shield {}",  # shield_state()
         _snapshot_output(f"{TEST_IP1} timeout 0s, {TEST_IP3} timeout 30m"),  # snapshot v4
         "",  # snapshot v6
-        "",  # apply bypass ruleset
+        "",  # apply down ruleset
         "",  # restore allow sets
         "valid output",  # verify
     ]
-    harness.ruleset.build_bypass.return_value = "bypass ruleset"
-    harness.ruleset.verify_bypass.return_value = []
-    harness.ruleset.verify_hook.return_value = []
+    harness.ruleset.build_down.return_value = "down ruleset"
+    harness.ruleset.verify_down.return_value = []
+    harness.ruleset.verify_up.return_value = []
 
     harness.mode.shield_down("test-ctr")
 
@@ -552,7 +557,7 @@ def test_shield_up_survives_restore_failure(
     """A failed allow-set restore is logged, never raised.
 
     Coming up with a cold allow set (the workload re-learns via DNS) beats
-    staying in bypass because a restore batch was rejected.
+    staying down because a restore batch was rejected.
     """
     harness = make_hook_mode(config=make_config())
     harness.mode._container_ruleset = lambda _c: harness.ruleset
@@ -564,9 +569,9 @@ def test_shield_up_survives_restore_failure(
         ExecError(["nft"], 1, "conflict"),  # restore fails
         "valid output",  # verify
     ]
-    harness.ruleset.build_hook.return_value = "hook ruleset"
-    harness.ruleset.verify_hook.return_value = []
-    harness.ruleset.verify_bypass.return_value = ["not bypass"]
+    harness.ruleset.build_up.return_value = "up ruleset"
+    harness.ruleset.verify_up.return_value = []
+    harness.ruleset.verify_down.return_value = ["not down"]
     harness.ruleset.add_elements_dual.return_value = ""
 
     with caplog.at_level(logging.WARNING):
@@ -589,12 +594,12 @@ def test_shield_down_tolerates_unsnapshottable_sets(
         "table inet terok_shield {}",  # shield_state()
         ExecError(["nft"], 1, "No such file or directory"),  # snapshot v4 fails
         ExecError(["nft"], 1, "No such file or directory"),  # snapshot v6 fails
-        "",  # apply bypass ruleset
+        "",  # apply down ruleset
         "valid output",  # verify
     ]
-    harness.ruleset.build_bypass.return_value = "bypass ruleset"
-    harness.ruleset.verify_bypass.return_value = []
-    harness.ruleset.verify_hook.return_value = []
+    harness.ruleset.build_down.return_value = "down ruleset"
+    harness.ruleset.verify_down.return_value = []
+    harness.ruleset.verify_up.return_value = []
 
     harness.mode.shield_down("test-ctr")
 
@@ -632,30 +637,28 @@ def test_shield_reset_flushes_and_reseeds_allow_sets(
 
 
 @pytest.mark.parametrize(
-    ("nft_output", "verify_bypass", "verify_hook", "expected"),
+    ("nft_output", "verify_down", "verify_up", "expected"),
     [
         pytest.param("", None, None, ShieldState.OFFLINE, id="offline"),
-        pytest.param(RulesetBuilder().build_hook(), ["not bypass"], [], ShieldState.UP, id="up"),
-        pytest.param(RulesetBuilder().build_bypass(), [], None, ShieldState.DOWN, id="down"),
-        pytest.param(
-            "random nft stuff", ["not bypass"], ["not hook"], ShieldState.ERROR, id="error"
-        ),
+        pytest.param(RulesetBuilder().build_up(), ["not down"], [], ShieldState.UP, id="up"),
+        pytest.param(RulesetBuilder().build_down(), [], None, ShieldState.DOWN, id="down"),
+        pytest.param("random nft stuff", ["not down"], ["not up"], ShieldState.ERROR, id="error"),
     ],
 )
 def test_shield_state_classifies_rulesets(
     make_hook_mode: HookModeHarnessFactory,
     nft_output: str,
-    verify_bypass: list[str] | None,
-    verify_hook: list[str] | None,
+    verify_down: list[str] | None,
+    verify_up: list[str] | None,
     expected: ShieldState,
 ) -> None:
-    """shield_state() distinguishes offline, hook, bypass, and invalid rulesets."""
+    """shield_state() distinguishes offline, up, down, and invalid rulesets."""
     harness = make_hook_mode()
     harness.runner.nft_via_nsenter.return_value = nft_output
-    if verify_bypass is not None:
-        harness.ruleset.verify_bypass.return_value = verify_bypass
-    if verify_hook is not None:
-        harness.ruleset.verify_hook.return_value = verify_hook
+    if verify_down is not None:
+        harness.ruleset.verify_down.return_value = verify_down
+    if verify_up is not None:
+        harness.ruleset.verify_up.return_value = verify_up
     assert harness.mode.shield_state("test") == expected
 
 
@@ -664,7 +667,7 @@ def test_shield_state_detects_quarantine(make_hook_mode: HookModeHarnessFactory)
     harness = make_hook_mode()
     harness.runner.nft_via_nsenter.return_value = "table inet terok_shield { policy drop }"
     harness.ruleset.verify_quarantine.return_value = []  # passes
-    harness.ruleset.verify_bypass.return_value = ["not bypass"]
+    harness.ruleset.verify_down.return_value = ["not down"]
     assert harness.mode.shield_state("test") == ShieldState.QUARANTINE
 
 
@@ -685,8 +688,8 @@ def test_shield_quarantine_applies_block_ruleset(
         "",  # apply quarantine ruleset
         "valid output",  # verify
     ]
-    harness.ruleset.verify_bypass.return_value = ["not bypass"]
-    harness.ruleset.verify_hook.return_value = ["not hook"]
+    harness.ruleset.verify_down.return_value = ["not down"]
+    harness.ruleset.verify_up.return_value = ["not up"]
     build_mock = mock.Mock(return_value="quarantine ruleset")
     verify_mock = mock.Mock(return_value=[])
     monkeypatch.setattr(RulesetBuilder, "build_quarantine", build_mock)
@@ -709,8 +712,8 @@ def test_shield_quarantine_raises_on_verification_failure(
         "",  # apply
         "bad output",  # verify
     ]
-    harness.ruleset.verify_bypass.return_value = ["not bypass"]
-    harness.ruleset.verify_hook.return_value = ["not hook"]
+    harness.ruleset.verify_down.return_value = ["not down"]
+    harness.ruleset.verify_up.return_value = ["not up"]
     monkeypatch.setattr(
         RulesetBuilder, "build_quarantine", mock.Mock(return_value="quarantine ruleset")
     )
@@ -752,9 +755,9 @@ def test_shield_quarantine_on_offline_applies_without_delete(
 @pytest.mark.parametrize(
     ("kwargs", "expected", "method_name"),
     [
-        pytest.param({}, "hook ruleset", "build_hook", id="default-hook-preview"),
+        pytest.param({}, "up ruleset", "build_up", id="default-up-preview"),
         pytest.param(
-            {"down": True, "allow_all": True}, "bypass ruleset", "build_bypass", id="bypass-preview"
+            {"down": True, "disengaged": True}, "down ruleset", "build_down", id="down-preview"
         ),
     ],
 )
@@ -1091,8 +1094,8 @@ def test_shield_up_on_offline_applies_without_delete(
         "",  # apply ruleset (no delete prefix)
         "valid output",  # verify
     ]
-    harness.ruleset.build_hook.return_value = "hook ruleset"
-    harness.ruleset.verify_hook.return_value = []
+    harness.ruleset.build_up.return_value = "up ruleset"
+    harness.ruleset.verify_up.return_value = []
     harness.ruleset.add_elements_dual.return_value = ""
 
     harness.mode.shield_up("test-ctr")
@@ -1105,19 +1108,19 @@ def test_shield_up_on_offline_applies_without_delete(
 def test_shield_down_on_offline_applies_without_delete(
     make_hook_mode: HookModeHarnessFactory,
 ) -> None:
-    """shield_down() on OFFLINE netns applies bypass ruleset without delete table prefix."""
+    """shield_down() on OFFLINE netns applies the down ruleset without delete table prefix."""
     harness = make_hook_mode()
     harness.mode._container_ruleset = lambda _c: harness.ruleset
     # shield_state() → list_rules returns empty (OFFLINE)
     harness.runner.nft_via_nsenter.side_effect = [
         "",  # shield_state() → OFFLINE
-        "",  # apply bypass ruleset (no delete prefix)
+        "",  # apply down ruleset (no delete prefix)
         "valid output",  # verify
     ]
-    harness.ruleset.build_bypass.return_value = "bypass ruleset"
-    harness.ruleset.verify_bypass.return_value = []
+    harness.ruleset.build_down.return_value = "down ruleset"
+    harness.ruleset.verify_down.return_value = []
 
-    harness.mode.shield_down("test-ctr", allow_all=False)
+    harness.mode.shield_down("test-ctr", disengaged=False)
 
     # On an empty netns there is nothing to delete — no call should contain "delete table"
     for call in harness.runner.nft_via_nsenter.call_args_list:
@@ -1534,12 +1537,12 @@ def test_pre_start_includes_hooks_dir_when_persists(
 
 
 def test_shield_state_returns_disengaged(make_hook_mode: HookModeHarnessFactory) -> None:
-    """shield_state() returns DISENGAGED when allow-all bypass is active but not simple bypass."""
+    """shield_state() returns DISENGAGED when the disengaged ruleset is active but not the down one."""
     harness = make_hook_mode()
     harness.runner.nft_via_nsenter.return_value = "some rules"
-    # First call (allow_all=False): non-empty errors → not DOWN, continue
-    # Second call (allow_all=True): empty list → DISENGAGED
-    harness.ruleset.verify_bypass.side_effect = [["not bypass"], []]
+    # First call (disengaged=False): non-empty errors → not DOWN, continue
+    # Second call (disengaged=True): empty list → DISENGAGED
+    harness.ruleset.verify_down.side_effect = [["not down"], []]
 
     assert harness.mode.shield_state("test-ctr") == ShieldState.DISENGAGED
 
@@ -1714,21 +1717,26 @@ def test_pre_start_clears_stale_deny_cache_when_deny_tier_empties(
 
 
 @mock.patch("terok_shield.hooks.mode.has_global_hooks", return_value=True)
-def test_pre_start_override_rejects_cidr(
+def test_pre_start_override_range_is_seeded_and_logged(
     _has_hooks: mock.Mock,
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
     make_hook_mode: HookModeHarnessFactory,
     make_config: ConfigFactory,
 ) -> None:
-    """A CIDR in the override tier fails the launch closed — no subnet break-glass."""
+    """A CIDR in the override tier opens the whole range — loudly: warning + audit event."""
     _set_euid(monkeypatch, 0)
     config = make_config()
     harness = make_hook_mode(config=config)
     harness.runner.run.return_value = _MODERN_PODMAN_INFO
     harness.profiles.compose_profiles.return_value = []
 
-    with pytest.raises(ValueError, match="CIDR"):
+    with caplog.at_level(logging.WARNING):
         harness.mode.pre_start("test", ["dev-standard"], override=[BROAD_CIDR_8])
+
+    assert any(BROAD_CIDR_8 in record.message for record in caplog.records)
+    harness.audit.log_event.assert_any_call("test", "override_range", detail=BROAD_CIDR_8)
+    assert BROAD_CIDR_8 in StateBundle(config.state_dir).ruleset.read_text()
 
 
 # ── Container ID persistence ─────────────────────────────
@@ -1763,10 +1771,10 @@ def test_shield_up_repopulates_deny_sets(
     harness = make_hook_mode(config=config)
     harness.mode._container_ruleset = lambda _c: harness.ruleset
     harness.runner.nft_via_nsenter.return_value = ""
-    harness.ruleset.build_hook.return_value = "hook ruleset"
-    harness.ruleset.verify_hook.return_value = []
+    harness.ruleset.build_up.return_value = "up ruleset"
+    harness.ruleset.verify_up.return_value = []
     harness.ruleset.add_elements_dual.return_value = ""
-    harness.ruleset.verify_bypass.return_value = ["not bypass"]
+    harness.ruleset.verify_down.return_value = ["not down"]
 
     # Write a deny.list
     _b = StateBundle(config.state_dir)
@@ -1789,15 +1797,15 @@ def test_shield_down_repopulates_deny_sets(
     harness = make_hook_mode(config=config)
     harness.mode._container_ruleset = lambda _c: harness.ruleset
     harness.runner.nft_via_nsenter.return_value = ""
-    harness.ruleset.build_bypass.return_value = "bypass ruleset"
-    harness.ruleset.verify_bypass.return_value = []
+    harness.ruleset.build_down.return_value = "down ruleset"
+    harness.ruleset.verify_down.return_value = []
 
     # Write a deny.list before going down
     _b = StateBundle(config.state_dir)
     _b.ensure_dirs()
     _b.write_tier("security_deny", f"-{TEST_IP1}\n")
 
-    harness.mode.shield_down("test-ctr", allow_all=False)
+    harness.mode.shield_down("test-ctr", disengaged=False)
 
     # Verify deny elements were sent via nsenter
     deny_calls = [c for c in harness.runner.nft_via_nsenter.call_args_list if c.kwargs.get("stdin")]
@@ -1820,11 +1828,11 @@ def test_shield_transitions_reseed_override_set(
     harness = make_hook_mode(config=config)
     harness.mode._container_ruleset = lambda _c: harness.ruleset
     harness.runner.nft_via_nsenter.return_value = ""
-    harness.ruleset.build_hook.return_value = "hook ruleset"
-    harness.ruleset.verify_hook.return_value = []
+    harness.ruleset.build_up.return_value = "up ruleset"
+    harness.ruleset.verify_up.return_value = []
     harness.ruleset.add_elements_dual.return_value = ""
-    harness.ruleset.build_bypass.return_value = "bypass ruleset"
-    harness.ruleset.verify_bypass.return_value = [] if transition == "down" else ["not bypass"]
+    harness.ruleset.build_down.return_value = "down ruleset"
+    harness.ruleset.verify_down.return_value = [] if transition == "down" else ["not down"]
 
     _b = StateBundle(config.state_dir)
     _b.ensure_dirs()
@@ -1858,7 +1866,7 @@ def test_refresh_rewrites_tiers_and_ruleset(
     harness.profiles.compose_profiles.return_value = []
     harness.mode.pre_start("test", ["dev-standard"], security_deny=[TEST_IP1])
 
-    harness.mode.refresh(["dev-standard"], security_deny=[TEST_IP2])
+    harness.mode.refresh("test", ["dev-standard"], security_deny=[TEST_IP2])
 
     bundle = StateBundle(config.state_dir)
     tier = bundle.tier_path("security_deny").read_text()
@@ -1867,6 +1875,31 @@ def test_refresh_rewrites_tiers_and_ruleset(
     ruleset = bundle.ruleset.read_text()
     assert TEST_IP2 in ruleset
     assert TEST_IP1 not in ruleset
+
+
+@mock.patch("terok_shield.hooks.mode.has_global_hooks", return_value=True)
+def test_refresh_override_range_is_logged(
+    _has_hooks: mock.Mock,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    make_hook_mode: HookModeHarnessFactory,
+    make_config: ConfigFactory,
+) -> None:
+    """refresh() logs a CIDR override the way pre_start() does: a warning and an audit event."""
+    _set_euid(monkeypatch, 0)
+    config = make_config()
+    harness = make_hook_mode(config=config)
+    harness.runner.run.return_value = _MODERN_PODMAN_INFO
+    harness.profiles.compose_profiles.return_value = []
+    harness.mode.pre_start("test", ["dev-standard"])
+    harness.audit.log_event.reset_mock()
+
+    with caplog.at_level(logging.WARNING):
+        harness.mode.refresh("test", ["dev-standard"], override=[BROAD_CIDR_8])
+
+    assert any(BROAD_CIDR_8 in record.message for record in caplog.records)
+    harness.audit.log_event.assert_any_call("test", "override_range", detail=BROAD_CIDR_8)
+    assert BROAD_CIDR_8 in StateBundle(config.state_dir).ruleset.read_text()
 
 
 @mock.patch("terok_shield.hooks.mode.has_global_hooks", return_value=True)
@@ -1891,7 +1924,7 @@ def test_refresh_reuses_persisted_network_mode(
     assert StateBundle(config.state_dir).network_mode.read_text().strip() == "pasta"
     harness.runner.run.reset_mock()
 
-    harness.mode.refresh(["dev-standard"])
+    harness.mode.refresh("test", ["dev-standard"])
 
     assert not [c for c in harness.runner.run.call_args_list if "info" in c.args[0]]
 
@@ -1904,7 +1937,7 @@ def test_refresh_without_prepared_bundle_raises(
     harness = make_hook_mode(config=make_config())
 
     with pytest.raises(RuntimeError, match="persisted DNS tier"):
-        harness.mode.refresh(["dev-standard"])
+        harness.mode.refresh("test", ["dev-standard"])
 
 
 from terok_shield.state import StateBundle

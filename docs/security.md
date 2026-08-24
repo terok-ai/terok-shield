@@ -44,12 +44,13 @@ SAST scan.
 - `_safe_port()` — validates port range, rejects bools
 - `_safe_ident()` / `_safe_timeout()` — validate nft set/table names and set-element timeouts
 
-**Self-verification:** `RulesetBuilder.verify_hook()` checks post-apply
+**Self-verification:** `RulesetBuilder.verify_up()` checks post-apply
 invariants: managed table present, drop policy, both chains, reject type,
 dual-stack allow and deny sets declared, all private ranges (RFC 1918/3927 +
 RFC 4193/4291) blocked, terminal deny rule with the `BLOCKED` log prefix.
-`verify_bypass()` checks accept policy on output, drop on input, the bypass
-log prefix, and (unless `allow_all`) the private-range rules;
+`verify_down()` checks accept policy on output, drop on input, the bypass
+log prefix, and the range rejects — present for DOWN, absent for DISENGAGED
+(which must also carry no deny-set reject);
 `verify_quarantine()` checks the blackout ruleset. `shield up` / `down` /
 `quarantine` run the matching verifier after applying and raise on any error.
 
@@ -142,7 +143,7 @@ unrestricted."**
 | dnsmasq fails to start (dnsmasq tier) | Hook exits non-zero → torn down |
 
 `shield up` / `down` / `quarantine` additionally verify the applied ruleset
-(`verify_hook` / `verify_bypass` / `verify_quarantine`) and raise if any
+(`verify_up` / `verify_down` / `verify_quarantine`) and raise if any
 invariant is missing.
 
 The fail-closed guarantee applies once hooks are installed by `pre_start()`.

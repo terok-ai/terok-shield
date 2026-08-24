@@ -21,7 +21,7 @@ class TestAddElementsLive:
 
     def test_elements_appear_in_set(self, container: str, container_pid: str) -> None:
         """IPs added via add_elements appear in 'nft list set'."""
-        r = nsenter_nft(container_pid, stdin=RulesetBuilder().build_hook())
+        r = nsenter_nft(container_pid, stdin=RulesetBuilder().build_up())
         assert r.returncode == 0, f"Ruleset apply failed: {r.stderr}"
         r = nsenter_nft(container_pid, stdin=add_elements("t40_project_allow_v4", [TEST_IP1]))
         assert r.returncode == 0, f"Add elements failed: {r.stderr}"
@@ -35,7 +35,7 @@ class TestAddElementsLive:
     def test_multiple_elements(self, container: str, container_pid: str) -> None:
         """Multiple IPs can be added to the set."""
         ips = [*ALLOWED_TARGET_IPS, GOOGLE_DNS_IP, QUAD9_DNS_IP]
-        r = nsenter_nft(container_pid, stdin=RulesetBuilder().build_hook())
+        r = nsenter_nft(container_pid, stdin=RulesetBuilder().build_up())
         assert r.returncode == 0, f"Ruleset apply failed: {r.stderr}"
         r = nsenter_nft(container_pid, stdin=add_elements("t40_project_allow_v4", ips))
         assert r.returncode == 0, f"Add elements failed: {r.stderr}"

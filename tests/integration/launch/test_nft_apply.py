@@ -14,7 +14,7 @@ from ..conftest import nsenter_nft
 
 def _apply(pid: str) -> None:
     """Apply hook ruleset and assert success."""
-    result = nsenter_nft(pid, stdin=RulesetBuilder().build_hook())
+    result = nsenter_nft(pid, stdin=RulesetBuilder().build_up())
     assert result.returncode == 0, f"nft apply failed: {result.stderr}"
 
 
@@ -40,7 +40,7 @@ class TestHookApply:
         """Apply hook ruleset and run verify_ruleset against the output."""
         _apply(container_pid)
         listed = _list(container_pid)
-        errors = RulesetBuilder().verify_hook(listed.stdout)
+        errors = RulesetBuilder().verify_up(listed.stdout)
         assert errors == [], f"Verification errors: {errors}"
 
     def test_policy_drop_enforced(self, container_pid: str) -> None:

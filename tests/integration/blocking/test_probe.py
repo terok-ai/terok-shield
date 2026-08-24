@@ -78,7 +78,7 @@ class TestShieldProbe:
             text=True,
             timeout=10,
         ).stdout.strip()
-        r = nsenter_nft(pid, stdin=RulesetBuilder().build_hook())
+        r = nsenter_nft(pid, stdin=RulesetBuilder().build_up())
         assert r.returncode == 0, f"Ruleset apply failed: {r.stderr}"
 
         result = self._run_probe(probe_container, BLOCKED_TARGET_IP)

@@ -59,14 +59,14 @@ class TestRulesCLI:
     def test_cli_rules_shows_state_down(
         self, shielded_container: str, capsys: pytest.CaptureFixture
     ) -> None:
-        """``main(["rules", container])`` shows State: down after bypass."""
+        """``main(["rules", container])`` shows State: down after shield down."""
         _shield().down(shielded_container, shielded_container.id)
         main(["rules", shielded_container])
         captured = capsys.readouterr()
         assert "State: down" in captured.out
 
 
-# -- Rules content in bypass mode ----------------------------
+# -- Rules content in the down posture ----------------------------
 
 
 @pytest.mark.needs_podman
@@ -75,11 +75,11 @@ class TestRulesCLI:
 @podman_missing
 @nft_missing
 @pytest.mark.usefixtures("nft_in_netns")
-class TestRulesBypassAPI:
-    """Verify ``Shield.rules()`` returns correct bypass ruleset."""
+class TestRulesDownAPI:
+    """Verify ``Shield.rules()`` returns the correct down ruleset."""
 
     def test_rules_contain_bypass_prefix(self, shielded_container: str) -> None:
-        """Bypass ruleset contains the TEROK_SHIELD_BYPASS log prefix."""
+        """Down ruleset contains the TEROK_SHIELD_BYPASS log prefix."""
         shield = _shield()
         shield.down(shielded_container, shielded_container.id)
         rules = shield.rules(shielded_container)
@@ -89,8 +89,8 @@ class TestRulesBypassAPI:
     def test_rules_restored_after_up(self, shielded_container: str) -> None:
         """Rules revert to deny-all after shield.up().
 
-        The distinguishing signal is the output-chain policy — ``accept`` in
-        bypass, ``drop`` when restored. The ``TEROK_SHIELD_BYPASS`` prefix is
+        The distinguishing signal is the output-chain policy — ``accept`` when
+        down, ``drop`` when restored. The ``TEROK_SHIELD_BYPASS`` prefix is
         NOT one: it also labels the ``@bypass_window`` tier, which is a
         permanent part of the deny-all ruleset (an empty timed allow-all set).
         """

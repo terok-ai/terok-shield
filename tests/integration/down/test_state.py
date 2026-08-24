@@ -38,9 +38,9 @@ class TestShieldState:
         assert shield.state(shielded_container) == ShieldState.DOWN
 
     def test_state_disengaged_after_shield_disengaged(self, shielded_container: str) -> None:
-        """State is DISENGAGED after shield.down(allow_all=True)."""
+        """State is DISENGAGED after shield.down(disengaged=True)."""
         shield = _shield()
-        shield.down(shielded_container, shielded_container.id, allow_all=True)
+        shield.down(shielded_container, shielded_container.id, disengaged=True)
         assert shield.state(shielded_container) == ShieldState.DISENGAGED
 
     def test_state_up_after_shield_up(self, shielded_container: str) -> None:

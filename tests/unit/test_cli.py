@@ -228,11 +228,11 @@ def test_logs_parser_supports_optional_container_and_count(parser: argparse.Argu
     assert filtered_args.n == 10
 
 
-def test_down_parser_supports_allow_all(parser: argparse.ArgumentParser) -> None:
-    """down defaults to allow_all=False and flips with --all."""
+def test_down_parser_supports_disengaged(parser: argparse.ArgumentParser) -> None:
+    """down defaults to disengaged=False and flips with --disengage."""
     base = ["down", "ctr", "--container-id", _CONTAINER_ID]
-    assert not parser.parse_args(base).allow_all
-    assert parser.parse_args([*base, "--all"]).allow_all
+    assert not parser.parse_args(base).disengaged
+    assert parser.parse_args([*base, "--disengage"]).disengaged
 
 
 @pytest.mark.parametrize(
@@ -257,23 +257,23 @@ def test_container_id_parses_as_attribute(parser: argparse.ArgumentParser) -> No
 
 
 @pytest.mark.parametrize(
-    ("args", "expected_down", "expected_allow_all"),
+    ("args", "expected_down", "expected_disengaged"),
     [
         pytest.param(["preview"], False, False, id="defaults"),
         pytest.param(["preview", "--down"], True, False, id="down"),
-        pytest.param(["preview", "--down", "--all"], True, True, id="down-all"),
+        pytest.param(["preview", "--down", "--disengage"], True, True, id="down-disengage"),
     ],
 )
 def test_preview_parser_supports_flags(
     parser: argparse.ArgumentParser,
     args: list[str],
     expected_down: bool,
-    expected_allow_all: bool,
+    expected_disengaged: bool,
 ) -> None:
-    """preview parses down/all flags without custom post-processing."""
+    """preview parses down/disengage flags without custom post-processing."""
     parsed = parser.parse_args(args)
     assert parsed.down is expected_down
-    assert parsed.allow_all is expected_allow_all
+    assert parsed.disengaged is expected_disengaged
 
 
 def test_parser_supports_state_dir_flag(parser: argparse.ArgumentParser) -> None:
@@ -554,14 +554,14 @@ def test_allow_and_deny_dispatch_to_shield(
         pytest.param(
             ["down", _CONTAINER, "--container-id", _CONTAINER_ID],
             "down",
-            mock.call(_CONTAINER, _CONTAINER_ID, allow_all=False),
+            mock.call(_CONTAINER, _CONTAINER_ID, disengaged=False),
             id="down",
         ),
         pytest.param(
-            ["down", _CONTAINER, "--container-id", _CONTAINER_ID, "--all"],
+            ["down", _CONTAINER, "--container-id", _CONTAINER_ID, "--disengage"],
             "down",
-            mock.call(_CONTAINER, _CONTAINER_ID, allow_all=True),
-            id="down-all",
+            mock.call(_CONTAINER, _CONTAINER_ID, disengaged=True),
+            id="down-disengage",
         ),
         pytest.param(
             ["up", _CONTAINER, "--container-id", _CONTAINER_ID],
@@ -572,20 +572,20 @@ def test_allow_and_deny_dispatch_to_shield(
         pytest.param(
             ["preview"],
             "preview",
-            mock.call(down=False, allow_all=False),
+            mock.call(down=False, disengaged=False),
             id="preview-default",
         ),
         pytest.param(
             ["preview", "--down"],
             "preview",
-            mock.call(down=True, allow_all=False),
+            mock.call(down=True, disengaged=False),
             id="preview-down",
         ),
         pytest.param(
-            ["preview", "--down", "--all"],
+            ["preview", "--down", "--disengage"],
             "preview",
-            mock.call(down=True, allow_all=True),
-            id="preview-down-all",
+            mock.call(down=True, disengaged=True),
+            id="preview-down-disengage",
         ),
         pytest.param(["profiles"], "profiles_list", mock.call(), id="profiles"),
     ],
@@ -618,10 +618,10 @@ def test_rules_dispatches_to_state_and_rules(cli_dispatch: CliDispatchHarness) -
     cli_dispatch.shield.rules.assert_called_once_with(_CONTAINER)
 
 
-def test_preview_requires_down_for_all() -> None:
-    """preview --all without --down exits 1."""
+def test_preview_requires_down_for_disengage() -> None:
+    """preview --disengage without --down exits 1."""
     with pytest.raises(SystemExit) as ctx:
-        main(["preview", "--all"])
+        main(["preview", "--disengage"])
     assert ctx.value.code == 1
 
 

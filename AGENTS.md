@@ -148,7 +148,7 @@ Integration tests live in `tests/integration/` and are organized by **workflow/f
 | `blocking/` | Default-deny, IPv6 drop, private-range reject, ICMP probe |
 | `allow_deny/` | shield_allow/deny, CLI allow/deny, nft elements |
 | `dns/` | resolve, caching, force-refresh, profile→DNS pipeline |
-| `bypass/` | shield down/up, state detection, bypass traffic, lifecycle E2E |
+| `down/` | shield down/up, state detection, down-posture traffic, lifecycle E2E |
 | `observability/` | status, rules, logs, audit trail |
 | `safety/` | Fail-closed error paths |
 | `cli/` | CLI parsing/help (no container needed) |

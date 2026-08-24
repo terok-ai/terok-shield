@@ -184,6 +184,7 @@ def test_refresh_dispatches_and_logs(
     harness.shield.refresh("test-ctr", security_deny=(TEST_DOMAIN,), override=(TEST_DOMAIN2,))
 
     harness.mode.refresh.assert_called_once_with(
+        "test-ctr",
         ["base"],
         security_deny=(TEST_DOMAIN,),
         provider_allow=(),
@@ -269,26 +270,26 @@ def test_rules_delegates_to_mode(make_shield: ShieldHarnessFactory) -> None:
 
 
 @pytest.mark.parametrize(
-    ("allow_all", "expected_detail"),
+    ("disengaged", "expected_detail"),
     [
         pytest.param(False, None, id="default"),
-        pytest.param(True, "allow_all=True", id="allow-all"),
+        pytest.param(True, "disengaged=True", id="disengaged"),
     ],
 )
 def test_down_delegates_and_logs(
     make_shield: ShieldHarnessFactory,
-    allow_all: bool,
+    disengaged: bool,
     expected_detail: str | None,
 ) -> None:
     """down() delegates to the backend, logs, and pings the hub."""
     harness = make_shield()
-    harness.shield.down("test-ctr", "ctr-uuid-1", allow_all=allow_all)
-    harness.mode.shield_down.assert_called_once_with("test-ctr", allow_all=allow_all)
+    harness.shield.down("test-ctr", "ctr-uuid-1", disengaged=disengaged)
+    harness.mode.shield_down.assert_called_once_with("test-ctr", disengaged=disengaged)
     harness.audit.log_event.assert_called_once_with(
         "test-ctr", "shield_down", detail=expected_detail
     )
     harness.hub_events.shield_down.assert_called_once_with(
-        "test-ctr", "ctr-uuid-1", allow_all=allow_all, dossier={}
+        "test-ctr", "ctr-uuid-1", disengaged=disengaged, dossier={}
     )
 
 
@@ -332,11 +333,11 @@ def test_down_resolves_dossier_via_meta_path(
     meta.write_text(json.dumps({"project": "terok", "task": "xyz"}))
     StateBundle(state_dir).meta_path.write_text(str(meta))
     harness = make_shield()
-    harness.shield.down("test-ctr", "ctr-uuid-1", allow_all=True)
+    harness.shield.down("test-ctr", "ctr-uuid-1", disengaged=True)
     harness.hub_events.shield_down.assert_called_once_with(
         "test-ctr",
         "ctr-uuid-1",
-        allow_all=True,
+        disengaged=True,
         dossier={"project": "terok", "task": "xyz"},
     )
 
@@ -360,7 +361,7 @@ def test_state_delegates_to_mode(make_shield: ShieldHarnessFactory) -> None:
     ("kwargs", "expected"),
     [
         pytest.param({}, "table inet terok_shield { policy drop }", id="default"),
-        pytest.param({"down": True, "allow_all": True}, "bypass", id="down-bypass"),
+        pytest.param({"down": True, "disengaged": True}, "disengaged", id="down-disengaged"),
     ],
 )
 def test_preview_delegates_to_mode(
@@ -373,7 +374,7 @@ def test_preview_delegates_to_mode(
     harness.mode.preview.return_value = expected
     assert harness.shield.preview(**kwargs) == expected
     harness.mode.preview.assert_called_once_with(
-        down=kwargs.get("down", False), allow_all=kwargs.get("allow_all", False)
+        down=kwargs.get("down", False), disengaged=kwargs.get("disengaged", False)
     )
 
 

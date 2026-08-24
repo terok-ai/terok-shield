@@ -68,7 +68,7 @@ COMMANDS: CommandTree = CommandTree(
         _lazy("resolve", "Resolve DNS profiles and cache IPs", "launch:RESOLVE"),
         _lazy("allow", "Live-allow a domain or IP for a container", "control:ALLOW"),
         _lazy("deny", "Live-deny a domain or IP for a container", "control:DENY"),
-        _lazy("down", "Switch container to bypass mode (accept-all + log)", "control:DOWN"),
+        _lazy("down", "Switch container to the DOWN posture (accept + log)", "control:DOWN"),
         _lazy("up", "Restore deny-all mode for a container", "control:UP"),
         _lazy(
             "reset",

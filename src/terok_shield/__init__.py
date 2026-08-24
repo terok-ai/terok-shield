@@ -364,7 +364,7 @@ class Shield:
         the layout: *security_deny* → t20 (vault hosts denied direct),
         *provider_allow* → t30 (provider egress), *project_allow* → t40 (git
         remote + custom, merged with the composed profiles), *override* → t10
-        (break-glass allow above the deny; single host/IP only).
+        (break-glass allow above the deny; a CIDR is accepted but logged as a warning).
         """
         if profiles is None:
             profiles = list(self.config.default_profiles)
@@ -401,6 +401,7 @@ class Shield:
         if profiles is None:
             profiles = list(self.config.default_profiles)
         self._mode.refresh(
+            container,
             profiles,
             security_deny=security_deny,
             provider_allow=provider_allow,
@@ -453,25 +454,29 @@ class Shield:
         """Return current nft rules for a container."""
         return self._mode.list_rules(container)
 
-    def down(self, container: str, container_id: str, *, allow_all: bool = False) -> None:
-        """Switch a running container to bypass mode.
+    def down(self, container: str, container_id: str, *, disengaged: bool = False) -> None:
+        """Switch a running container to the DOWN posture.
 
         *container* is the operator-facing podman name (audit log key);
         *container_id* is the full podman UUID — the routing key for
         the per-container hub socket the supervisor listens on.  The
         caller knows both at every emit site, so neither carries a
         default.
+
+        With *disengaged*, the container takes the DISENGAGED posture
+        instead: nothing is enforced — no deny set, no private-range or
+        hard-deny reject — and every new connection is only logged.
         """
-        self._mode.shield_down(container, allow_all=allow_all)
+        self._mode.shield_down(container, disengaged=disengaged)
         self.audit.log_event(
             container,
             "shield_down",
-            detail="allow_all=True" if allow_all else None,
+            detail="disengaged=True" if disengaged else None,
         )
         self.hub_events.shield_down(
             container,
             container_id,
-            allow_all=allow_all,
+            disengaged=disengaged,
             dossier=self._read_dossier(),
         )
 
@@ -525,9 +530,9 @@ class Shield:
         """Query the live nft ruleset to determine a container's shield state."""
         return self._mode.shield_state(container)
 
-    def preview(self, *, down: bool = False, allow_all: bool = False) -> str:
+    def preview(self, *, down: bool = False, disengaged: bool = False) -> str:
         """Generate the ruleset that would be applied to a container."""
-        return self._mode.preview(down=down, allow_all=allow_all)
+        return self._mode.preview(down=down, disengaged=disengaged)
 
     def resolve(
         self,

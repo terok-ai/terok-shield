@@ -99,8 +99,8 @@ class ShieldState(enum.Enum):
 
     QUARANTINE: Total network blackout — all traffic dropped, dropped traffic logged.
     UP: Normal enforcing mode (deny-all with allowlists).
-    DOWN: Bypass mode with private-range protection (RFC 1918 + RFC 4193).
-    DISENGAGED: Bypass mode without private-range protection.
+    DOWN: Accept-by-default posture, private-range protection retained (RFC 1918 + RFC 4193).
+    DISENGAGED: Accept-everything posture — no deny set, no private-range or hard-deny reject.
     OFFLINE: No ruleset found (container stopped or unshielded).
     ERROR: Ruleset present but unrecognised.
     """
@@ -179,8 +179,8 @@ class ShieldModeBackend(Protocol):
     """Strategy protocol for shield mode implementations.
 
     Each concrete backend (e.g. ``HookMode``) provides the full
-    lifecycle: per-container firewalling, live allow/deny, bypass,
-    and preview.
+    lifecycle: per-container firewalling, live allow/deny, posture
+    transitions, and preview.
     """
 
     def pre_start(
@@ -203,6 +203,7 @@ class ShieldModeBackend(Protocol):
 
     def refresh(
         self,
+        container: str,
         profiles: list[str],
         *,
         security_deny: Sequence[str] = (),
@@ -238,8 +239,8 @@ class ShieldModeBackend(Protocol):
         """Return the current nft rules for a running container."""
         ...
 
-    def shield_down(self, container: str, *, allow_all: bool = False) -> None:
-        """Switch a container to bypass mode."""
+    def shield_down(self, container: str, *, disengaged: bool = False) -> None:
+        """Switch a container to the DOWN posture."""
         ...
 
     def shield_quarantine(self, container: str) -> None:
@@ -258,6 +259,6 @@ class ShieldModeBackend(Protocol):
         """Query a container's shield state from the live ruleset."""
         ...
 
-    def preview(self, *, down: bool = False, allow_all: bool = False) -> str:
+    def preview(self, *, down: bool = False, disengaged: bool = False) -> str:
         """Generate the ruleset without applying it."""
         ...
