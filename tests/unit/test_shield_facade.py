@@ -518,13 +518,18 @@ class TestCheckEnvironment:
         _find_dirs: mock.Mock,
         make_shield: ShieldHarnessFactory,
     ) -> None:
-        """No lookup tool and no dnsmasq reports getent degradation in the environment check."""
+        """No lookup tool and no dnsmasq: the responder still answers, on getent.
+
+        The tier a status line shows names both halves — what answers the
+        container, and what it resolves with — because ``proxy + dig`` and
+        ``proxy + getent`` are not the same tier in practice.
+        """
         harness = make_shield()
         harness.runner.run.return_value = _podman_info_json("5.8.0")
         harness.runner.has.side_effect = lambda cmd: cmd not in ("dig", "drill", "dnsmasq")
         env = harness.shield.check_environment()
-        assert any("dig/drill" in i for i in env.issues)
-        assert env.dns_tier == "getent"
+        assert any("built-in responder" in i for i in env.issues)
+        assert env.dns_tier == "proxy + getent"
 
     @mock.patch("terok_shield.podman_info.find_hooks_dirs", return_value=[FAKE_HOOKS_DIR])
     @mock.patch("terok_shield.podman_info.has_global_hooks", return_value=True)
@@ -535,7 +540,7 @@ class TestCheckEnvironment:
         make_shield: ShieldHarnessFactory,
         tmp_path: Path,
     ) -> None:
-        """dnsmasq present but AppArmor-confined from the state dir → dig + advisory."""
+        """dnsmasq present but AppArmor-confined from the state dir → the responder + advisory."""
         harness = make_shield(ShieldConfig(state_dir=tmp_path))
         harness.runner.has.side_effect = lambda cmd: cmd in ("dnsmasq", "dig")
 
@@ -550,7 +555,7 @@ class TestCheckEnvironment:
 
         harness.runner.run.side_effect = _run
         env = harness.shield.check_environment()
-        assert env.dns_tier == "lookup"
+        assert env.dns_tier == "proxy + dig"
         assert any("AppArmor" in i for i in env.issues)
 
     @mock.patch("terok_shield.podman_info.find_hooks_dirs", return_value=[])

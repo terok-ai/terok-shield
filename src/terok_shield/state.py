@@ -284,7 +284,7 @@ class StateBundle:
         return self.state_dir / "dns.tier"
 
     def read_dns_tier(self) -> str | None:
-        """The DNS tier this container launched with (``dnsmasq``/``lookup``/``getent``).
+        """The DNS tier this container launched with (``dnsmasq``/``proxy``/``lookup``/``getent``).
 
         Returns the value the OCI hook recorded at ``pre_start`` — the tier
         actually enforcing this task's egress — or ``None`` when the file is
@@ -305,9 +305,11 @@ class StateBundle:
             return None
         tier = _LEGACY_TIER_NAMES.get(tier, tier)
         # Only the tiers the OCI hook records (mirrors config.DnsTier's
-        # values); a stray or corrupt file reads as None, never an
-        # unsupported tier.
-        return tier if tier in {"dnsmasq", "lookup", "getent"} else None
+        # values, which this layer may not import); a stray or corrupt file
+        # reads as None, never an unsupported tier.  A test holds the two
+        # lists together — a tier missing from here reads as "never
+        # launched", and its container can never restart.
+        return tier if tier in {"dnsmasq", "proxy", "lookup", "getent"} else None
 
     @property
     def network_mode(self) -> Path:

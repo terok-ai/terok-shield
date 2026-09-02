@@ -43,25 +43,67 @@ class DnsTier(enum.Enum):
 
     DNSMASQ: Per-container dnsmasq with ``--nftset`` auto-populates nft
         allow sets on every DNS query.  Handles IP rotation.
+    PROXY: Our own responder
+        ([`proxy`][terok_shield.dns.proxy]) does the same, for a host
+        with no nftset-capable dnsmasq.  Degraded — it answers A and
+        AAAA and relays the rest — but it follows a rotation, which
+        neither tier below it can.
     LOOKUP: Static resolution at pre-start via a one-shot lookup tool —
         ``dig`` (bind) or ``drill`` (ldns, the Arch/Manjaro default).
     GETENT: Single-IP resolution via ``getent hosts`` (minimal fallback).
     """
 
     DNSMASQ = "dnsmasq"
+    PROXY = "proxy"
     LOOKUP = "lookup"
     GETENT = "getent"
+
+    @property
+    def is_dynamic(self) -> bool:
+        """Does something fill the nft sets while the container runs?
+
+        The two tiers that answer the container's own queries do.  What
+        follows from it is the same for both: the allowlist needs no
+        static pre-resolution, and set elements carry an expiry, because
+        an address that stops being an answer must stop being allowed.
+        """
+        return self in (DnsTier.DNSMASQ, DnsTier.PROXY)
+
+
+#: How a host may ask for a tier.  ``auto`` takes the best one available.
+#: A tier by name is a requirement: shield refuses the launch rather than
+#: run a container under weaker egress control than the operator asked
+#: for, because a silent demotion is exactly how an allowlist stops
+#: meaning what it says.
+DNS_TIER_AUTO = "auto"
+
+
+class DnsTierUnavailableError(RuntimeError):
+    """A tier was named in the configuration and the host cannot provide it."""
 
 
 def detect_dns_tier(
     has: Callable[[str], bool],
     dnsmasq_nftset_ok: Callable[[], bool] = lambda: True,
     dnsmasq_state_readable: Callable[[], bool] = lambda: True,
+    *,
+    requested: str = DNS_TIER_AUTO,
+    proxy_enabled: bool = True,
 ) -> DnsTier:
     """Detect the best available DNS resolution tier.
 
     Probes for executables in priority order: dnsmasq (with nftset
-    support, and able to read its config) > dig/drill > getent.
+    support, and able to read its config) > our own proxy > dig/drill >
+    getent.
+
+    *requested* is the operator's choice.  ``auto`` takes the best tier
+    the host can provide.  A tier by name is a requirement, and a host
+    that cannot provide it fails the launch rather than quietly running
+    the container under weaker egress control than was asked for.
+
+    Raises:
+        DnsTierUnavailableError: A tier was named and this host cannot
+            provide it, or the name is not a tier.
 
     Args:
         has: Returns True if the named executable exists on PATH.
@@ -75,11 +117,71 @@ def detect_dns_tier(
             Defaults to ``lambda: True``; production callers pass a real
             probe.
     """
+    available = available_dns_tiers(
+        has,
+        dnsmasq_nftset_ok=dnsmasq_nftset_ok,
+        dnsmasq_state_readable=dnsmasq_state_readable,
+        proxy_enabled=proxy_enabled,
+    )
+    if requested != DNS_TIER_AUTO:
+        try:
+            wanted = DnsTier(requested)
+        except ValueError:
+            raise DnsTierUnavailableError(f"unknown dns tier {requested!r}") from None
+        if wanted not in available:
+            raise DnsTierUnavailableError(
+                f"dns tier {requested!r} was asked for and this host cannot provide it"
+                f" (available: {', '.join(tier.value for tier in available)})"
+            )
+        return wanted
+    return available[0]
+
+
+def available_dns_tiers(
+    has: Callable[[str], bool],
+    *,
+    dnsmasq_nftset_ok: Callable[[], bool] = lambda: True,
+    dnsmasq_state_readable: Callable[[], bool] = lambda: True,
+    proxy_enabled: bool = True,
+) -> tuple[DnsTier, ...]:
+    """The tiers this host can provide, best first.
+
+    The proxy is ours, so its availability is a decision rather than a
+    probe: it needs no package and it is on unless the operator turned it
+    off.  ``getent`` closes the list because a host that resolves nothing
+    at all has no allowlist to enforce in the first place.
+    """
+    tiers: list[DnsTier] = []
     if has("dnsmasq") and dnsmasq_nftset_ok() and dnsmasq_state_readable():
-        return DnsTier.DNSMASQ
+        tiers.append(DnsTier.DNSMASQ)
+    if proxy_enabled:
+        tiers.append(DnsTier.PROXY)
     if has("dig") or has("drill"):
-        return DnsTier.LOOKUP
-    return DnsTier.GETENT
+        tiers.append(DnsTier.LOOKUP)
+    tiers.append(DnsTier.GETENT)
+    return tuple(tiers)
+
+
+def dns_tier_detail(tier: DnsTier, has: Callable[[str], bool]) -> str:
+    """The tier as an operator reads it, naming what it resolves with.
+
+    The proxy answers queries but resolves them with whatever one-shot
+    tool the host has, and that half decides how good its answers are —
+    so a status line that said only "proxy" would hide the part an
+    operator can act on.  ``proxy + dig`` and ``proxy + getent`` are not
+    the same tier in practice.
+    """
+    if tier in (DnsTier.DNSMASQ, DnsTier.LOOKUP, DnsTier.GETENT):
+        return tier.value
+    return f"{tier.value} + {lookup_tool(has)}"
+
+
+def lookup_tool(has: Callable[[str], bool]) -> str:
+    """The one-shot resolver this host will use: ``dig``, ``drill``, or ``getent``."""
+    for tool in ("dig", "drill"):
+        if has(tool):
+            return tool
+    return "getent"
 
 
 # ── Shield mode and state ───────────────────────────────
@@ -157,6 +259,11 @@ class ShieldConfig:
 
     state_dir: Path
     mode: ShieldMode = ShieldMode.HOOK
+    dns_tier: str = DNS_TIER_AUTO
+    """The tier the operator asked for.  ``auto`` takes the best one this
+    host can provide; a tier by name is a requirement, and a host that
+    cannot provide it fails the launch rather than quietly enforcing
+    less."""
     default_profiles: tuple[str, ...] = ("dev-standard",)
     loopback_ports: tuple[int, ...] = ()
     audit_enabled: bool = True

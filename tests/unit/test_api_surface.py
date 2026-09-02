@@ -100,6 +100,7 @@ class TestAPISurface:
         assert names == [
             "state_dir",
             "mode",
+            "dns_tier",
             "default_profiles",
             "loopback_ports",
             "audit_enabled",
@@ -110,6 +111,7 @@ class TestAPISurface:
 
         cfg = make_config()
         assert cfg.mode == ShieldMode.HOOK
+        assert cfg.dns_tier == "auto"
         assert cfg.default_profiles == ("dev-standard",)
         assert cfg.loopback_ports == ()
         assert cfg.audit_enabled is True

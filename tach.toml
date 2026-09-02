@@ -139,6 +139,14 @@ layer = "core"
 depends_on = [
 ]
 
+# The built-in responder — the tier for hosts with no nftset-capable
+# dnsmasq.  Reads the allowlist it enforces, resolves through the shared
+# resolver, and writes the nft sets from inside the container's netns.
+[[modules]]
+path = "terok_shield.dns.proxy"
+layer = "core"
+depends_on = ["terok_shield.dns.resolver"]
+
 # AppArmor confinement probe + dnsmasq-tier selection
 [[modules]]
 path = "terok_shield.dns.apparmor"

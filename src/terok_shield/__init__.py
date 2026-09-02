@@ -33,6 +33,7 @@ from .config import (
     ShieldModeBackend,
     ShieldRuntime,
     ShieldState,
+    dns_tier_detail,
 )
 from .paths import HOOK_ENTRYPOINT_NAME
 from .state import StateBundle
@@ -275,28 +276,38 @@ class Shield:
         health = "ok"
 
         tier, apparmor_blocked = apparmor.detect_dns_tier_under_apparmor(
-            self.runner, self.config.state_dir
+            self.runner, self.config.state_dir, requested=self.config.dns_tier
         )
-        dns_tier = tier.value
+        # The proxy tier is only half a name: it answers queries, but what it
+        # resolves them with decides how good those answers are.
+        dns_tier = dns_tier_detail(tier, self.runner.has)
         if apparmor_blocked:
             issues.append(
                 "dnsmasq is present but AppArmor confines it from the shield "
-                f"state directory — domain allowlisting falls back to static {tier.value} "
-                "resolution (no IP rotation handling). Install the terok AppArmor "
+                f"state directory — domain allowlisting falls back to {dns_tier}. "
+                "Install the terok AppArmor "
                 "profile to enable the dnsmasq tier (see docs/apparmor.md)"
+            )
+        elif tier == DnsTier.PROXY:
+            issues.append(
+                f"dnsmasq unavailable (not installed, or without nftset support) — "
+                f"domain allowlisting runs on the built-in responder ({dns_tier}). "
+                "It follows IP rotation, and answers A and AAAA only. "
+                "Install an nftset-capable dnsmasq for the full tier"
             )
         elif tier == DnsTier.LOOKUP:
             issues.append(
-                "dnsmasq unavailable (not installed, or without nftset support) — "
+                "dnsmasq unavailable and the built-in responder is turned off — "
                 "domain allowlisting uses static pre-start resolution "
                 "(no IP rotation handling). "
                 "Install an nftset-capable dnsmasq for dynamic domain-based egress control"
             )
         elif tier == DnsTier.GETENT:
             issues.append(
-                "Neither dnsmasq nor a lookup tool (dig/drill) found — DNS "
-                "resolution uses getent (single IP, no AAAA). Install dnsmasq "
-                "or at minimum dnsutils/bind-utils/ldns"
+                "Neither dnsmasq nor a lookup tool (dig/drill) found, and the "
+                "built-in responder is turned off — DNS resolution uses getent "
+                "(single IP, no AAAA). Install dnsmasq or at minimum "
+                "dnsutils/bind-utils/ldns"
             )
 
         hooks_dirs = find_hooks_dirs()

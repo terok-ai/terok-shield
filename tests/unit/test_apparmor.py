@@ -51,16 +51,29 @@ def test_tier_is_dnsmasq_when_present_capable_and_readable() -> None:
     assert tier is DnsTier.DNSMASQ
 
 
-def test_tier_falls_back_to_dig_when_confined() -> None:
-    """dnsmasq present + nftset-capable but AppArmor-confined → dig."""
+def test_tier_falls_back_to_the_proxy_when_confined() -> None:
+    """dnsmasq present + nftset-capable but AppArmor-confined → the proxy.
+
+    This is the #1246 host.  It used to drop to static resolution and
+    lose every rotation with it; the fallback now still follows one.
+    """
     has = lambda n: n in {"dnsmasq", "dig"}  # noqa: E731
     tier = detect_dns_tier(has, lambda: True, lambda: False)
+    assert tier is DnsTier.PROXY
+
+
+def test_tier_falls_back_to_dig_when_confined_and_the_proxy_is_off() -> None:
+    """With the proxy turned off, a confined dnsmasq drops to static resolution."""
+    has = lambda n: n in {"dnsmasq", "dig"}  # noqa: E731
+    tier = detect_dns_tier(has, lambda: True, lambda: False, proxy_enabled=False)
     assert tier is DnsTier.LOOKUP
 
 
 def test_tier_falls_back_to_getent_when_confined_and_no_dig() -> None:
-    """Confined dnsmasq with no dig present drops all the way to getent."""
-    tier = detect_dns_tier(lambda n: n == "dnsmasq", lambda: True, lambda: False)
+    """Confined dnsmasq, no dig, no proxy — the floor."""
+    tier = detect_dns_tier(
+        lambda n: n == "dnsmasq", lambda: True, lambda: False, proxy_enabled=False
+    )
     assert tier is DnsTier.GETENT
 
 
@@ -127,20 +140,20 @@ def test_helper_keeps_dnsmasq_when_usable(tmp_path: Path) -> None:
     assert apparmor_blocked is False
 
 
-def test_helper_downgrades_to_dig_when_confined(tmp_path: Path) -> None:
-    """AppArmor-confined dnsmasq with dig present → dig tier, flagged, after probing."""
+def test_helper_downgrades_to_the_proxy_when_confined(tmp_path: Path) -> None:
+    """AppArmor-confined dnsmasq → the proxy tier, flagged, after probing."""
     runner = _fake_runner(readable=False)
     tier, apparmor_blocked = detect_dns_tier_under_apparmor(runner, tmp_path)
-    assert tier is DnsTier.LOOKUP
+    assert tier is DnsTier.PROXY
     assert apparmor_blocked is True
     assert _probed_apparmor(runner)
 
 
 def test_helper_flags_block_even_when_falling_to_getent(tmp_path: Path) -> None:
-    """Confined dnsmasq with no dig → getent, still flagged (not a dig-only signal)."""
+    """Confined dnsmasq with no dig → still the proxy, still flagged."""
     runner = _fake_runner(present=("dnsmasq",), readable=False)
     tier, apparmor_blocked = detect_dns_tier_under_apparmor(runner, tmp_path)
-    assert tier is DnsTier.GETENT
+    assert tier is DnsTier.PROXY
     assert apparmor_blocked is True
 
 
@@ -148,15 +161,15 @@ def test_helper_skips_probe_when_nftset_unsupported(tmp_path: Path) -> None:
     """dnsmasq without nftset is disqualified first — the AppArmor probe never runs."""
     runner = _fake_runner(nftset=False)
     tier, apparmor_blocked = detect_dns_tier_under_apparmor(runner, tmp_path)
-    assert tier is DnsTier.LOOKUP
+    assert tier is DnsTier.PROXY
     assert apparmor_blocked is False
     assert not _probed_apparmor(runner)
 
 
 def test_helper_absent_dnsmasq_is_not_blocked(tmp_path: Path) -> None:
-    """No dnsmasq → dig, not flagged, and no probe runs."""
+    """No dnsmasq → the proxy, not flagged, and no probe runs."""
     runner = _fake_runner(present=("dig",))
     tier, apparmor_blocked = detect_dns_tier_under_apparmor(runner, tmp_path)
-    assert tier is DnsTier.LOOKUP
+    assert tier is DnsTier.PROXY
     assert apparmor_blocked is False
     assert not _probed_apparmor(runner)

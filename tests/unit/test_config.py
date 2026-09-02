@@ -191,11 +191,81 @@ class TestLookupTierDetection:
     """The lookup tier accepts either one-shot resolver."""
 
     def test_drill_alone_selects_the_lookup_tier(self) -> None:
+        """With the proxy off, the one-shot tools are what is left."""
         from terok_shield.config import DnsTier, detect_dns_tier
 
-        assert detect_dns_tier(lambda name: name == "drill") is DnsTier.LOOKUP
+        tier = detect_dns_tier(lambda name: name == "drill", proxy_enabled=False)
+        assert tier is DnsTier.LOOKUP
 
     def test_no_tool_falls_through_to_getent(self) -> None:
         from terok_shield.config import DnsTier, detect_dns_tier
 
-        assert detect_dns_tier(lambda name: False) is DnsTier.GETENT
+        assert detect_dns_tier(lambda name: False, proxy_enabled=False) is DnsTier.GETENT
+
+
+class TestProxyTierDetection:
+    """The proxy is ours, so it is a decision rather than a probe."""
+
+    def test_a_host_without_dnsmasq_gets_the_proxy(self) -> None:
+        """Default on: a rotation breaking a task mid-run is the worse default."""
+        from terok_shield.config import DnsTier, detect_dns_tier
+
+        assert detect_dns_tier(lambda name: name == "dig") is DnsTier.PROXY
+
+    def test_dnsmasq_still_outranks_it(self) -> None:
+        from terok_shield.config import DnsTier, detect_dns_tier
+
+        assert detect_dns_tier(lambda _name: True) is DnsTier.DNSMASQ
+
+    def test_a_named_tier_is_a_requirement(self) -> None:
+        """An operator who names a tier gets it or gets an error, never less."""
+        import pytest
+
+        from terok_shield.config import DnsTierUnavailableError, detect_dns_tier
+
+        with pytest.raises(DnsTierUnavailableError, match="dnsmasq"):
+            detect_dns_tier(lambda _name: False, requested="dnsmasq")
+
+    def test_a_named_tier_the_host_has_is_honoured(self) -> None:
+        """Naming a weaker tier than the host could run is the operator's call."""
+        from terok_shield.config import DnsTier, detect_dns_tier
+
+        assert detect_dns_tier(lambda _name: True, requested="getent") is DnsTier.GETENT
+
+    def test_an_unknown_tier_name_is_refused(self) -> None:
+        import pytest
+
+        from terok_shield.config import DnsTierUnavailableError, detect_dns_tier
+
+        with pytest.raises(DnsTierUnavailableError, match="unknown"):
+            detect_dns_tier(lambda _name: True, requested="nonesuch")
+
+    def test_the_detail_names_what_the_proxy_resolves_with(self) -> None:
+        """``proxy + dig`` and ``proxy + getent`` are not the same tier in practice."""
+        from terok_shield.config import DnsTier, dns_tier_detail
+
+        assert dns_tier_detail(DnsTier.PROXY, lambda name: name == "dig") == "proxy + dig"
+        assert dns_tier_detail(DnsTier.PROXY, lambda _name: False) == "proxy + getent"
+        assert dns_tier_detail(DnsTier.DNSMASQ, lambda _name: True) == "dnsmasq"
+
+    def test_every_tier_can_be_read_back_from_a_bundle(self, tmp_path) -> None:
+        """The state layer mirrors this enum by hand, and a drift is unrecoverable.
+
+        A tier the reader does not know reads as "never launched", and
+        the container recorded under it can never restart — it can only
+        be re-created.
+        """
+        from terok_shield.config import DnsTier
+        from terok_shield.state import StateBundle
+
+        bundle = StateBundle(tmp_path)
+        for tier in DnsTier:
+            bundle.dns_tier.write_text(f"{tier.value}\n")
+            assert bundle.read_dns_tier() == tier.value
+
+    def test_only_the_answering_tiers_are_dynamic(self) -> None:
+        """What follows from it: no static pre-resolution, and set entries expire."""
+        from terok_shield.config import DnsTier
+
+        assert DnsTier.DNSMASQ.is_dynamic and DnsTier.PROXY.is_dynamic
+        assert not DnsTier.LOOKUP.is_dynamic and not DnsTier.GETENT.is_dynamic

@@ -40,6 +40,7 @@ from ..config import (
     ShieldConfig,
     ShieldRuntime,
     ShieldState,
+    dns_tier_detail,
 )
 from ..dns import apparmor, dnsmasq
 from ..nft.constants import (
@@ -536,13 +537,22 @@ class HookMode:
         then sees the drop to static resolution at once, instead of tracing a
         later egress failure back to it.
         """
-        tier, apparmor_blocked = apparmor.detect_dns_tier_under_apparmor(self._runner, state_dir)
+        tier, apparmor_blocked = apparmor.detect_dns_tier_under_apparmor(
+            self._runner, state_dir, requested=self._config.dns_tier
+        )
         if apparmor_blocked:
+            rotation = (
+                "Domain allowlists still follow a rotation — the built-in responder "
+                "answers the container's own queries — but it answers A and AAAA only."
+                if tier.is_dynamic
+                else "Domain allowlists now resolve once at launch, not on each reply, so a "
+                "domain whose address rotates can fail."
+            )
             detail = (
-                f"DNS tier fell back to '{tier.value}'. AppArmor confines dnsmasq from "
+                f"DNS tier fell back to "
+                f"'{dns_tier_detail(tier, self._runner.has)}'. AppArmor confines dnsmasq from "
                 f"{state_dir}, so the per-container dnsmasq tier is not available. "
-                "Domain allowlists now resolve once at launch, not on each reply, so a "
-                "domain whose address rotates can fail. To restore the dnsmasq tier, "
+                f"{rotation} To restore the dnsmasq tier, "
                 "install the terok-shield AppArmor profile addendum. See docs/apparmor.md. "
                 "The terok orchestrator installs it with 'terok setup'."
             )

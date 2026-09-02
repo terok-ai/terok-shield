@@ -1970,7 +1970,7 @@ from terok_shield.state import StateBundle
 def test_detect_dns_tier_audits_advisory_when_apparmor_blocks(
     make_hook_mode: HookModeHarnessFactory, tmp_path: Path
 ) -> None:
-    """_detect_dns_tier falls back and audits the AppArmor advisory when dnsmasq is confined."""
+    """A confined dnsmasq falls back to the responder, and the advisory says so."""
     harness = make_hook_mode()
     harness.runner.has.side_effect = lambda name: name in ("dnsmasq", "dig")
 
@@ -1985,8 +1985,10 @@ def test_detect_dns_tier_audits_advisory_when_apparmor_blocks(
 
     tier = harness.mode._detect_dns_tier("some-task", tmp_path)
 
-    assert tier is DnsTier.LOOKUP
+    assert tier is DnsTier.PROXY
     harness.audit.log_event.assert_called_once()
     detail = harness.audit.log_event.call_args.kwargs["detail"]
     assert "AppArmor" in detail
-    assert "lookup" in detail
+    assert "proxy + dig" in detail
+    # The advisory has to say what the fallback still does, not only what it lost.
+    assert "still follow a rotation" in detail
