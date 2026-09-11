@@ -15,21 +15,21 @@ Launch a shielded container via podman. Resolves DNS, installs hooks, and
 execs into `podman run` with the correct flags.
 
 ```bash
-terok-shield run <container> [--profiles <profile>...] -- <image> [cmd...]
+terok-shield run <container> [--profiles <profile>[,<profile>...]] -- <image> [cmd...]
 ```
 
 | Argument | Description |
 |----------|-------------|
 | `container` | Container name |
-| `--profiles` | Override default profiles (space-separated) |
+| `--profiles` | Profiles to apply (comma-separated); without it, the `default_profiles` from `config.yml` apply |
 | `-- ...` | Everything after `--` is passed to `podman run` |
 
 ```bash
 # Basic usage
-terok-shield run my-container -- alpine:latest sh
+terok-shield run my-container --profiles dev-standard -- alpine:latest sh
 
-# With custom profiles
-terok-shield run my-container --profiles dev-standard dev-python -- alpine:latest sh
+# Multiple profiles
+terok-shield run my-container --profiles dev-standard,dev-python -- alpine:latest sh
 
 # With extra podman flags (after --)
 terok-shield run my-container -- --rm -it -e FOO=bar alpine:latest sh
@@ -45,13 +45,13 @@ Resolve DNS, install hooks, and print the podman flags needed to launch a
 shielded container. Useful for scripting or inspecting what `run` would do.
 
 ```bash
-terok-shield prepare <container> [--profiles <profile>...] [--json]
+terok-shield prepare <container> [--profiles <profile>[,<profile>...]] [--json]
 ```
 
 | Argument | Description |
 |----------|-------------|
 | `container` | Container name |
-| `--profiles` | Override default profiles (space-separated) |
+| `--profiles` | Profiles to apply (comma-separated); without it, the `default_profiles` from `config.yml` apply |
 | `--json` | Output as a JSON array (machine-readable) |
 
 ```bash
@@ -86,9 +86,13 @@ terok-shield status
 ```
 
 ```text
-Mode:     hook
-Audit:    enabled
-Profiles: base, dev-node, dev-python, dev-standard, nvidia-hpc
+Version:            0.8.0
+Podman:             5.4.0
+Mode:               hook
+Hooks:              global
+Health:             ok
+Audit:              enabled
+Available profiles: base, dev-node, dev-python, dev-standard, krun_guest, nvidia-hpc
 ```
 
 With a container name, prints the live firewall state (`up`, `down`, `disengaged`,
@@ -101,7 +105,10 @@ terok-shield status my-container
 
 ## resolve
 
-Resolve DNS domains from the configured profiles and cache the resulting IPs.
+Re-resolve a prepared container's policy into its resolution caches: the
+allowlist it launched with, its break-glass overrides, and its security denies.
+`resolve` rewrites no policy. On `dnsmasq-live`, dnsmasq resolves allowed
+domains per query, so `resolve` says so instead of printing an allow count.
 
 ```bash
 terok-shield resolve <container> [--force]
@@ -110,7 +117,7 @@ terok-shield resolve <container> [--force]
 | Argument | Description |
 |----------|-------------|
 | `container` | Container name (used as the cache key) |
-| `--force` | Bypass cache freshness and re-resolve all domains |
+| `--force` | Re-resolve every domain even when the cache is fresh |
 
 ```bash
 terok-shield resolve my-container

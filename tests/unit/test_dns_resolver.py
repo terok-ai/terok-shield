@@ -297,11 +297,25 @@ def test_resolve_and_cache_returns_fresh_cache(
     cache_path = StateBundle(tmp_path).resolved_cache
     cache_path.write_text(f"{TEST_IP1}\n{TEST_IP2}\n")
 
-    assert harness.resolver.resolve_and_cache([TEST_DOMAIN], cache_path, max_age=3600) == [
+    assert harness.resolver.resolve_and_cache([TEST_DOMAIN], cache_path) == [
         TEST_IP1,
         TEST_IP2,
     ]
     harness.runner.lookup_all.assert_not_called()
+
+
+def test_resolve_and_cache_force_re_resolves_a_fresh_cache(
+    tmp_path: Path,
+    make_resolver: ResolverHarnessFactory,
+) -> None:
+    """resolve_and_cache(force=True) resolves again even when the cache is fresh."""
+    harness = make_resolver()
+    _dig_returns(harness.runner, {TEST_DOMAIN: [TEST_IP2]})
+    cache_path = StateBundle(tmp_path).resolved_cache
+    cache_path.write_text(f"{TEST_IP1}\n")
+
+    assert harness.resolver.resolve_and_cache([TEST_DOMAIN], cache_path, force=True) == [TEST_IP2]
+    harness.runner.lookup_all.assert_called_once()
 
 
 def test_resolve_and_cache_re_resolves_stale_cache(
@@ -316,7 +330,7 @@ def test_resolve_and_cache_re_resolves_stale_cache(
     cache_path.write_text(f"{TEST_IP1}\n")
     os.utime(cache_path, (0, 0))
 
-    assert harness.resolver.resolve_and_cache([TEST_DOMAIN], cache_path, max_age=3600) == [TEST_IP2]
+    assert harness.resolver.resolve_and_cache([TEST_DOMAIN], cache_path) == [TEST_IP2]
     harness.runner.lookup_all.assert_called_once()
 
 
@@ -324,7 +338,7 @@ def test_resolve_and_cache_re_resolves_when_source_is_newer(
     tmp_path: Path,
     make_resolver: ResolverHarnessFactory,
 ) -> None:
-    """A cache older than ``source_mtime`` is re-resolved even within ``max_age``."""
+    """A cache older than ``source_mtime`` is re-resolved even within the freshness window."""
     harness = make_resolver()
     _dig_returns(harness.runner, {TEST_DOMAIN: [TEST_IP2]})
 
@@ -333,7 +347,7 @@ def test_resolve_and_cache_re_resolves_when_source_is_newer(
     edited_after = cache_path.stat().st_mtime + 10  # authored allowlist changed later
 
     result = harness.resolver.resolve_and_cache(
-        [TEST_DOMAIN], cache_path, max_age=3600, source_mtime=edited_after
+        [TEST_DOMAIN], cache_path, source_mtime=edited_after
     )
     assert result == [TEST_IP2]
     harness.runner.lookup_all.assert_called_once()
@@ -351,7 +365,7 @@ def test_resolve_and_cache_keeps_cache_when_source_is_older(
     edited_before = cache_path.stat().st_mtime - 10
 
     result = harness.resolver.resolve_and_cache(
-        [TEST_DOMAIN], cache_path, max_age=3600, source_mtime=edited_before
+        [TEST_DOMAIN], cache_path, source_mtime=edited_before
     )
     assert result == [TEST_IP1]
     harness.runner.lookup_all.assert_not_called()

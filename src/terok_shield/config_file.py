@@ -26,7 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 class AuditFileConfig(BaseModel):
     """Audit section of ``config.yml``."""
 
-    enabled: bool = Field(default=True, description="Enable JSON-lines audit logging")
+    enabled: bool = Field(default=True, description="Enable per-container JSON-lines audit logging")
     model_config = ConfigDict(extra="forbid")
 
 
@@ -39,11 +39,12 @@ class ShieldFileConfig(BaseModel):
     """
 
     mode: Literal["auto", "hook"] = Field(
-        default="auto", description="Firewall mode (``auto`` selects the best available)"
+        default="auto",
+        description="Firewall mode: ``auto`` selects the best available; ``hook`` forces OCI hook mode",
     )
     default_profiles: list[str] = Field(
-        default_factory=lambda: ["dev-standard"],
-        description="Profiles applied when no explicit list is given",
+        default_factory=list,
+        description="Profiles applied when a command does not pass ``--profiles``; an empty list applies none",
     )
     audit: AuditFileConfig = Field(
         default_factory=AuditFileConfig, description="Audit logging settings"
@@ -56,8 +57,8 @@ class ShieldFileConfig(BaseModel):
 
     @field_validator("default_profiles")
     @classmethod
-    def _profiles_non_empty(cls, v: list[str]) -> list[str]:
-        """Ensure every profile name is a non-empty string."""
-        if not v or not all(isinstance(p, str) and p for p in v):
+    def _profile_names_non_empty(cls, v: list[str]) -> list[str]:
+        """Ensure every profile name is a non-empty string; an empty list names no profile."""
+        if not all(isinstance(p, str) and p for p in v):
             raise ValueError("each profile must be a non-empty string")
         return v

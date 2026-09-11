@@ -53,7 +53,7 @@ is applied externally at container creation time.
 ### 2. Start a shielded container
 
 ```bash
-terok-shield run my-container -- alpine:latest sh
+terok-shield run my-container --profiles dev-standard -- alpine:latest sh
 ```
 
 This resolves DNS, installs OCI hooks, and launches the container with a

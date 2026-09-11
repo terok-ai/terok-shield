@@ -60,7 +60,7 @@ class TestResolveAndCacheLive:
             assert cache_path.is_file()
 
             # Second call: returns from cache (no DNS needed)
-            ips2 = resolver.resolve_and_cache([CLOUDFLARE_DOMAIN], cache_path, max_age=3600)
+            ips2 = resolver.resolve_and_cache([CLOUDFLARE_DOMAIN], cache_path)
             assert ips2 == ips1
 
     def test_mixed_entries(self) -> None:

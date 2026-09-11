@@ -36,7 +36,7 @@ class TestShieldConfig:
         cfg = make_config()
         assert cfg.state_dir == state_dir
         assert cfg.mode == ShieldMode.HOOK
-        assert cfg.default_profiles == ("dev-standard",)
+        assert cfg.default_profiles == ()
         assert cfg.loopback_ports == ()
         assert cfg.audit_enabled
         assert cfg.profiles_dir is None
@@ -115,7 +115,7 @@ class TestShieldFileConfigDefaults:
         """Empty config produces sane defaults."""
         cfg = ShieldFileConfig()
         assert cfg.mode == "auto"
-        assert cfg.default_profiles == ["dev-standard"]
+        assert cfg.default_profiles == []
         assert cfg.audit.enabled is True
 
     def test_audit_defaults(self) -> None:
@@ -165,10 +165,21 @@ class TestShieldFileConfigProfileValidation:
         with pytest.raises(ValidationError, match="non-empty"):
             ShieldFileConfig(default_profiles=["valid", ""])
 
-    def test_empty_list_rejected(self) -> None:
-        """An empty profile list is rejected."""
-        with pytest.raises(ValidationError, match="non-empty"):
-            ShieldFileConfig(default_profiles=[])
+    def test_empty_list_accepted(self) -> None:
+        """An empty profile list names no profile."""
+        assert ShieldFileConfig(default_profiles=[]).default_profiles == []
+
+    @pytest.mark.parametrize(
+        "profiles",
+        [
+            pytest.param([1], id="int"),
+            pytest.param([None], id="none"),
+        ],
+    )
+    def test_invalid_profile_name_rejected(self, profiles: list[object]) -> None:
+        """A profile name that is not a string is rejected."""
+        with pytest.raises(ValidationError):
+            ShieldFileConfig(default_profiles=profiles)  # type: ignore[arg-type]
 
 
 class TestShieldFileConfigModeValidation:

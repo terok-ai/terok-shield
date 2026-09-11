@@ -25,7 +25,7 @@ terok-shield --version
 ## Quick start
 
 ```bash
-terok-shield run my-container -- alpine:latest sh
+terok-shield run my-container --profiles dev-standard -- alpine:latest sh
 ```
 
 This single command:
@@ -37,12 +37,12 @@ This single command:
    cap-drop, security-opt)
 
 The container starts with a default-deny firewall — only destinations in the
-default `dev-standard` profile are reachable.
+`dev-standard` profile are reachable. No profile applies unless you name one.
 
 ### Multiple profiles
 
 ```bash
-terok-shield run my-container --profiles dev-standard dev-python my-project \
+terok-shield run my-container --profiles dev-standard,dev-python,my-project \
   -- alpine:latest sh
 ```
 

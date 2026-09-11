@@ -81,7 +81,7 @@ terok-shield ships with several bundled profiles
 | `dev-node` | Yarn, jsDelivr, unpkg |
 | `nvidia-hpc` | CUDA, NGC, NVIDIA drivers |
 
-The default profile is `dev-standard`.  To add a custom allowlist,
+No profile applies unless you name one.  To add a custom allowlist,
 create a `.txt` file in `~/.config/terok/shield/profiles` with one domain or IP per line:
 
 e.g. `~/.config/terok/shield/profiles/my-project.txt`
@@ -95,7 +95,7 @@ cdn.example.com
 ### 2. Start a container with the shield
 
 ```bash
-terok-shield run my-container -- alpine:latest sh
+terok-shield run my-container --profiles dev-standard -- alpine:latest sh
 ```
 
 This resolves DNS, installs OCI hooks, and launches the container

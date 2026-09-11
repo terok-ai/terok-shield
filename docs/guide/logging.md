@@ -59,7 +59,8 @@ prefixes:
 | `TEROK_SHIELD_DENIED:` | Packet rejected by the explicit deny set (operator refused) |
 | `TEROK_SHIELD_PRIVATE:` | Packet rejected by private-range rule (RFC 1918 + RFC 4193/4291) |
 | `TEROK_SHIELD_BLOCKED:` | Packet rejected by the terminal default-deny rule (unclassified) |
-| `TEROK_SHIELD_BYPASS:` | Packet accepted through the bypass window or while the shield is down |
+| `TEROK_SHIELD_BYPASS:` | Packet accepted through the timed bypass window |
+| `TEROK_SHIELD_DOWN:` | New connection accepted while the shield is down (DOWN or DISENGAGED posture) |
 
 View with:
 

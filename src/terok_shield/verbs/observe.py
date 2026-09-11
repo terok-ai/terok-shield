@@ -37,13 +37,13 @@ def _handle_status(shield: Shield, *, container: str | None = None) -> None:
             shield_version = "dev"
         status = shield.status()
         env = shield.check_environment()
-        print(f"Version:  {shield_version}")
-        print(f"Podman:   {format_version(env.podman_version)}")
-        print(f"Mode:     {status['mode']}")
-        print(f"Hooks:    {env.hooks}")
-        print(f"Health:   {env.health}")
-        print(f"Audit:    {'enabled' if status['audit_enabled'] else 'disabled'}")
-        print(f"Profiles: {', '.join(status['profiles']) or '(none)'}")
+        print(f"Version:            {shield_version}")
+        print(f"Podman:             {format_version(env.podman_version)}")
+        print(f"Mode:               {status['mode']}")
+        print(f"Hooks:              {env.hooks}")
+        print(f"Health:             {env.health}")
+        print(f"Audit:              {'enabled' if status['audit_enabled'] else 'disabled'}")
+        print(f"Available profiles: {', '.join(status['profiles']) or '(none)'}")
         print_env_hint(env)
 
 

@@ -2086,3 +2086,61 @@ def test_detect_dns_tier_audits_advisory_when_apparmor_blocks(
     harness.audit.log_event.assert_called_once()
     detail = harness.audit.log_event.call_args.kwargs["detail"]
     assert "AppArmor" in detail
+
+
+# ── resolve() ────────────────────────────────────────────────────────────
+
+
+def _authored_bundle(state_dir: Path, tier: DnsTier) -> StateBundle:
+    """A bundle as a launch leaves it: a DNS tier and one domain in each resolved tier."""
+    bundle = StateBundle(state_dir)
+    bundle.ensure_dirs()
+    bundle.dns_tier.write_text(f"{tier.value}\n")
+    bundle.write_tier("project_allow", f"+{TEST_DOMAIN}\n")
+    bundle.write_tier("override", f"+{TEST_DOMAIN2}\n")
+    bundle.write_tier("security_deny", f"-{CONTAINER_HOSTNAME}\n")
+    return bundle
+
+
+def test_resolve_needs_a_launched_bundle(make_hook_mode: HookModeHarnessFactory) -> None:
+    """Without the DNS tier pre_start persists, resolve() has nothing to resolve against."""
+    with pytest.raises(RuntimeError, match="no persisted DNS tier"):
+        make_hook_mode().mode.resolve()
+
+
+@pytest.mark.parametrize("force", [False, True], ids=["fresh-cache", "force"])
+def test_resolve_refreshes_every_cache_and_rewrites_no_tier(
+    make_hook_mode: HookModeHarnessFactory, force: bool
+) -> None:
+    """On a static tier, resolve() re-resolves allow, override and deny; the authored tiers stay."""
+    harness = make_hook_mode()
+    bundle = _authored_bundle(harness.config.state_dir.resolve(), DnsTier.GETENT)
+    tiers = ("project_allow", "override", "security_deny")
+    authored = {tier: bundle.tier_path(tier).read_text() for tier in tiers}
+    harness.dns.resolve_and_cache.return_value = [TEST_IP1]
+
+    assert harness.mode.resolve(force=force) == [TEST_IP1]
+
+    calls = harness.dns.resolve_and_cache.call_args_list
+    assert [c.args[1] for c in calls] == [
+        bundle.resolved_cache,
+        bundle.override_resolved,
+        bundle.deny_resolved,
+    ]
+    assert {c.kwargs["force"] for c in calls} == {force}
+    assert {tier: bundle.tier_path(tier).read_text() for tier in tiers} == authored
+
+
+def test_resolve_leaves_live_tier_allow_resolution_to_dnsmasq(
+    make_hook_mode: HookModeHarnessFactory,
+) -> None:
+    """dnsmasq-live resolves allowed domains per query: resolve() drops a stale allow cache."""
+    harness = make_hook_mode()
+    bundle = _authored_bundle(harness.config.state_dir.resolve(), DnsTier.DNSMASQ_LIVE)
+    bundle.resolved_cache.write_text(f"{TEST_IP4}\n")
+
+    assert harness.mode.resolve() == []
+
+    assert not bundle.resolved_cache.exists()
+    calls = harness.dns.resolve_and_cache.call_args_list
+    assert [c.args[1] for c in calls] == [bundle.override_resolved, bundle.deny_resolved]

@@ -21,6 +21,7 @@ from terok_shield.nft.constants import (
     BLOCKED_LOG_PREFIX,
     BYPASS_LOG_PREFIX,
     DENIED_LOG_PREFIX,
+    DOWN_LOG_PREFIX,
     NFLOG_GROUP,
     PRIVATE_LOG_PREFIX,
 )
@@ -734,6 +735,14 @@ class TestNflogWatcherParsing:
         assert events[0].action == "bypass_connection"
         assert events[0].port == 53
         assert events[0].proto == 17
+
+    def test_down_packet(self) -> None:
+        """NFLOG message with DOWN prefix yields down_connection event."""
+        watcher = self._make_watcher()
+        data = _make_nflog_packet(f"{DOWN_LOG_PREFIX}: ", "203.0.113.1", 6, 443)
+        events = watcher._parse_messages(data)
+        assert len(events) == 1
+        assert events[0].action == "down_connection"
 
     def test_blocked_packet_produces_queued_connection(self) -> None:
         """NFLOG message with BLOCKED prefix yields queued_connection event."""

@@ -34,19 +34,6 @@ def validate_container_name(name: str) -> str:
     return name
 
 
-def validate_safe_name(name: str) -> str:
-    """Validate a generic safe name (profiles, cache keys).
-
-    Stricter than container names — no leading underscore.
-
-    Raises:
-        ValueError: If the name contains path separators or other unsafe chars.
-    """
-    if not SAFE_NAME.fullmatch(name):
-        raise ValueError(f"Unsafe name: {name!r}")
-    return name
-
-
 def validate_container_id(container_id: str) -> str:
     """Validate a podman container id against path-traversal and redirection.
 

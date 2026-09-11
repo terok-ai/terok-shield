@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from terok_shield.profiles import ProfileLoader
+from terok_shield.profiles import ProfileLoader, UnknownProfileError
 
 from ..testfs import FAKE_PROFILES_DIR, FORBIDDEN_TRAVERSAL, NONEXISTENT_DIR
 from ..testnet import CUSTOM_DOMAIN, DEV_PYPI_DOMAIN, TEST_DOMAIN, TEST_IP1
@@ -40,10 +40,19 @@ def test_find_profile_prefers_user_overrides(tmp_path: Path) -> None:
     assert ProfileLoader(user_dir=tmp_path)._find_profile("base") == user_file
 
 
-def test_find_profile_rejects_path_traversal() -> None:
-    """Profile names are validated before touching the filesystem."""
-    with pytest.raises(ValueError):
-        ProfileLoader(user_dir=FAKE_PROFILES_DIR)._find_profile(FORBIDDEN_TRAVERSAL)
+@pytest.mark.parametrize(
+    "name",
+    [
+        pytest.param(FORBIDDEN_TRAVERSAL, id="path-traversal"),
+        pytest.param("_hidden", id="leading-underscore"),
+        pytest.param(".hidden", id="leading-dot"),
+        pytest.param("-flag", id="leading-dash"),
+        pytest.param("", id="empty"),
+    ],
+)
+def test_find_profile_names_no_profile_for_unsafe_names(name: str) -> None:
+    """An unsafe name names no profile: the lookup never builds a path from it."""
+    assert ProfileLoader(user_dir=FAKE_PROFILES_DIR)._find_profile(name) is None
 
 
 def test_load_profile_reads_bundled_profile() -> None:
@@ -51,10 +60,17 @@ def test_load_profile_reads_bundled_profile() -> None:
     assert len(ProfileLoader(user_dir=NONEXISTENT_DIR).load_profile("base")) > 0
 
 
-def test_load_profile_raises_for_missing_profile() -> None:
-    """load_profile() raises FileNotFoundError for unknown profile names."""
-    with pytest.raises(FileNotFoundError):
-        ProfileLoader(user_dir=NONEXISTENT_DIR).load_profile("nonexistent-xyz")
+@pytest.mark.parametrize(
+    "name",
+    [
+        pytest.param("nonexistent-xyz", id="missing"),
+        pytest.param(FORBIDDEN_TRAVERSAL, id="path-traversal"),
+    ],
+)
+def test_load_profile_names_the_available_profiles_for_an_unknown_name(name: str) -> None:
+    """load_profile() refuses a name that carries no profile and lists the profiles that exist."""
+    with pytest.raises(UnknownProfileError, match="available profiles: .*dev-standard"):
+        ProfileLoader(user_dir=NONEXISTENT_DIR).load_profile(name)
 
 
 def test_load_profile_uses_user_override(tmp_path: Path) -> None:

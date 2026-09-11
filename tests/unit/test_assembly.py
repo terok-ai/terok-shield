@@ -16,7 +16,7 @@ from unittest import mock
 
 import pytest
 
-from terok_shield import Shield, ShieldConfig
+from terok_shield import DnsTier, Shield, ShieldConfig
 from terok_shield.audit import AuditLogger
 from terok_shield.dns.resolver import DnsResolver
 from terok_shield.hooks.mode import HookMode
@@ -24,7 +24,7 @@ from terok_shield.nft.rules import RulesetBuilder
 from terok_shield.profiles import ProfileLoader
 
 from ..testfs import FAKE_RESOLVED_DIR, NFT_BINARY
-from ..testnet import TEST_DOMAIN, TEST_IP1, TEST_IP2
+from ..testnet import TEST_DOMAIN, TEST_DOMAIN2, TEST_IP1, TEST_IP2
 
 
 @dataclass
@@ -128,7 +128,7 @@ def test_resolve_and_cache_reuses_fresh_cache(tmp_path: Path) -> None:
 
     resolver.resolve_and_cache([TEST_DOMAIN], cache_path)
     runner.lookup_all.reset_mock()
-    assert resolver.resolve_and_cache([TEST_DOMAIN], cache_path, max_age=3600) == [TEST_IP1]
+    assert resolver.resolve_and_cache([TEST_DOMAIN], cache_path) == [TEST_IP1]
     runner.lookup_all.assert_not_called()
 
 
@@ -195,19 +195,23 @@ def test_shield_audit_path_derived_from_state_dir(_find: mock.Mock, tmp_path: Pa
 
 
 @mock.patch("terok_shield.run.find_nft", return_value=NFT_BINARY)
-def test_shield_resolve_caches_in_resolved_cache(_find: mock.Mock, tmp_path: Path) -> None:
-    """Shield.resolve() writes the project-allow tier and caches in resolved.ips."""
+def test_shield_resolve_refreshes_the_cache_without_rewriting_the_policy(
+    _find: mock.Mock, tmp_path: Path
+) -> None:
+    """Shield.resolve() re-resolves the authored policy into resolved.ips and leaves t40 as written."""
     dns = mock.MagicMock()
     dns.resolve_and_cache.return_value = [TEST_IP1]
-    profiles = mock.MagicMock()
-    profiles.compose_profiles.return_value = [TEST_DOMAIN]
+    bundle = StateBundle(tmp_path.resolve())
+    bundle.ensure_dirs()
+    bundle.dns_tier.write_text(f"{DnsTier.GETENT.value}\n")
+    authored = f"+{TEST_DOMAIN}\n+{TEST_DOMAIN2}\n"
+    bundle.write_tier("project_allow", authored)
 
-    Shield(ShieldConfig(state_dir=tmp_path), dns=dns, profiles=profiles).resolve(["dev-standard"])
+    assert Shield(ShieldConfig(state_dir=tmp_path), dns=dns).resolve() == [TEST_IP1]
 
-    bundle = StateBundle(tmp_path)
-    assert f"+{TEST_DOMAIN}" in bundle.tier_path("project_allow").read_text()
+    assert bundle.tier_path("project_allow").read_text() == authored
     args = dns.resolve_and_cache.call_args.args
-    assert args[0] == [TEST_DOMAIN]  # allow_targets() composed from the written tier
+    assert args[0] == [TEST_DOMAIN, TEST_DOMAIN2]
     assert args[1] == bundle.resolved_cache
 
 

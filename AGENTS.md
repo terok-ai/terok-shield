@@ -17,7 +17,7 @@
 
 - `src/terok_shield/`: Python package (CLI in `cli/main.py`, command registry in `commands.py`, nft ruleset engine in `nft/` — `rules.py` + `constants.py`, hook orchestration in `hooks/`, OCI hook entrypoint in `resources/nft_hook.py`)
 - `tests/`: `pytest` test suite
-- `src/terok_shield/resources/dns/`: Bundled DNS domain allowlists
+- `src/terok_shield/resources/examples/`: Bundled example allowlist profiles, applied only when a caller names them
 
 ## Build, Lint, and Test Commands
 
@@ -179,7 +179,7 @@ The library is a pure function of its inputs. Given a `ShieldConfig` with `state
 - **`ShieldConfig`** (frozen dataclass) — per-container configuration with required `state_dir: Path`
 - **`Shield`** (facade) — public API; delegates to collaborators injected via constructor
 - **`HookMode`** (strategy) — nft-based hook mode implementation of `ShieldModeBackend` protocol
-- **`StateBundle`** — per-container state-file bundle; `read_effective_ips()` merges profile/live/deny into the effective allowlist
+- **`StateBundle`** — per-container state-file bundle; `read_effective_ips()` seeds the t40 allow set with the resolved and literal allow IPs, minus the denied ones
 - **`AuditLogger`** — writes JSONL audit events to a single file
 - **`DnsResolver`** — stateless DNS resolution; takes explicit `cache_path` parameter
 - **`ProfileLoader`** — loads `.txt` allowlists from bundled + user directories
@@ -191,7 +191,7 @@ Each container gets an isolated `state_dir` with this layout:
 
 The canonical layout lives in `state.py`'s module docstring (hooks/,
 the stdlib-only entrypoint, `ruleset.nft`, DNS-tier files, the
-profile/live/deny allowlist files, dnsmasq artifacts, `loopback.ports`,
+`policy/` tier files and their resolution caches, dnsmasq artifacts, `loopback.ports`,
 `container.id`, `audit.jsonl`) — mirror it from there rather than here.
 
 Path functions in `state.py` derive all paths from `state_dir`. `BUNDLE_VERSION` in `state.py` provides a cross-process contract between `pre_start()` and the OCI hook.
@@ -199,10 +199,10 @@ Path functions in `state.py` derive all paths from `state_dir`. `BUNDLE_VERSION`
 ### Data flow
 
 1. **CLI / terok** constructs `ShieldConfig(state_dir=...)` and creates `Shield(config)`
-2. **`Shield.pre_start()`** installs hooks, resolves DNS → writes `profile.allowed`, generates `ruleset.nft`, sets OCI annotations (`state_dir`, `loopback_ports`, `version`), returns podman args
+2. **`Shield.pre_start()`** installs hooks, writes the `policy/` tiers and resolves them into the seed caches, generates `ruleset.nft` and the dnsmasq config, and returns podman args carrying the OCI annotations (`state_dir`, `version`, DNS tier, upstream DNS); `loopback.ports` lives in the bundle
 3. **OCI hook** (the stdlib-only entrypoint from `resources/nft_hook.py`) reads annotations and applies the pre-generated `ruleset.nft` inside the container's netns
-4. **`Shield.allow()` / `deny()`** modify nft sets immediately + persist to `live.allowed`
-5. **`Shield.up()`** re-applies ruleset, restoring IPs from both allowlist files
+4. **`Shield.allow()` / `deny()`** modify nft sets immediately and persist to the `policy/live` overlay
+5. **`Shield.up()`** rebuilds the UP ruleset, re-seeds the tier sets from the policy and its caches, and restores the allow-set elements dnsmasq learned
 
 ### Configuration layer separation
 
@@ -213,7 +213,7 @@ Path functions in `state.py` derive all paths from `state_dir`. `BUNDLE_VERSION`
 ## Key Guidelines
 
 - **Fail-closed**: Any hook/ruleset failure must prevent the container from starting unrestricted
-- **Allowlisting**: Both IP addresses and DNS domains are supported in `.txt` allowlists; bundled defaults use DNS names because they are more stable and easier to audit
+- **Allowlisting**: Both IP addresses and DNS domains are supported in `.txt` allowlists; bundled profiles use DNS names because they are more stable and easier to audit
 - **Minimal changes**: Make surgical, focused changes
 - **Existing tests**: Never remove or modify unrelated tests
 - **Dependencies**: Use uv; runtime dependencies are PyYAML, pydantic, and terok-util

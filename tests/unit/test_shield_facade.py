@@ -171,6 +171,17 @@ def test_pre_start_uses_default_profiles(
     )
 
 
+def test_pre_start_composes_no_profile_unless_named(make_shield: ShieldHarnessFactory) -> None:
+    """pre_start() passes no profile when neither the call nor the config names one."""
+    harness = make_shield()
+    harness.mode.pre_start.return_value = []
+
+    harness.shield.pre_start("test-ctr")
+    harness.mode.pre_start.assert_called_once_with(
+        "test-ctr", [], security_deny=(), provider_allow=(), project_allow=(), override=()
+    )
+
+
 def test_refresh_dispatches_and_logs(
     make_shield: ShieldHarnessFactory,
     make_config: ConfigFactory,
@@ -394,56 +405,16 @@ def test_preview_delegates_to_mode(
     )
 
 
-def test_resolve_composes_profiles_and_caches_dns(make_shield: ShieldHarnessFactory) -> None:
-    """resolve() composes profile entries and passes them to the DNS cache."""
-    harness = make_shield()
-    harness.profiles.compose_profiles.return_value = [TEST_DOMAIN]
-    harness.dns.resolve_and_cache.return_value = [TEST_IP1]
-
-    result = harness.shield.resolve(["dev-standard"])
-
-    harness.profiles.compose_profiles.assert_called_once_with(["dev-standard"])
-    harness.dns.resolve_and_cache.assert_called_once()
-    assert result == [TEST_IP1]
-
-
-def test_resolve_returns_empty_for_empty_profiles(make_shield: ShieldHarnessFactory) -> None:
-    """resolve() short-circuits when composed profiles contain no entries."""
-    harness = make_shield()
-    harness.profiles.compose_profiles.return_value = []
-    assert harness.shield.resolve(["empty"]) == []
-
-
-@pytest.mark.parametrize(
-    ("force", "expected_max_age"),
-    [
-        pytest.param(False, 3600, id="default-cache"),
-        pytest.param(True, 0, id="force-refresh"),
-    ],
-)
-def test_resolve_passes_cache_age(
-    make_shield: ShieldHarnessFactory,
-    force: bool,
-    expected_max_age: int,
+@pytest.mark.parametrize("force", [False, True], ids=["fresh-cache", "force"])
+def test_resolve_delegates_to_the_mode_backend(
+    make_shield: ShieldHarnessFactory, force: bool
 ) -> None:
-    """resolve() adjusts cache freshness based on the force flag."""
+    """resolve() hands the force flag to the mode backend and returns its allow IPs."""
     harness = make_shield()
-    harness.profiles.compose_profiles.return_value = [TEST_DOMAIN]
-    harness.dns.resolve_and_cache.return_value = [TEST_IP1]
+    harness.mode.resolve.return_value = [TEST_IP1]
 
-    harness.shield.resolve(["dev-standard"], force=force)
-    assert harness.dns.resolve_and_cache.call_args.kwargs["max_age"] == expected_max_age
-
-
-def test_resolve_uses_default_profiles(
-    make_shield: ShieldHarnessFactory,
-    make_config: ConfigFactory,
-) -> None:
-    """resolve() falls back to config.default_profiles when profiles is None."""
-    harness = make_shield(config=make_config(default_profiles=("base",)))
-    harness.profiles.compose_profiles.return_value = []
-    harness.shield.resolve()
-    harness.profiles.compose_profiles.assert_called_once_with(["base"])
+    assert harness.shield.resolve(force=force) == [TEST_IP1]
+    harness.mode.resolve.assert_called_once_with(force=force)
 
 
 @pytest.mark.parametrize(
