@@ -1,4 +1,18 @@
 # Changelog
+## v0.8.0 — Past Prologue
+
+## What's Changed
+* feat!: tiered egress policy engine by @sliwowitz in https://github.com/terok-ai/terok-shield/pull/352
+* perf(dns): parallel resolution, 2s per-lookup budget, shared host-level cache by @sliwowitz in https://github.com/terok-ai/terok-shield/pull/397
+* feat: route logging through terok-util unified facility by @sliwowitz in https://github.com/terok-ai/terok-shield/pull/407
+* feat(watch): Landlock-confine the reader daemons by @sliwowitz in https://github.com/terok-ai/terok-shield/pull/408
+* Keep DNS working on the AppArmor dig and getent fallback by @sliwowitz in https://github.com/terok-ai/terok-shield/pull/429
+* feat!: reserve 'bypass' for the timed window; DISENGAGED enforces nothing; a t10 override accepts a CIDR by @sliwowitz in https://github.com/terok-ai/terok-shield/pull/430
+* feat(dns)!: the lookup tier accepts drill alongside dig by @sliwowitz in https://github.com/terok-ai/terok-shield/pull/435
+* feat(dns): tiers that say what they provide, and the dnsmasq binary to run by @sliwowitz in https://github.com/terok-ai/terok-shield/pull/444
+
+**Full Changelog**: https://github.com/terok-ai/terok-shield/compare/v0.7.2...v0.8.0
+
 ## v0.7.2 — The Celestial Temple
 
 Test, build, and docs infrastructure changes only.
