@@ -5,7 +5,7 @@
 
 import pytest
 
-from terok_shield.nft.constants import BLOCKED_LOG_PREFIX, BYPASS_LOG_PREFIX
+from terok_shield.nft.constants import BLOCKED_LOG_PREFIX, DOWN_LOG_PREFIX
 from terok_shield.nft.rules import RulesetBuilder
 
 from ..testnet import EXPECTED_PRIVATE_RANGES, IPV6_CLOUDFLARE, LINK_LOCAL_DNS, TEST_IP1, TEST_IP2
@@ -73,11 +73,11 @@ class TestRulesetBuilderBuildDown:
         rs = builder.build_down()
         assert "policy accept" in rs
 
-    def test_includes_bypass_log(self) -> None:
-        """Down ruleset includes the bypass nflog prefix."""
+    def test_includes_down_log(self) -> None:
+        """Down ruleset includes the DOWN nflog prefix."""
         builder = RulesetBuilder()
         rs = builder.build_down()
-        assert BYPASS_LOG_PREFIX in rs
+        assert DOWN_LOG_PREFIX in rs
 
     def test_disengaged(self) -> None:
         """Down with disengaged=True omits every reject, private ranges included."""

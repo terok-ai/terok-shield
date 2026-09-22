@@ -17,13 +17,6 @@ from mkdocs_terok.config_reference import render_model_tables, render_yaml_examp
 
 from terok_shield.config_file import ShieldFileConfig
 
-_FIELD_DOCS: dict[str, str] = {
-    "mode": "Firewall mode. ``auto`` selects the best available; ``hook`` forces OCI hook mode.",
-    "default_profiles": "Allowlist profiles applied when no explicit list is given.",
-    "loopback_ports": "TCP ports forwarded to host loopback via pasta ``-T``.",
-    "audit.enabled": "Write per-container JSONL audit logs.",
-}
-
 
 def _generate() -> str:
     buf = io.StringIO()
@@ -34,11 +27,11 @@ def _generate() -> str:
         "Unknown keys are rejected at load time (`extra='forbid'`).\n\n"
     )
 
-    buf.write(render_model_tables(ShieldFileConfig, field_docs=_FIELD_DOCS))
+    buf.write(render_model_tables(ShieldFileConfig))
 
     buf.write("## Example\n\n")
     buf.write('```yaml title="config.yml"\n')
-    buf.write(render_yaml_example(ShieldFileConfig, field_docs=_FIELD_DOCS))
+    buf.write(render_yaml_example(ShieldFileConfig))
     buf.write("```\n")
 
     return buf.getvalue()

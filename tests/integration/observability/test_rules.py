@@ -6,7 +6,7 @@
 import pytest
 
 from terok_shield.cli.main import main
-from terok_shield.nft.constants import BYPASS_LOG_PREFIX
+from terok_shield.nft.constants import DOWN_LOG_PREFIX
 
 from ..conftest import nft_missing, podman_missing
 from ..helpers import disposable_shield as _shield
@@ -78,12 +78,12 @@ class TestRulesCLI:
 class TestRulesDownAPI:
     """Verify ``Shield.rules()`` returns the correct down ruleset."""
 
-    def test_rules_contain_bypass_prefix(self, shielded_container: str) -> None:
-        """Down ruleset contains the TEROK_SHIELD_BYPASS log prefix."""
+    def test_rules_contain_down_prefix(self, shielded_container: str) -> None:
+        """Down ruleset contains the TEROK_SHIELD_DOWN log prefix."""
         shield = _shield()
         shield.down(shielded_container, shielded_container.id)
         rules = shield.rules(shielded_container)
-        assert BYPASS_LOG_PREFIX in rules
+        assert DOWN_LOG_PREFIX in rules
         assert "policy accept" in rules
 
     def test_rules_restored_after_up(self, shielded_container: str) -> None:
@@ -91,7 +91,7 @@ class TestRulesDownAPI:
 
         The distinguishing signal is the output-chain policy — ``accept`` when
         down, ``drop`` when restored. The ``TEROK_SHIELD_BYPASS`` prefix is
-        NOT one: it also labels the ``@bypass_window`` tier, which is a
+        NOT one: it labels the ``@bypass_window`` tier, which is a
         permanent part of the deny-all ruleset (an empty timed allow-all set).
         """
         shield = _shield()

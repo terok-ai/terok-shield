@@ -89,14 +89,13 @@ stale on-disk entrypoint — bump it whenever the entrypoint *protocol*
 changes even if the file layout itself is unchanged, so that
 ``terok setup`` rewrites the script instead of short-circuiting.
 
-Current shape (v16): v15 plus two derived seed caches —
+Current shape (v17): v16 plus ``dnsmasq.bin``, the recorded dnsmasq binary
+the OCI hook launches and matches.  (v16 added the derived seed caches
 ``override_resolved.ips`` (t10 break-glass) and ``deny_resolved.ips``
-(t20 security-deny).  Both tiers are now statically resolved, so each is
-repopulated *by address* on every ``shield down``/``up`` rebuild instead
-of depending on the DNS plane to re-learn it.  (v15
-replaced the six v14 split allow/deny files with the tiered ``policy/``
-bundle of unified ``+``/``-`` files plus the derived ``resolved.ips``
-cache.)  Earlier shapes are recoverable via
+(t20 security-deny), so both tiers are repopulated *by address* on every
+``shield down``/``up`` rebuild; v15 replaced the six v14 split allow/deny
+files with the tiered ``policy/`` bundle of unified ``+``/``-`` files plus
+the derived ``resolved.ips`` cache.)  Earlier shapes are recoverable via
 ``git log -L /^BUNDLE_VERSION/:src/terok_shield/state.py``.
 """
 

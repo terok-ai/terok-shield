@@ -87,4 +87,5 @@ BLOCKED_LOG_PREFIX = "TEROK_SHIELD_BLOCKED"  # terminal default-deny (unclassifi
 DENIED_LOG_PREFIX = "TEROK_SHIELD_DENIED"  # explicit deny set (operator refused)
 PRIVATE_LOG_PREFIX = "TEROK_SHIELD_PRIVATE"
 ALLOWED_LOG_PREFIX = "TEROK_SHIELD_ALLOWED"
-BYPASS_LOG_PREFIX = "TEROK_SHIELD_BYPASS"
+BYPASS_LOG_PREFIX = "TEROK_SHIELD_BYPASS"  # accepted through the timed bypass window
+DOWN_LOG_PREFIX = "TEROK_SHIELD_DOWN"  # new connection accepted while the shield is down

@@ -542,28 +542,20 @@ class Shield:
         """Generate the ruleset that would be applied to a container."""
         return self._mode.preview(down=down, disengaged=disengaged)
 
-    def resolve(
-        self,
-        profiles: list[str] | None = None,
-        *,
-        force: bool = False,
-    ) -> list[str]:
-        """Resolve DNS profiles and cache the results."""
-        if profiles is None:
-            profiles = list(self.config.default_profiles)
-        entries = self.profiles.compose_profiles(profiles)
-        if not entries:
-            return []
-        bundle = StateBundle(self.config.state_dir)
-        bundle.ensure_dirs()
-        bundle.write_tier("project_allow", "".join(f"+{e}\n" for e in entries))
-        max_age = 0 if force else 3600
-        return self.dns.resolve_and_cache(
-            bundle.read_effective().allow_targets(),
-            bundle.resolved_cache,
-            max_age=max_age,
-            source_mtime=bundle.policy_mtime(),
-        )
+    def resolve(self, *, force: bool = False) -> list[str]:
+        """Re-resolve the container's authored policy into its static-resolution caches.
+
+        Refreshes the caches [`pre_start`][terok_shield.Shield.pre_start] and
+        [`refresh`][terok_shield.Shield.refresh] fill — the allow cache on the
+        tiers without DNS interception, the t10 override cache and the t20
+        deny cache — without rewriting any tier.  *force* re-resolves even
+        when a cache is fresh.  Returns the resolved allow IPs; the
+        ``dnsmasq-live`` tier resolves per query, so it returns none.
+
+        Raises:
+            RuntimeError: When pre_start never completed for this state dir.
+        """
+        return self._mode.resolve(force=force)
 
     def profiles_list(self) -> list[str]:
         """List available profile names."""

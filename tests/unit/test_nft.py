@@ -14,6 +14,7 @@ import pytest
 from terok_shield.nft.constants import (
     BLOCKED_LOG_PREFIX,
     BYPASS_LOG_PREFIX,
+    DOWN_LOG_PREFIX,
     HARD_DENY_RANGES,
     NFT_TABLE,
     PASTA_HOST_LOOPBACK_MAP,
@@ -59,6 +60,7 @@ _ALLOW_LOG_PREFIX = "TEROK_SHIELD_ALLOWED"
 _DENY_LOG_PREFIX = "TEROK_SHIELD_DENIED"
 _ALLOWED_LOG_PREFIX = "TEROK_SHIELD_ALLOWED"
 _BYPASS_LOG_PREFIX = "TEROK_SHIELD_BYPASS"
+_DOWN_LOG_PREFIX = "TEROK_SHIELD_DOWN"
 _BLOCKED_LOG_PREFIX = "TEROK_SHIELD_BLOCKED"
 _ADMIN_PROHIBITED = "admin-prohibited"
 _INPUT_CHAIN = "chain input"
@@ -670,7 +672,7 @@ def test_verify_up_reports_errors_for_empty_input() -> None:
         pytest.param("policy drop", id="input-policy-drop"),
         pytest.param(_ALLOW_V4_SET, id="allow-v4-set"),
         pytest.param(_ALLOW_V6_SET, id="allow-v6-set"),
-        pytest.param(BYPASS_LOG_PREFIX, id="bypass-log-prefix"),
+        pytest.param(DOWN_LOG_PREFIX, id="down-log-prefix"),
         pytest.param("ct state new log group", id="logs-new-connections"),
     ],
 )
@@ -693,7 +695,7 @@ def test_down_ruleset_disengaged_enforces_nothing() -> None:
         assert net not in rs, f"Range {net!r} should be absent when disengaged=True"
     assert _DENY_LOG_PREFIX not in rs
     assert "reject" not in rs
-    assert BYPASS_LOG_PREFIX in rs  # still logs every new connection
+    assert DOWN_LOG_PREFIX in rs  # still logs every new connection
 
 
 def test_down_ruleset_includes_deny_sets() -> None:
@@ -725,7 +727,13 @@ def test_override_accept_is_audited_in_both_postures() -> None:
     leaves no trace.
     """
     assert _ALLOWED_LOG_PREFIX in _rule_for(RulesetBuilder().build_up(), "t10_override_v4")
-    assert _BYPASS_LOG_PREFIX in _rule_for(RulesetBuilder().build_down(), "t10_override_v4")
+    assert _DOWN_LOG_PREFIX in _rule_for(RulesetBuilder().build_down(), "t10_override_v4")
+
+
+def test_bypass_prefix_marks_only_the_timed_window() -> None:
+    """BYPASS tags the bypass-window accept; the down posture logs under its own DOWN prefix."""
+    assert _BYPASS_LOG_PREFIX in _rule_for(RulesetBuilder().build_up(), "bypass_window_v4")
+    assert _BYPASS_LOG_PREFIX not in RulesetBuilder().build_down()
 
 
 def test_down_ruleset_emits_loopback_port_rules() -> None:
@@ -764,35 +772,35 @@ def test_verify_down_accepts_generated_down_rulesets(ruleset: str, disengaged: b
     ("nft_output", "expected_error"),
     [
         pytest.param(
-            "policy drop TEROK_SHIELD_BYPASS",
+            "policy drop TEROK_SHIELD_DOWN",
             "output policy is not accept",
             id="missing-accept-policy",
         ),
         pytest.param(
-            "policy accept TEROK_SHIELD_BYPASS",
+            "policy accept TEROK_SHIELD_DOWN",
             "input policy is not drop",
             id="missing-drop-policy",
         ),
         pytest.param(
-            "policy accept policy drop", "bypass nflog prefix missing", id="missing-bypass-prefix"
+            "policy accept policy drop", "down nflog prefix missing", id="missing-down-prefix"
         ),
         pytest.param(
-            "chain input { policy drop;\nTEROK_SHIELD_BYPASS t40_project_allow_v4 t40_project_allow_v6 }",
+            "chain input { policy drop;\nTEROK_SHIELD_DOWN t40_project_allow_v4 t40_project_allow_v6 }",
             "output chain missing",
             id="missing-output-chain",
         ),
         pytest.param(
-            "chain output { policy accept;\nTEROK_SHIELD_BYPASS t40_project_allow_v4 t40_project_allow_v6 }",
+            "chain output { policy accept;\nTEROK_SHIELD_DOWN t40_project_allow_v4 t40_project_allow_v6 }",
             "input chain missing",
             id="missing-input-chain",
         ),
         pytest.param(
-            f"{_OUTPUT_CHAIN} policy accept {_INPUT_CHAIN} policy drop {BYPASS_LOG_PREFIX} t40_project_allow_v6",
+            f"{_OUTPUT_CHAIN} policy accept {_INPUT_CHAIN} policy drop {DOWN_LOG_PREFIX} t40_project_allow_v6",
             "t40_project_allow_v4 set missing",
             id="missing-allow-v4-set",
         ),
         pytest.param(
-            f"{_OUTPUT_CHAIN} policy accept {_INPUT_CHAIN} policy drop {BYPASS_LOG_PREFIX} t40_project_allow_v4",
+            f"{_OUTPUT_CHAIN} policy accept {_INPUT_CHAIN} policy drop {DOWN_LOG_PREFIX} t40_project_allow_v4",
             "t40_project_allow_v6 set missing",
             id="missing-allow-v6-set",
         ),
@@ -809,7 +817,7 @@ def test_verify_down_reports_missing_top_level_invariants(
 def test_verify_down_reports_private_ranges_when_disengaged_is_false() -> None:
     """Private-range reject rules remain mandatory in the default down posture."""
     errors = _builder.verify_down(
-        f"{_OUTPUT_CHAIN} policy accept {_INPUT_CHAIN} policy drop {BYPASS_LOG_PREFIX} t40_project_allow_v4 t40_project_allow_v6"
+        f"{_OUTPUT_CHAIN} policy accept {_INPUT_CHAIN} policy drop {DOWN_LOG_PREFIX} t40_project_allow_v4 t40_project_allow_v6"
     )
     range_errors = [error for error in errors if "Private-range" in error]
     assert len(range_errors) == len(PRIVATE_RANGES)
@@ -818,7 +826,7 @@ def test_verify_down_reports_private_ranges_when_disengaged_is_false() -> None:
 def test_verify_down_accepts_absent_private_ranges_in_disengaged_mode() -> None:
     """disengaged=True treats absent private-range rejects as correct."""
     errors = _builder.verify_down(
-        f"{_OUTPUT_CHAIN} policy accept {_INPUT_CHAIN} policy drop {BYPASS_LOG_PREFIX} t40_project_allow_v4 t40_project_allow_v6",
+        f"{_OUTPUT_CHAIN} policy accept {_INPUT_CHAIN} policy drop {DOWN_LOG_PREFIX} t40_project_allow_v4 t40_project_allow_v6",
         disengaged=True,
     )
     range_errors = [error for error in errors if "Private-range" in error]
@@ -920,11 +928,12 @@ def test_quarantine_ruleset_has_no_port_accept_rules() -> None:
     assert "tcp dport" not in rs
 
 
-def test_quarantine_ruleset_does_not_include_bypass_or_deny_prefixes() -> None:
-    """Block mode uses only the BLOCKED prefix, not BYPASS or DENIED."""
+def test_quarantine_ruleset_does_not_include_bypass_down_or_deny_prefixes() -> None:
+    """Block mode uses only the BLOCKED prefix, not BYPASS, DOWN or DENIED."""
     rs = RulesetBuilder.build_quarantine()
     assert _DENY_LOG_PREFIX not in rs
     assert BYPASS_LOG_PREFIX not in rs
+    assert DOWN_LOG_PREFIX not in rs
 
 
 # ── verify_quarantine() ─────────────────────────────────────────

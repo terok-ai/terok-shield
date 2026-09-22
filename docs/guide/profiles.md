@@ -14,7 +14,7 @@ user-defined ones.
 | `dev-node` | Yarn, jsDelivr, unpkg, CDN resources |
 | `nvidia-hpc` | CUDA downloads, NGC registry, NVIDIA drivers |
 
-The default profile is `dev-standard`. You can see all available profiles with:
+No profile applies unless you name one. You can see all available profiles with:
 
 ```bash
 terok-shield status
@@ -61,7 +61,7 @@ Custom profiles appear alongside the bundled ones:
 
 ```bash
 terok-shield status
-# Profiles: base, dev-node, dev-python, dev-standard, my-project, nvidia-hpc
+# Available profiles: base, dev-node, dev-python, dev-standard, krun_guest, my-project, nvidia-hpc
 ```
 
 ### Overriding bundled profiles
@@ -77,11 +77,11 @@ takes precedence. The bundled version is ignored.
 Specify profiles with the `--profiles` flag:
 
 ```bash
-# Default profile (dev-standard)
-terok-shield run my-container -- alpine:latest sh
+# One profile
+terok-shield run my-container --profiles dev-standard -- alpine:latest sh
 
-# Multiple profiles (space-separated)
-terok-shield run my-container --profiles dev-standard dev-python my-project \
+# Multiple profiles (comma-separated)
+terok-shield run my-container --profiles dev-standard,dev-python,my-project \
   -- alpine:latest sh
 ```
 
@@ -93,17 +93,20 @@ resolves it there. See [DNS tiers](modes.md#dns-tiers).
 
 ### Pre-resolving DNS
 
-You can also pre-resolve DNS separately, for debugging or to inspect the
-resolved IPs:
+You can also re-resolve a prepared container's DNS separately, for debugging
+or to inspect the resolved IPs. `resolve` refreshes the container's resolution
+caches from the policy it launched with and rewrites no policy:
 
 ```bash
 terok-shield resolve my-container
-terok-shield resolve my-container --force   # bypass cache freshness
+terok-shield resolve my-container --force   # re-resolve even when the cache is fresh
 ```
 
-### Changing the default profile
+### Default profiles
 
-Edit `~/.config/terok/shield/config.yml`:
+`default_profiles` in `~/.config/terok/shield/config.yml` names the profiles
+that apply when a command does not pass `--profiles`. The list is empty unless
+you set it:
 
 ```yaml
 default_profiles:
@@ -120,7 +123,7 @@ for example:
 
 ```bash
 terok-shield run my-container \
-  --profiles base dev-standard dev-python my-project \
+  --profiles base,dev-standard,dev-python,my-project \
   -- alpine:latest sh
 ```
 

@@ -14,8 +14,8 @@ Traffic tests are split by protocol/port so that future rule changes
 import pytest
 
 from terok_shield.nft.constants import (
-    BYPASS_LOG_PREFIX,
     DENIED_LOG_PREFIX,
+    DOWN_LOG_PREFIX,
     HARD_DENY_RANGES,
     PRIVATE_RANGES,
 )
@@ -134,11 +134,11 @@ class TestDownRuleset:
     """Verify structural properties of the down ruleset."""
 
     def test_down_ruleset_has_log_prefix(self, shielded_container: str) -> None:
-        """The down ruleset contains the TEROK_SHIELD_BYPASS log prefix."""
+        """The down ruleset contains the TEROK_SHIELD_DOWN log prefix."""
         shield = _shield()
         shield.down(shielded_container, shielded_container.id)
         rules = shield.rules(shielded_container)
-        assert BYPASS_LOG_PREFIX in rules
+        assert DOWN_LOG_PREFIX in rules
 
     def test_down_ruleset_has_accept_policy(self, shielded_container: str) -> None:
         """The down ruleset output chain has policy accept."""
@@ -153,7 +153,7 @@ class TestDownRuleset:
         shield.down(shielded_container, shielded_container.id, disengaged=True)
         rules = shield.rules(shielded_container)
         assert DENIED_LOG_PREFIX not in rules
-        assert BYPASS_LOG_PREFIX in rules
+        assert DOWN_LOG_PREFIX in rules
 
 
 @pytest.mark.needs_podman

@@ -309,6 +309,29 @@ class HookMode:
             override=override,
         )
 
+    def resolve(self, *, force: bool = False) -> list[str]:
+        """Re-resolve the authored policy into its static-resolution caches.
+
+        The resolution step of [`refresh`][terok_shield.hooks.mode.HookMode.refresh]
+        on its own: every cache the bundle's policy feeds is refreshed, and no
+        tier, ruleset or dnsmasq config is rewritten — the project-allow tier
+        keeps every host its caller authored.  *force* re-resolves even when a
+        cache is fresh.  Returns the resolved allow IPs, which stay empty on
+        the live tier, where dnsmasq resolves per query.
+
+        Raises:
+            RuntimeError: When the bundle carries no persisted DNS tier
+                (``pre_start`` never ran for this state dir).
+        """
+        sd = self._config.state_dir.resolve()
+        tier = StateBundle(sd).read_dns_tier()
+        if tier is None:
+            raise RuntimeError(
+                "shield bundle has no persisted DNS tier — "
+                "pre_start never completed for this container"
+            )
+        return self._resolve_policy(sd, tier, force=force)
+
     def _author_policy(
         self,
         container: str,
@@ -333,9 +356,8 @@ class HookMode:
         """
         entries = self._profiles.compose_profiles(profiles) + list(project_allow)
         self._write_generated_tiers(container, sd, security_deny, provider_allow, override)
-        self._write_policy_and_resolve(sd, entries, tier)
-        self._resolve_override(sd)
-        self._resolve_security_deny(sd)
+        self._write_project_allow(sd, entries)
+        self._resolve_policy(sd, tier)
         self._write_ruleset(sd, tier, upstream_dns, *gateways)
         self._write_dns_artifacts(sd, tier, upstream_dns)
 
@@ -376,42 +398,25 @@ class HookMode:
             logger.warning("t10 override opens a whole range above the security-deny: %s", net)
             self._audit.log_event(container, "override_range", detail=net)
 
-    def _resolve_override(self, sd: Path) -> None:
-        """Statically resolve the t10 break-glass targets into the override seed cache.
+    def _write_project_allow(self, sd: Path, entries: list[str]) -> None:
+        """Write the composed profiles plus the caller's project hosts as the t40 tier."""
+        StateBundle(sd).write_tier("project_allow", "".join(f"+{e}\n" for e in entries))
 
-        The override tier is a *separate* above-deny nft set, resolved
-        independently of the allow tiers and statically on every DNS tier —
-        break-glass entries are rare and specific, and dnsmasq interception
-        would populate t40 (below the deny), defeating the override.
+    def _resolve_policy(self, sd: Path, tier: DnsTier, *, force: bool = False) -> list[str]:
+        """Refresh every static-resolution cache the authored policy feeds.
+
+        Launch, restart and [`resolve`][terok_shield.hooks.mode.HookMode.resolve]
+        share this one step, so no path refreshes a cache the others skip.
+        *force* re-resolves even when a cache is fresh.  Returns the resolved
+        allow IPs.
         """
-        bundle = StateBundle(sd)
-        self._resolve_tier(
-            bundle, bundle.read_effective().override_targets(), bundle.override_resolved
-        )
+        allow_ips = self._resolve_allow(sd, tier, force=force)
+        self._resolve_override(sd, force=force)
+        self._resolve_security_deny(sd, force=force)
+        return allow_ips
 
-    def _resolve_security_deny(self, sd: Path) -> None:
-        """Statically resolve the t20 security-deny targets into the deny seed cache.
-
-        Denied domains must deny by *address*: the deny set is enforced even
-        in the shield-down posture (the down transition repopulates it from
-        [`read_denied_ips`][terok_shield.state.StateBundle.read_denied_ips]),
-        and an address-level deny also catches direct-IP access that never
-        consults the DNS plane.  Resolved statically on every DNS tier —
-        dnsmasq interception only ever *adds* to allow sets, so it can play
-        no part in populating a deny.
-        """
-        bundle = StateBundle(sd)
-        self._resolve_tier(bundle, bundle.read_effective().deny_targets(), bundle.deny_resolved)
-
-    def _resolve_tier(self, bundle: StateBundle, targets: list[str], cache: Path) -> None:
-        """Refresh one tier's static-resolution cache; an empty tier clears it."""
-        if not targets:
-            cache.unlink(missing_ok=True)
-            return
-        self._dns.resolve_and_cache(targets, cache, source_mtime=bundle.policy_mtime())
-
-    def _write_policy_and_resolve(self, sd: Path, entries: list[str], tier: DnsTier) -> None:
-        """Write the composed profiles as the project-allow tier; statically resolve only where needed.
+    def _resolve_allow(self, sd: Path, tier: DnsTier, *, force: bool) -> list[str]:
+        """Statically resolve the allow tiers wherever no DNS interception covers them.
 
         The authored ``policy/40-project-allow`` is the source of truth
         (domains + literal IPs).  On the live tier there is **no**
@@ -434,17 +439,64 @@ class HookMode:
             ShieldNeedsSetup: A wildcard entry on a tier that resolves once.
         """
         bundle = StateBundle(sd)
-        bundle.write_tier("project_allow", "".join(f"+{e}\n" for e in entries))
         if tier.live:
             bundle.resolved_cache.unlink(missing_ok=True)
-            return
-        if wildcards := bundle.read_effective().wildcard_domains():
+            return []
+        effective = bundle.read_effective()
+        if wildcards := effective.wildcard_domains():
             raise ShieldNeedsSetup(
                 WILDCARDS_NEED_LIVE_TIER.format(tier=tier.value, names=", ".join(wildcards))
             )
-        self._dns.resolve_and_cache(
-            bundle.read_effective().allow_targets(),
-            bundle.resolved_cache,
+        return self._resolve_tier(
+            bundle, effective.allow_targets(), bundle.resolved_cache, force=force
+        )
+
+    def _resolve_override(self, sd: Path, *, force: bool) -> None:
+        """Statically resolve the t10 break-glass targets into the override seed cache.
+
+        The override tier is a *separate* above-deny nft set, resolved
+        independently of the allow tiers and statically on every DNS tier —
+        break-glass entries are rare and specific, and dnsmasq interception
+        would populate t40 (below the deny), defeating the override.
+        """
+        bundle = StateBundle(sd)
+        self._resolve_tier(
+            bundle,
+            bundle.read_effective().override_targets(),
+            bundle.override_resolved,
+            force=force,
+        )
+
+    def _resolve_security_deny(self, sd: Path, *, force: bool) -> None:
+        """Statically resolve the t20 security-deny targets into the deny seed cache.
+
+        Denied domains must deny by *address*: the deny set is enforced even
+        in the shield-down posture (the down transition repopulates it from
+        [`read_denied_ips`][terok_shield.state.StateBundle.read_denied_ips]),
+        and an address-level deny also catches direct-IP access that never
+        consults the DNS plane.  Resolved statically on every DNS tier —
+        dnsmasq interception only ever *adds* to allow sets, so it can play
+        no part in populating a deny.
+        """
+        bundle = StateBundle(sd)
+        self._resolve_tier(
+            bundle, bundle.read_effective().deny_targets(), bundle.deny_resolved, force=force
+        )
+
+    def _resolve_tier(
+        self, bundle: StateBundle, targets: list[str], cache: Path, *, force: bool
+    ) -> list[str]:
+        """Refresh one tier's static-resolution cache; an empty tier clears it.
+
+        *force* re-resolves even when the cache is fresh.  Returns the resolved IPs.
+        """
+        if not targets:
+            cache.unlink(missing_ok=True)
+            return []
+        return self._dns.resolve_and_cache(
+            targets,
+            cache,
+            force=force,
             source_mtime=bundle.policy_mtime(),
         )
 

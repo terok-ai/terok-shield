@@ -7,7 +7,7 @@ import pytest
 
 from terok_shield import ShieldState
 from terok_shield.cli.main import main
-from terok_shield.nft.constants import BYPASS_LOG_PREFIX
+from terok_shield.nft.constants import DOWN_LOG_PREFIX
 from tests.testnet import BLOCKED_TARGET_DNS_PORT, BLOCKED_TARGET_HTTP, BLOCKED_TARGET_IP
 
 from ..conftest import nft_missing, podman_missing
@@ -83,7 +83,7 @@ class TestDownPreviewCLI:
         main(["preview", "--down"])
         captured = capsys.readouterr()
         assert "policy accept" in captured.out
-        assert BYPASS_LOG_PREFIX in captured.out
+        assert DOWN_LOG_PREFIX in captured.out
 
     def test_preview_disengaged(self, capsys: pytest.CaptureFixture) -> None:
         """``preview --down --disengage`` omits private-range rules."""

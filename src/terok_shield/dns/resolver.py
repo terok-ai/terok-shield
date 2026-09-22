@@ -55,6 +55,10 @@ _HOST_CACHE_KEY_LEN = 16
 """Hex digits of the entry-list hash used as the host-cache filename."""
 
 
+_CACHE_MAX_AGE = 3600
+"""Seconds a resolution cache stays fresh, per container and on the host alike."""
+
+
 class DnsResolver:
     """Stateless DNS resolver — all persistence lives in the cache files.
 
@@ -81,7 +85,7 @@ class DnsResolver:
         entries: list[str],
         cache_path: Path,
         *,
-        max_age: int = 3600,
+        force: bool = False,
         source_mtime: float = 0.0,
     ) -> list[str]:
         """Resolve profile entries and cache the result.
@@ -93,16 +97,18 @@ class DnsResolver:
         Args:
             entries: Domain names and/or raw IPs from composed profiles.
             cache_path: Per-container file the nft ruleset reads.
-            max_age: Cache freshness threshold in seconds (default: 1 hour).
+            force: Re-resolve even when a cache is younger than the one-hour
+                freshness window.
             source_mtime: mtime of the authored policy; a per-container cache
-                older than it is re-resolved even within ``max_age``, so an
-                edited allowlist takes effect on the next task start. The host
-                cache ignores this — its content-hash key already makes it
+                older than it is re-resolved even within the freshness window,
+                so an edited allowlist takes effect on the next task start. The
+                host cache ignores this — its content-hash key already makes it
                 edit-aware.
 
         Returns:
             Resolved IPv4/IPv6 addresses combined with raw IPs/CIDRs.
         """
+        max_age = 0 if force else _CACHE_MAX_AGE
         if self._cache_fresh(cache_path, max_age, source_mtime):
             return self._read_cache(cache_path)
 

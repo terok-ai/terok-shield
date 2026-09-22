@@ -112,7 +112,7 @@ class TestAPISurface:
 
         cfg = make_config()
         assert cfg.mode == ShieldMode.HOOK
-        assert cfg.default_profiles == ("dev-standard",)
+        assert cfg.default_profiles == ()
         assert cfg.loopback_ports == ()
         assert cfg.audit_enabled is True
         assert cfg.profiles_dir is None

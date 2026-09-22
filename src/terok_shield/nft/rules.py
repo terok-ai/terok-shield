@@ -41,6 +41,7 @@ from .constants import (
     BLOCKED_LOG_PREFIX,
     BYPASS_LOG_PREFIX,
     DENIED_LOG_PREFIX,
+    DOWN_LOG_PREFIX,
     HARD_DENY_RANGES,
     NFLOG_GROUP,
     NFT_TABLE,
@@ -156,7 +157,7 @@ class RulesetBuilder:
         """Generate the DOWN-posture (manual ``shield down``) ruleset.
 
         Output policy is ``accept`` and every new connection is logged with
-        the bypass prefix.  Plain DOWN still enforces the hard-deny floor and
+        the DOWN prefix.  Plain DOWN still enforces the hard-deny floor and
         the security-deny tier (deny set + private ranges), with the t10
         override kept *above* the deny — a break-glass host must stay
         reachable in every posture that enforces the deny.
@@ -176,13 +177,13 @@ class RulesetBuilder:
             sections.extend(
                 (
                     self._range_reject(HARD_DENY_RANGES, PRIVATE_LOG_PREFIX),
-                    self._match(TIER_OVERRIDE, "accept", BYPASS_LOG_PREFIX),
+                    self._match(TIER_OVERRIDE, "accept", DOWN_LOG_PREFIX),
                     self._match(TIER_SECURITY_DENY, _REJECT, DENIED_LOG_PREFIX),
                     self._range_reject(PRIVATE_RANGES, PRIVATE_LOG_PREFIX),
                 )
             )
         sections.append(
-            f'        ct state new log group {NFLOG_GROUP} prefix "{BYPASS_LOG_PREFIX}: " counter'
+            f'        ct state new log group {NFLOG_GROUP} prefix "{DOWN_LOG_PREFIX}: " counter'
         )
         return self._table(self._set_decls(), self._join(*sections), policy="accept")
 
@@ -247,7 +248,7 @@ class RulesetBuilder:
         """Check applied DOWN-posture ruleset invariants.  Returns errors (empty = OK).
 
         Verifies the table header, ``policy accept`` on output / ``drop`` on
-        input, both chains, every tier set, and the bypass nflog prefix.
+        input, both chains, every tier set, and the DOWN nflog prefix.
         Plain DOWN must carry both range-reject floors; DISENGAGED must carry
         neither floor nor the deny-set reject — a partially applied ruleset
         that keeps any reject must not pass as DISENGAGED.
@@ -260,8 +261,8 @@ class RulesetBuilder:
         if "policy drop" not in nft_output:
             errors.append("input policy is not drop")
         errors.extend(self._verify_common(nft_output, expect_reject=not disengaged))
-        if BYPASS_LOG_PREFIX not in nft_output:
-            errors.append("bypass nflog prefix missing")
+        if DOWN_LOG_PREFIX not in nft_output:
+            errors.append("down nflog prefix missing")
         floors = ((HARD_DENY_RANGES, "Hard-deny"), (PRIVATE_RANGES, "Private-range"))
         if disengaged:
             for nets, label in floors:

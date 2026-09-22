@@ -195,7 +195,7 @@ class TestPreStartDnsmasqTier:
         with tempfile.TemporaryDirectory() as tmp:
             sd = Path(tmp)
             shield = Shield(ShieldConfig(state_dir=sd))
-            args = shield.pre_start("test-ctr")
+            args = shield.pre_start("test-ctr", ["dev-standard"])
 
             tier = _tier_from_args(args)
             if tier not in _DNSMASQ_TIERS:
@@ -248,7 +248,7 @@ class TestDnsmasqInContainer:
 
         _podman_rm(name)
         try:
-            extra_args = shield.pre_start(name)
+            extra_args = shield.pre_start(name, ["dev-standard"])
             tier = _tier_from_args(extra_args)
             if tier != DnsTier.DNSMASQ_LIVE.value:
                 pytest.skip(f"dnsmasq tier not selected (got '{tier}')")

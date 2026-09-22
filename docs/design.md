@@ -21,7 +21,7 @@ runtime `/proc` discovery.
 Allowlists are `.txt` files with one entry per line — domain names or raw
 IP/CIDRs. Lines starting with `#` are comments.
 
-Bundled defaults use domain names because they're stable across IP rotations and
+Bundled profiles use domain names because they're stable across IP rotations and
 easy to audit. DNS resolution uses the best available tier:
 
 1. **dnsmasq-live** (preferred) — a per-container dnsmasq instance is started by
@@ -224,7 +224,8 @@ to the kernel log and delivered over netlink to userspace consumers
 - `TEROK_SHIELD_DENIED:` traffic rejected by the explicit deny set (operator refused)
 - `TEROK_SHIELD_PRIVATE:` non-allowlisted private-range traffic rejected (RFC 1918 + RFC 4193/4291)
 - `TEROK_SHIELD_BLOCKED:` traffic rejected by the terminal default-deny rule (unclassified)
-- `TEROK_SHIELD_BYPASS:` traffic passing through the bypass window or while the shield is down
+- `TEROK_SHIELD_BYPASS:` traffic accepted through the timed bypass window
+- `TEROK_SHIELD_DOWN:` new connections accepted while the shield is down (DOWN or DISENGAGED posture)
 
 ## Public API
 
@@ -248,8 +249,8 @@ shield = Shield(ShieldConfig(state_dir=Path("/path/to/state")))
 | `quarantine(container)` | Total network blackout (drop all, log dropped traffic) |
 | `state(container)` | Query container shield state (`QUARANTINE`, `UP`, `DOWN`, `DISENGAGED`, `OFFLINE`, `ERROR`) |
 | `rules(container)` | Return current nft ruleset for a container |
-| `resolve(profiles, force=False)` | Resolve DNS profiles and cache results |
-| `status()` | Return mode, profiles, audit config |
+| `resolve(*, force=False)` | Re-resolve the authored policy into its resolution caches; rewrites no tier |
+| `status()` | Return mode, available profiles, audit config |
 | `check_environment()` | Probe podman/hooks/DNS-tier health for consumers |
 | `preview(*, down=False, disengaged=False)` | Show ruleset that would be applied |
 
@@ -258,7 +259,7 @@ best-effort shield_up/shield_down hub events to the supervisor's
 per-container socket.
 
 `ShieldConfig` is a frozen dataclass with required `state_dir: Path` and
-optional mode, default profiles, loopback ports, profiles dir, audit
+optional mode, default profiles (empty: no profile applies), loopback ports, profiles dir, audit
 settings, and container runtime category (`ShieldRuntime`). The library
 never reads environment variables or config files — all configuration
 comes from the caller.

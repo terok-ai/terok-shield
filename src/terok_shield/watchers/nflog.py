@@ -163,6 +163,8 @@ class NflogWatcher:
             action = "allowed_connection"
         elif "BYPASS" in prefix:
             action = "bypass_connection"
+        elif "DOWN" in prefix:
+            action = "down_connection"
         else:
             action = "nflog"
 

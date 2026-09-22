@@ -45,7 +45,7 @@ class TestShieldPreStart:
         """
         sd = shield_env / "containers" / "dns-test-ctr"
         shield = Shield(ShieldConfig(state_dir=sd))
-        shield.pre_start("dns-test-ctr")
+        shield.pre_start("dns-test-ctr", ["dev-standard"])
 
         bundle = StateBundle(sd)
         project_allow = bundle.tier_path("project_allow")
