@@ -22,10 +22,10 @@ the name stops resolving (NXDOMAIN), not merely IP-filtered.
 import subprocess
 
 import pytest
+from terok_util import find_host_tool
 
 from terok_shield import DnsTier, Shield, ShieldConfig
 from terok_shield.nft.constants import NFT_TABLE_NAME, TIER_PROJECT_ALLOW
-from terok_shield.run import which_sbin_aware
 from terok_shield.state import StateBundle
 from tests.testnet import (
     ALLOWED_TARGET_DOMAIN,
@@ -53,7 +53,7 @@ from ..helpers import (
 _ALLOW_PROFILE = "learned-state"
 
 dnsmasq_missing = pytest.mark.skipif(
-    not which_sbin_aware("dnsmasq"),
+    not find_host_tool("dnsmasq"),
     reason="dnsmasq not installed",
 )
 

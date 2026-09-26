@@ -27,10 +27,11 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from terok_util import find_host_tool
 from terok_util.matrix import check_capability_contract, tcp_reachable
 
-from terok_shield.podman_info import has_global_hooks, parse_podman_info
-from terok_shield.run import find_nft, which_sbin_aware
+from terok_shield.podman_info import has_global_hooks
+from terok_shield.run import find_nft
 from tests.testnet import ALLOWED_TARGET_IPS
 
 from .helpers import keepalive, start_shielded_container
@@ -172,22 +173,8 @@ def _infra_problem(message: str) -> None:
 
 
 def _hooks_available() -> bool:
-    """Return True if OCI hooks will fire on container start.
-
-    Either per-container ``--hooks-dir`` persists (future podman fix)
-    or global hooks are installed via ``terok-shield setup``.
-    """
-    if has_global_hooks():
-        return True
-    if _has("podman"):
-        output = subprocess.run(
-            ["podman", "info", "-f", "json"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        ).stdout
-        return parse_podman_info(output).hooks_dir_persists
-    return False
+    """Return True when setup-installed global hooks are registered."""
+    return has_global_hooks()
 
 
 # -- Matrix capability contract ------------------------------
@@ -204,7 +191,7 @@ def _hooks_available() -> bool:
 _CAPABILITY_PROBES = {
     "podman": lambda: _has("podman"),
     "nft": lambda: bool(find_nft()),
-    "dnsmasq": lambda: bool(which_sbin_aware("dnsmasq")),
+    "dnsmasq": lambda: bool(find_host_tool("dnsmasq")),
     # A lookup tool, not one particular binary: the resolver takes dig or
     # drill, and the Arch/Manjaro images ship the latter.
     "lookup": lambda: _has("dig") or _has("drill"),

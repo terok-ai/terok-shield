@@ -10,11 +10,12 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+from terok_util import SetupCheck, SetupStatus
 
 from terok_shield import DnsTier, ExecError, Shield, ShieldConfig, ShieldState, state
 from terok_shield.run import ShieldNeedsSetup
 
-from ..testfs import FAKE_HOOKS_DIR, NFT_BINARY
+from ..testfs import NFT_BINARY
 from ..testnet import TEST_DOMAIN, TEST_DOMAIN2, TEST_IP1, TEST_IP2
 
 ConfigFactory = Callable[..., ShieldConfig]
@@ -502,36 +503,16 @@ def _run_side_effect(podman_version: str = "5.8.0"):
     return _effect
 
 
+@mock.patch(
+    "terok_shield.hooks.install.HooksInstaller.check_setup",
+    return_value=(SetupCheck("terok-shield", "hooks", SetupStatus.READY),),
+)
 class TestCheckEnvironment:
-    """Tests for Shield.check_environment()."""
+    """Environment diagnostics with owned setup checks isolated from the host."""
 
-    @staticmethod
-    def _write_hook_layout(hooks_dir: Path, ballast_body: str) -> None:
-        """Write a JSON descriptor + ballast in the layout the version probe expects.
-
-        The probe follows the descriptor's ``hook.path`` to find the
-        script, then reads ``_oci_state.py`` next to it.  Single-flavor
-        installs put descriptors and scripts in the same dir, so the
-        helper just lays both there.
-        """
-        import json
-
-        from terok_shield.podman_info.hooks_dir import HOOK_JSON_FILENAME
-
-        hooks_dir.mkdir(parents=True, exist_ok=True)
-        script_path = hooks_dir / "terok-shield-hook"
-        script_path.write_text("#!/usr/bin/env python3\n")
-        (hooks_dir / "_oci_state.py").write_text(ballast_body)
-        (hooks_dir / HOOK_JSON_FILENAME).write_text(
-            json.dumps({"hook": {"path": str(script_path), "args": []}})
-        )
-
-    @mock.patch("terok_shield.podman_info.find_hooks_dirs", return_value=[FAKE_HOOKS_DIR])
-    @mock.patch("terok_shield.podman_info.has_global_hooks", return_value=True)
     def test_no_lookup_tool_reports_issue(
         self,
-        _has_hooks: mock.Mock,
-        _find_dirs: mock.Mock,
+        check_setup: mock.Mock,
         make_shield: ShieldHarnessFactory,
     ) -> None:
         """No lookup tool and no dnsmasq reports getent degradation in the environment check."""
@@ -539,15 +520,13 @@ class TestCheckEnvironment:
         harness.runner.run.return_value = _podman_info_json("5.8.0")
         harness.runner.has.side_effect = lambda cmd: cmd not in ("dig", "drill", "dnsmasq")
         env = harness.shield.check_environment()
+        check_setup.assert_called_once_with()
         assert any(DnsTier.GETENT.hint in i for i in env.issues)
         assert env.dns_tier == DnsTier.GETENT.value
 
-    @mock.patch("terok_shield.podman_info.find_hooks_dirs", return_value=[FAKE_HOOKS_DIR])
-    @mock.patch("terok_shield.podman_info.has_global_hooks", return_value=True)
     def test_missing_configured_dnsmasq_reports_issue(
         self,
-        _has_hooks: mock.Mock,
-        _find_dirs: mock.Mock,
+        check_setup: mock.Mock,
         make_shield: ShieldHarnessFactory,
         tmp_path: Path,
     ) -> None:
@@ -557,15 +536,13 @@ class TestCheckEnvironment:
         harness.runner.run.return_value = _podman_info_json("5.8.0")
         harness.runner.has.side_effect = lambda cmd: cmd == "dig"
         env = harness.shield.check_environment()
+        check_setup.assert_called_once_with()
         assert any(str(missing) in i for i in env.issues)
         assert env.dns_tier == DnsTier.LOOKUP.value
 
-    @mock.patch("terok_shield.podman_info.find_hooks_dirs", return_value=[FAKE_HOOKS_DIR])
-    @mock.patch("terok_shield.podman_info.has_global_hooks", return_value=True)
     def test_apparmor_confined_dnsmasq_reports_issue(
         self,
-        _has_hooks: mock.Mock,
-        _find_dirs: mock.Mock,
+        check_setup: mock.Mock,
         make_shield: ShieldHarnessFactory,
         tmp_path: Path,
     ) -> None:
@@ -584,234 +561,28 @@ class TestCheckEnvironment:
 
         harness.runner.run.side_effect = _run
         env = harness.shield.check_environment()
+        check_setup.assert_called_once_with()
         assert env.dns_tier == DnsTier.LOOKUP.value
         assert any("AppArmor" in i for i in env.issues)
 
-    @mock.patch("terok_shield.podman_info.find_hooks_dirs", return_value=[])
-    @mock.patch("terok_shield.podman_info.has_global_hooks", return_value=False)
     def test_no_global_hooks(
         self,
-        _has_hooks: mock.Mock,
-        _find_dirs: mock.Mock,
+        check_setup: mock.Mock,
         make_shield: ShieldHarnessFactory,
     ) -> None:
         """No global hooks → setup-needed."""
+        missing = SetupCheck("terok-shield", "hooks", SetupStatus.MISSING, "No global hooks")
+        check_setup.return_value = (missing,)
         harness = make_shield()
         harness.runner.run.return_value = _podman_info_json("5.8.0")
         env = harness.shield.check_environment()
+        check_setup.assert_called_once_with()
         assert not env.ok
+        assert missing.diagnostic in env.issues
         assert env.health == "setup-needed"
         assert env.hooks == "not-installed"
         assert env.needs_setup
         assert env.setup_hint
-
-    @mock.patch("terok_shield.podman_info.find_hooks_dirs", return_value=[FAKE_HOOKS_DIR])
-    @mock.patch("terok_shield.podman_info.has_global_hooks", return_value=True)
-    def test_stale_hooks_on_persistent_podman(
-        self,
-        _has_hooks: mock.Mock,
-        _find_dirs: mock.Mock,
-        make_shield: ShieldHarnessFactory,
-    ) -> None:
-        """Podman with hooks_dir_persists + global hooks → stale-hooks."""
-        harness = make_shield()
-        # Use a version >= HOOKS_DIR_PERSIST_VERSION so hooks_dir_persists is True,
-        # which triggers the stale-hooks detection path (global hooks installed but
-        # per-container hooks-dir already persists natively).
-        harness.runner.run.return_value = _podman_info_json("99.0.0")
-        env = harness.shield.check_environment()
-        assert not env.ok
-        assert env.health == "stale-hooks"
-        assert any("Stale" in i for i in env.issues)
-
-    @mock.patch("terok_shield._read_installed_hook_version", return_value=state.BUNDLE_VERSION)
-    @mock.patch("terok_shield.podman_info.find_hooks_dirs", return_value=[FAKE_HOOKS_DIR])
-    @mock.patch("terok_shield.podman_info.has_global_hooks", return_value=True)
-    def test_global_hooks_installed(
-        self,
-        _has_hooks: mock.Mock,
-        _find_dirs: mock.Mock,
-        _hook_ver: mock.Mock,
-        make_shield: ShieldHarnessFactory,
-    ) -> None:
-        """Global hooks present + version match → ok/global."""
-        harness = make_shield()
-        harness.runner.run.side_effect = _run_side_effect("5.8.0")
-        env = harness.shield.check_environment()
-        assert env.ok
-        assert env.health == "ok"
-        assert env.hooks == "global"
-
-    @mock.patch("terok_shield.podman_info.find_hooks_dirs")
-    @mock.patch("terok_shield.podman_info.has_global_hooks", return_value=True)
-    def test_stale_hook_version_detected(
-        self,
-        _has_hooks: mock.Mock,
-        _find_dirs: mock.Mock,
-        make_shield: ShieldHarnessFactory,
-        tmp_path: Path,
-    ) -> None:
-        """Mismatched ballast version → stale-hooks health status."""
-        hooks_dir = tmp_path / "hooks.d"
-        self._write_hook_layout(hooks_dir, "BUNDLE_VERSION = 1\n")
-        _find_dirs.return_value = [hooks_dir]
-
-        harness = make_shield()
-        harness.runner.run.side_effect = _run_side_effect("5.8.0")
-        env = harness.shield.check_environment()
-        assert env.health == "stale-hooks"
-        assert any("version" in i.lower() for i in env.issues)
-
-    @mock.patch("terok_shield.podman_info.find_hooks_dirs")
-    @mock.patch("terok_shield.podman_info.has_global_hooks", return_value=True)
-    def test_unreadable_hook_version_treated_as_stale(
-        self,
-        _has_hooks: mock.Mock,
-        _find_dirs: mock.Mock,
-        make_shield: ShieldHarnessFactory,
-        tmp_path: Path,
-    ) -> None:
-        """Ballast file without ``BUNDLE_VERSION`` line → stale-hooks (not silently ok)."""
-        hooks_dir = tmp_path / "hooks.d"
-        self._write_hook_layout(hooks_dir, "# no version here\n")
-        _find_dirs.return_value = [hooks_dir]
-
-        harness = make_shield()
-        harness.runner.run.side_effect = _run_side_effect("5.8.0")
-        env = harness.shield.check_environment()
-        assert env.health == "stale-hooks"
-        assert any("version" in i.lower() for i in env.issues)
-
-
-# ── _read_installed_hook_version tests ────────────────────
-
-
-class TestReadInstalledHookVersion:
-    """Tests for the _read_installed_hook_version helper.
-
-    User-scope installs split scripts from descriptors: the JSON
-    descriptor in ``hooks_dir`` carries the absolute ``path`` of the
-    role script, and the ballast lives next to that script.  The fixture
-    helpers mirror that layout: ``_write_layout`` writes a descriptor in
-    ``hooks_dir`` and a ballast in a sibling ``script_dir``.
-    """
-
-    @staticmethod
-    def _write_layout(hooks_dir: Path, script_dir: Path, ballast_body: str) -> None:
-        import json
-
-        from terok_shield.podman_info.hooks_dir import HOOK_JSON_FILENAME
-
-        hooks_dir.mkdir(parents=True, exist_ok=True)
-        script_dir.mkdir(parents=True, exist_ok=True)
-        script_path = script_dir / "terok-shield-hook"
-        script_path.write_text("#!/usr/bin/env python3\n")
-        (script_dir / "_oci_state.py").write_text(ballast_body)
-        (hooks_dir / HOOK_JSON_FILENAME).write_text(
-            json.dumps({"hook": {"path": str(script_path), "args": []}})
-        )
-
-    def test_reads_version_from_hook(self, tmp_path: Path) -> None:
-        """Extracts ``BUNDLE_VERSION`` via the descriptor's script-path reference."""
-        from terok_shield import _read_installed_hook_version
-
-        self._write_layout(tmp_path / "hooks.d", tmp_path / "scripts", "BUNDLE_VERSION = 42\n")
-        assert _read_installed_hook_version([tmp_path / "hooks.d"]) == 42
-
-    def test_returns_none_when_no_descriptor(self, tmp_path: Path) -> None:
-        """Returns None when no shield JSON descriptor is found."""
-        from terok_shield import _read_installed_hook_version
-
-        assert _read_installed_hook_version([tmp_path]) is None
-
-    def test_returns_none_on_oserror(self, tmp_path: Path) -> None:
-        """Returns None when the ballast file cannot be read."""
-        from terok_shield import _read_installed_hook_version
-
-        self._write_layout(tmp_path / "hooks.d", tmp_path / "scripts", "BUNDLE_VERSION = 5\n")
-        with mock.patch.object(Path, "read_text", side_effect=OSError("boom")):
-            assert _read_installed_hook_version([tmp_path / "hooks.d"]) is None
-
-    def test_returns_none_on_no_match(self, tmp_path: Path) -> None:
-        """Returns None when the ballast file has no ``BUNDLE_VERSION`` line."""
-        from terok_shield import _read_installed_hook_version
-
-        self._write_layout(tmp_path / "hooks.d", tmp_path / "scripts", "# no version here\n")
-        assert _read_installed_hook_version([tmp_path / "hooks.d"]) is None
-
-    def test_returns_none_on_non_dict_toplevel(self, tmp_path: Path) -> None:
-        """A descriptor whose top-level JSON isn't an object reports ``None``.
-
-        A malformed active descriptor (here a JSON array) must be
-        tolerated — reported as unknown (``None``) rather than raising on
-        the subsequent ``.get``.
-        """
-        import json
-
-        from terok_shield import _read_installed_hook_version
-        from terok_shield.podman_info.hooks_dir import HOOK_JSON_FILENAME
-
-        hooks_dir = tmp_path / "hooks.d"
-        hooks_dir.mkdir()
-        (hooks_dir / HOOK_JSON_FILENAME).write_text(json.dumps(["not", "an", "object"]))
-        assert _read_installed_hook_version([hooks_dir]) is None
-
-    def test_returns_none_on_non_dict_hook(self, tmp_path: Path) -> None:
-        """A descriptor whose ``hook`` value isn't an object reports ``None``.
-
-        The top-level parses to an object but ``hook`` is a string; the
-        probe must report ``None`` rather than raise on ``hook.get``.
-        """
-        import json
-
-        from terok_shield import _read_installed_hook_version
-        from terok_shield.podman_info.hooks_dir import HOOK_JSON_FILENAME
-
-        hooks_dir = tmp_path / "hooks.d"
-        hooks_dir.mkdir()
-        (hooks_dir / HOOK_JSON_FILENAME).write_text(json.dumps({"hook": "not-an-object"}))
-        assert _read_installed_hook_version([hooks_dir]) is None
-
-    def test_returns_none_on_non_string_path(self, tmp_path: Path) -> None:
-        """A descriptor whose ``hook.path`` isn't a string reports ``None``, not a crash.
-
-        A malformed active descriptor must be tolerated — reported as
-        unknown (``None``) rather than raising.
-        """
-        import json
-
-        from terok_shield import _read_installed_hook_version
-        from terok_shield.podman_info.hooks_dir import HOOK_JSON_FILENAME
-
-        hooks_dir = tmp_path / "hooks.d"
-        hooks_dir.mkdir()
-        (hooks_dir / HOOK_JSON_FILENAME).write_text(
-            json.dumps({"hook": {"path": 12345, "args": []}})
-        )
-        assert _read_installed_hook_version([hooks_dir]) is None
-
-    def test_broken_active_descriptor_does_not_fall_through(self, tmp_path: Path) -> None:
-        """A broken highest-precedence install reports ``None``, not a lower version.
-
-        Podman's last-wins ``--hooks-dir`` rule means the highest-precedence
-        descriptor is the *active* one.  If it is malformed, the probe must
-        report ``None`` rather than fall back to a valid lower-precedence
-        install whose (stale) version would mask the broken active one.
-        """
-        import json
-
-        from terok_shield import _read_installed_hook_version
-        from terok_shield.podman_info.hooks_dir import HOOK_JSON_FILENAME
-
-        # Lower precedence (first in the list): a valid v7 install.
-        low = tmp_path / "low"
-        self._write_layout(low, tmp_path / "low-scripts", "BUNDLE_VERSION = 7\n")
-        # Higher precedence (last in the list → reversed-walked first): broken.
-        high = tmp_path / "high"
-        high.mkdir()
-        (high / HOOK_JSON_FILENAME).write_text(json.dumps(["not", "an", "object"]))
-
-        assert _read_installed_hook_version([low, high]) is None
 
 
 from terok_shield.state import StateBundle
@@ -825,3 +596,19 @@ def test_reset_dispatches_and_logs(make_shield: ShieldHarnessFactory) -> None:
 
     harness.mode.shield_reset.assert_called_once_with("test-ctr")
     harness.audit.log_event.assert_called_once_with("test-ctr", "shield_reset")
+
+
+@pytest.mark.parametrize(
+    "status", [SetupStatus.READY, SetupStatus.STALE, SetupStatus.INVALID, SetupStatus.DOWNGRADE]
+)
+def test_environment_uses_owner_checks(status, make_shield: ShieldHarnessFactory) -> None:
+    """Environment diagnostics use the owner's receipt API, not child file internals."""
+    harness = make_shield()
+    harness.runner.run.side_effect = _run_side_effect("5.8.0")
+    with mock.patch(
+        "terok_shield.hooks.install.HooksInstaller.check_setup",
+        return_value=(SetupCheck("terok-shield", "hooks", status, "diagnostic"),),
+    ):
+        env = harness.shield.check_environment()
+    assert env.needs_setup == (status != SetupStatus.READY)
+    assert env.hooks == ("global" if status == SetupStatus.READY else "not-installed")

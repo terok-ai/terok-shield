@@ -25,8 +25,8 @@ The OCI bridge hook spawns one reader per shielded container at
 ``createRuntime`` and SIGTERMs it at ``poststop`` — the process tree is what
 ties the reader's lifetime to the container's.
 
-Stdlib-only by design: shipped as a resource that ``/usr/bin/python3`` can
-execute anywhere without depending on the terok-shield virtual environment.
+Stdlib-only by design: setup installs this script and its shared lookup
+helper; isolated Python needs no installed terok packages.
 """
 
 from __future__ import annotations
@@ -39,11 +39,11 @@ import logging
 import os
 import re
 import select
-import shutil
 import signal
 import socket
 import struct
 import subprocess  # nosec B404 — podman/nsenter re-exec for container netns
+import sys
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -320,9 +320,9 @@ def _reexec_inside_container_netns(
     script = Path(__file__).resolve()
     podman = _resolve_binary("podman")
     nsenter = _resolve_binary("nsenter")
-    python3 = _resolve_binary("python3")
     tail = [
-        python3,
+        sys.executable,
+        "-I",
         str(script),
         str(state_dir),
         container,
@@ -360,15 +360,11 @@ def _podman_container_pid(container: str) -> str:  # pragma: no cover — real p
 
 
 def _resolve_binary(name: str) -> str:
-    """Return the absolute path to *name* or fall back to ``/usr/bin/<name>``.
+    """Resolve a host tool using the standalone helper copied beside this reader."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _host_tools import require_host_tool
 
-    Turns a partial executable name into a full path so Sonar's "starting a
-    process with a partial executable path" rule is satisfied — and so the
-    subprocess actually resolves the binary against a known PATH rather than
-    whatever the caller's env happened to have.  Fallback to ``/usr/bin/<name>``
-    keeps the reader working on minimal images where PATH isn't inherited.
-    """
-    return shutil.which(name) or f"/usr/bin/{name}"
+    return require_host_tool(name)
 
 
 # ── Session ───────────────────────────────────────────────────────────

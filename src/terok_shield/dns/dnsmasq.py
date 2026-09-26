@@ -28,9 +28,11 @@ import time
 from collections.abc import Sequence
 from pathlib import Path
 
+from terok_util import require_host_tool
+
 from ..nft.constants import DNSMASQ_BIND_DEFAULT, NFT_TABLE_NAME, TIER_PROJECT_ALLOW
-from ..resources._oci_state import find_dnsmasq, is_our_dnsmasq
-from ..run import CommandRunner, ShieldNeedsSetup, which_sbin_aware
+from ..resources._oci_state import is_our_dnsmasq
+from ..run import CommandRunner, ShieldNeedsSetup
 from ..state import StateBundle
 
 logger = logging.getLogger(__name__)
@@ -53,10 +55,10 @@ def locate(explicit: Path | None, runner: CommandRunner) -> str:
         ShieldNeedsSetup: When *explicit* is not an executable file.
     """
     if explicit is None:
-        return (which_sbin_aware("dnsmasq") or "dnsmasq") if runner.has("dnsmasq") else ""
+        return "dnsmasq" if runner.has("dnsmasq") else ""
     if not (explicit.is_file() and os.access(explicit, os.X_OK)):
         raise ShieldNeedsSetup(f"dnsmasq_path {explicit} is not an executable file.")
-    return str(explicit.resolve())
+    return str(explicit.absolute())
 
 
 # ── Lifecycle ──────────────────────────────────────────
@@ -137,9 +139,11 @@ def reload(
     # netns already carries the listen address on ``lo`` (added at
     # createRuntime and persistent for the container's lifetime), so no
     # ``ip addr add`` is needed here.
+    binary = require_host_tool(bundle.dnsmasq_command.read_text().strip())
     _terminate(pid_int, state_dir)
     _clear_pid_file(state_dir)
-    runner.dnsmasq_via_nsenter(container, str(conf_path), binary=find_dnsmasq(state_dir))
+    bundle.dnsmasq_bin.write_text(binary + "\n")
+    runner.dnsmasq_via_nsenter(container, str(conf_path), binary=binary)
     _await_restart(state_dir)
 
 

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""Integration tests: hook installation via pre_start."""
+"""Integration tests: setup-owned hooks remain untouched by pre_start."""
 
 from pathlib import Path
 from unittest import mock
@@ -19,23 +19,19 @@ from ..conftest import nft_missing, podman_missing
 @podman_missing
 @nft_missing
 class TestHookInstall:
-    """Verify ``Shield.pre_start()`` installs OCI hook files."""
+    """Verify ``Shield.pre_start()`` does not modify global OCI hook files."""
 
-    @mock.patch("terok_shield.hooks.mode.has_global_hooks", return_value=True)
-    def test_pre_start_creates_hook_files(self, _hgh: mock.Mock, shield_env: Path) -> None:
-        """Hook JSON and entrypoint script exist after ``Shield.pre_start()``."""
+    @mock.patch("terok_shield.hooks.mode.HooksInstaller.check_setup", return_value=())
+    def test_pre_start_does_not_install_hooks(self, _hgh: mock.Mock, shield_env: Path) -> None:
+        """Preparing a task never installs or updates hooks."""
         sd = shield_env / "containers" / "test-ctr"
         shield = Shield(ShieldConfig(state_dir=sd))
         shield.pre_start("test-ctr")
 
-        hooks = StateBundle(sd).hooks_dir
-        assert (hooks / "terok-shield-createRuntime.json").is_file()
-        assert (hooks / "terok-shield-poststop.json").is_file()
-        entrypoint = StateBundle(sd).hook_entrypoint
-        assert entrypoint.is_file()
-        assert entrypoint.stat().st_mode & 0o100, "Entrypoint must be executable"
+        assert not (sd / "hooks").exists()
+        assert not (sd / "terok-shield-hook").exists()
 
-    @mock.patch("terok_shield.hooks.mode.has_global_hooks", return_value=True)
+    @mock.patch("terok_shield.hooks.mode.HooksInstaller.check_setup", return_value=())
     def test_pre_start_idempotent(self, _hgh: mock.Mock, shield_env: Path) -> None:
         """Calling ``Shield.pre_start()`` twice does not break anything."""
         sd = shield_env / "containers" / "test-ctr"
@@ -43,12 +39,5 @@ class TestHookInstall:
         shield.pre_start("test-ctr")
         shield.pre_start("test-ctr")
 
-        hooks = StateBundle(sd).hooks_dir
-        assert (hooks / "terok-shield-createRuntime.json").is_file()
-        assert (hooks / "terok-shield-poststop.json").is_file()
-        entrypoint = StateBundle(sd).hook_entrypoint
-        assert entrypoint.is_file()
-        assert entrypoint.stat().st_mode & 0o100, "Entrypoint must be executable after re-run"
-
-
-from terok_shield.state import StateBundle
+        assert not (sd / "hooks").exists()
+        assert not (sd / "terok-shield-hook").exists()

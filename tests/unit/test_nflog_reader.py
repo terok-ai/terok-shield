@@ -454,12 +454,13 @@ class TestResolveBinary:
     """``_resolve_binary`` returns an absolute path or the /usr/bin fallback."""
 
     def test_which_hit_returns_absolute_path(self) -> None:
-        with mock.patch.object(reader.shutil, "which", return_value="/opt/custom/bin/podman"):
+        with mock.patch("_host_tools.find_host_tool", return_value="/opt/custom/bin/podman"):
             assert reader._resolve_binary("podman") == "/opt/custom/bin/podman"
 
-    def test_which_miss_returns_usr_bin_fallback(self) -> None:
-        with mock.patch.object(reader.shutil, "which", return_value=None):
-            assert reader._resolve_binary("podman") == "/usr/bin/podman"
+    def test_which_miss_fails_loudly(self) -> None:
+        with mock.patch("_host_tools.find_host_tool", return_value=None):
+            with pytest.raises(FileNotFoundError, match="podman"):
+                reader._resolve_binary("podman")
 
 
 class TestOnStopSignal:

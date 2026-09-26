@@ -11,9 +11,10 @@ place.
 # WAYPOINT: Shield (__init__), HookMode (hooks.mode)
 
 import ipaddress as _ipaddress
-import shutil
 import subprocess
 from typing import Protocol, runtime_checkable
+
+from terok_util import SetupRequiredError, find_host_tool, require_host_tool
 
 # ── CommandRunner protocol ──────────────────────────────
 
@@ -86,9 +87,7 @@ class SubprocessRunner:
 
     def __init__(self) -> None:
         """Resolve the nft binary path, raising NftNotFoundError if missing."""
-        self._has_cache: dict[str, bool] = {}
-        self._nft = find_nft()
-        if not self._nft:
+        if not find_nft():
             raise NftNotFoundError(
                 "nft binary not found. Install nftables:\n"
                 "  Debian/Ubuntu: sudo apt install nftables\n"
@@ -110,7 +109,7 @@ class SubprocessRunner:
         try:
             # Explicit argv list with shell=False — auditable and testable
             r = subprocess.run(
-                cmd,
+                [require_host_tool(cmd[0]), *cmd[1:]],
                 input=stdin,
                 capture_output=True,
                 text=True,
@@ -130,23 +129,16 @@ class SubprocessRunner:
         return r.stdout or ""
 
     def has(self, name: str) -> bool:
-        """Return True if an executable is on PATH or a sbin dir (cached).
-
-        sbin-aware for the same reason as [`find_nft`][terok_shield.run.find_nft]: Debian-family login
-        shells omit /usr/sbin, and a plain which() there would silently
-        downgrade the DNS tier by "missing" dnsmasq.
-        """
-        if name not in self._has_cache:
-            self._has_cache[name] = bool(which_sbin_aware(name))
-        return self._has_cache[name]
+        """Return True when the current host PATH supplies an executable."""
+        return bool(find_host_tool(name))
 
     # ── nft ─────────────────────────────────────────────
 
     def nft(self, *args: str, stdin: str | None = None, check: bool = True) -> str:
         """Run nft command directly (hook mode, inside container netns)."""
         if stdin is not None:
-            return self.run([self._nft, *args, "-f", "-"], stdin=stdin, check=check)
-        return self.run([self._nft, *args], check=check)
+            return self.run([require_host_tool("nft"), *args, "-f", "-"], stdin=stdin, check=check)
+        return self.run([require_host_tool("nft"), *args], check=check)
 
     def nft_via_nsenter(
         self,
@@ -159,7 +151,15 @@ class SubprocessRunner:
         """Run nft inside a running container's network namespace."""
         if pid is None:
             pid = self.podman_inspect(container, "{{.State.Pid}}")
-        cmd = ["podman", "unshare", "nsenter", "-t", pid, "-n", self._nft]
+        cmd = [
+            "podman",
+            "unshare",
+            require_host_tool("nsenter"),
+            "-t",
+            pid,
+            "-n",
+            require_host_tool("nft"),
+        ]
         if stdin is not None:
             return self.run([*cmd, *args, "-f", "-"], stdin=stdin, check=check)
         return self.run([*cmd, *args], check=check)
@@ -177,7 +177,16 @@ class SubprocessRunner:
         if pid is None:
             pid = self.podman_inspect(container, "{{.State.Pid}}")
         return self.run(
-            ["podman", "unshare", "nsenter", "-t", pid, "-n", binary, f"--conf-file={conf_path}"]
+            [
+                "podman",
+                "unshare",
+                require_host_tool("nsenter"),
+                "-t",
+                pid,
+                "-n",
+                binary,
+                f"--conf-file={conf_path}",
+            ]
         )
 
     # ── Podman ──────────────────────────────────────────
@@ -279,7 +288,7 @@ class LookupToolNotFoundError(RuntimeError):
     """Raised when neither ``dig`` nor ``drill`` is found on the host."""
 
 
-class ShieldNeedsSetup(RuntimeError):
+class ShieldNeedsSetup(SetupRequiredError):
     """Raised when global OCI hooks are not installed.
 
     Per-container ``--hooks-dir`` does not persist across container
@@ -290,28 +299,7 @@ class ShieldNeedsSetup(RuntimeError):
 
 # ── Standalone helpers ──────────────────────────────────
 
-_SBIN_DIRS = ("/usr/sbin", "/sbin")
-
-
-def which_sbin_aware(name: str) -> str:
-    """Resolve *name* like ``shutil.which``, falling back to the sbin dirs.
-
-    Login shells on the Debian family exclude ``/usr/sbin`` from PATH, so
-    a plain which() misses sbin-installed daemons (dnsmasq) — and the DNS
-    tier silently downgrades to the lookup tier.  ``shutil.which`` with an explicit
-    ``path=`` keeps the executability check identical to PATH resolution.
-    """
-    for search_path in (None, *_SBIN_DIRS):
-        found = shutil.which(name, path=search_path)
-        if found:
-            return found
-    return ""
-
 
 def find_nft() -> str:
-    """Locate the nft binary, checking PATH then common sbin directories.
-
-    sbin directories are checked explicitly because rootless users often
-    lack them in PATH.  Returns empty string if not found.
-    """
-    return which_sbin_aware("nft")
+    """Locate nft using the same current PATH as every other host tool."""
+    return find_host_tool("nft") or ""

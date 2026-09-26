@@ -36,7 +36,9 @@ EXPECTED_ALL = [
     "ShieldMode",
     "ShieldRuntime",
     "ShieldState",
+    "ensure_user_hooks_dir_configured",
     "recorded_dns_tier",
+    "user_hooks_dir_configured",
 ]
 
 

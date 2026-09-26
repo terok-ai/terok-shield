@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 """OCI hook: apply pre-generated terok-shield nft ruleset.
@@ -10,8 +11,8 @@ runtime ``/proc`` discovery needed.
 
 Stdlib-only by design, except for a sibling-module import of
 ``_oci_state`` shipped to the same hooks directory at install time.
-The OCI runtime executes us with ``/usr/bin/python3`` outside any
-virtualenv, so a dependency on ``terok_shield`` would fail to import.
+The OCI runtime executes setup's Python in isolated mode; no installed
+terok packages are imported.
 
 The hook is invoked by crun, which runs inside podman's rootless user
 namespace (``NS_ROOTLESS``).  Inside ``NS_ROOTLESS`` ``os.getuid() ==
@@ -29,12 +30,9 @@ import sys
 import time
 from pathlib import Path
 
-# Sibling-module import: ``_oci_state.py`` lives next to this script in
-# the same hooks directory, and Python's default ``sys.path[0]`` (the
-# directory of the invoked script) makes it importable directly.  We
-# import the module qualified — every helper is reached as
-# ``_oci_state.foo`` — so unit tests can patch one canonical attribute
-# (``_oci_state.nsenter``) and have it apply to every caller.
+# Isolated Python omits the script directory from sys.path. Add only our
+# setup-owned directory so the copied ballast is importable, without importing
+# installed terok packages or accepting ambient PYTHONPATH.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _oci_state  # noqa: E402 — sys.path bootstrap precedes import
 
@@ -192,7 +190,9 @@ def _start_container_dnsmasq(pid: str, sd: Path) -> None:
     except OSError:
         pass
 
-    _oci_state.nsenter(pid, _oci_state.find_dnsmasq(sd), f"--conf-file={dnsmasq_conf}")
+    binary = _oci_state.find_dnsmasq(sd)
+    (sd / _oci_state.DNSMASQ_BIN_FILE_NAME).write_text(binary + "\n")
+    _oci_state.nsenter(pid, binary, f"--conf-file={dnsmasq_conf}")
 
     try:
         dnsmasq_pid = int(pid_file.read_text().strip())

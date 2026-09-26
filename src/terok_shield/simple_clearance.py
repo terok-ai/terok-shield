@@ -27,12 +27,11 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from terok_shield.resources import __file__ as _resources_init  # pragma: no cover
+from terok_util import require_host_tool
 
+from .paths import reader_script_path
 from .subprocess_env import child_process_env
 
-_RESOURCES_DIR = Path(_resources_init).parent
-_READER_SCRIPT = _RESOURCES_DIR / "nflog_reader.py"
 _HUB_BUS_NAME = "org.terok.Shield1"
 
 
@@ -106,13 +105,15 @@ class ClearanceSession:
 
     def _spawn_reader(self) -> subprocess.Popen:
         """Start the NFLOG reader subprocess in JSON mode."""
-        if not _READER_SCRIPT.exists():
-            print(f"Error: NFLOG reader script missing at {_READER_SCRIPT}", file=sys.stderr)
+        reader = reader_script_path()
+        if not reader.exists():
+            print(f"Error: NFLOG reader script missing at {reader}", file=sys.stderr)
             raise SystemExit(1)
         return subprocess.Popen(  # nosec B603
             [
                 sys.executable,
-                str(_READER_SCRIPT),
+                "-I",
+                str(reader),
                 str(self._state_dir),
                 self._container,
                 "--emit=json",
@@ -258,7 +259,7 @@ def _dbus_hub_active() -> bool:
     try:
         result = subprocess.run(  # nosec B603, B607
             [
-                "dbus-send",
+                require_host_tool("dbus-send"),
                 "--session",
                 "--print-reply",
                 "--dest=org.freedesktop.DBus",

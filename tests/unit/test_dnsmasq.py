@@ -260,6 +260,7 @@ def _launched(tmp_path: Path, tier: DnsTier = DnsTier.DNSMASQ_LIVE) -> StateBund
     bundle.ensure_dirs()
     bundle.dns_tier.write_text(f"{tier.value}\n")
     bundle.dnsmasq_bin.write_text(f"{DNSMASQ_SBIN}\n")
+    bundle.dnsmasq_command.write_text("dnsmasq\n")
     bundle.dnsmasq_pid.write_text("12345\n")
     return bundle
 
@@ -273,6 +274,7 @@ def _run_reload(tmp_path: Path, *args: object, **kwargs: object) -> mock.MagicMo
     runner = mock.MagicMock()
     with (
         mock.patch("terok_shield.dns.dnsmasq.is_our_dnsmasq", return_value=True),
+        mock.patch("terok_shield.dns.dnsmasq.require_host_tool", return_value=DNSMASQ_SBIN),
         mock.patch("terok_shield.dns.dnsmasq._terminate"),
         mock.patch("terok_shield.dns.dnsmasq._await_restart"),
     ):

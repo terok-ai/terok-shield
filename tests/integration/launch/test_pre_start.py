@@ -22,7 +22,7 @@ from ..helpers import assert_ruleset_applied
 class TestShieldPreStart:
     """Verify ``Shield.pre_start()`` returns correct podman args."""
 
-    @mock.patch("terok_shield.hooks.mode.has_global_hooks", return_value=True)
+    @mock.patch("terok_shield.hooks.mode.HooksInstaller.check_setup", return_value=())
     def test_pre_start_returns_podman_args(self, _hgh: mock.Mock, shield_env: Path) -> None:
         """Returned args contain ``--annotation`` and ``--cap-drop``."""
         sd = shield_env / "containers" / "test-container"
@@ -31,11 +31,10 @@ class TestShieldPreStart:
 
         assert "--annotation" in args
         assert "--cap-drop" in args
-        # --hooks-dir only present on podman >= 5.6.0;
-        # on older podman, global hooks are used instead
+        assert "--hooks-dir" not in args
 
     @pytest.mark.needs_internet
-    @mock.patch("terok_shield.hooks.mode.has_global_hooks", return_value=True)
+    @mock.patch("terok_shield.hooks.mode.HooksInstaller.check_setup", return_value=())
     def test_pre_start_resolves_dns(self, _hgh: mock.Mock, shield_env: Path) -> None:
         """DNS preparation is written after ``Shield.pre_start()``.
 

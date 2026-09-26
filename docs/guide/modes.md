@@ -85,12 +85,10 @@ preamble (lo, established, DNS, infra ports, +localhost grants) → t00 hard-den
 
 ### Per-container state bundle
 
-Each container's hooks and state are isolated in its own directory:
+Each container's state is isolated in its own directory:
 
 ```text
 {state_dir}/
-├── hooks/                                  # OCI hook descriptors (only if per-container hooks are supported)
-├── terok-shield-hook                       # Hook entrypoint (stdlib-only Python), per-container hooks only
 ├── policy/                                 # v15 tiered +/- policy, one file per tier set
 │   ├── 10-override                         #   → nft set t10_override (break-glass allow)
 │   ├── 20-security-deny                    #   → nft set t20_security_deny (vault hosts + operator deny)
@@ -101,23 +99,16 @@ Each container's hooks and state are isolated in its own directory:
 ├── ruleset.nft                             # Pre-generated nft ruleset (gateways baked in)
 ├── dnsmasq.conf                            # Generated dnsmasq config (dnsmasq tiers)
 ├── dnsmasq.pid                             # dnsmasq PID (dnsmasq tiers)
-├── dnsmasq.bin                             # The dnsmasq binary the hook launches
+├── dnsmasq.bin                             # Live dnsmasq identity (cleanup only)
 ├── resolv.conf                             # Bind-mounted /etc/resolv.conf (every tier)
 ├── upstream.dns                            # Persisted upstream DNS address
 ├── dns.tier                                # Persisted active DNS tier
 └── audit.jsonl                             # Per-container audit log
 ```
 
-> **Where the hooks live.** The `hooks/` descriptors and the
-> `terok-shield-hook` entrypoint above are part of this per-container bundle
-> only when podman supports persistent per-container hooks. It does not today —
-> podman drops a per-container `--hooks-dir` across stop/start
-> ([containers/podman#17935](https://github.com/containers/podman/issues/17935)) —
-> so shield installs the hooks once into a **global** directory and registers it
-> in podman's `containers.conf` (`hooks_dir` under `[engine]`;
-> `~/.config/containers/containers.conf` for rootless). Run `terok-shield setup`
-> to install the global hooks and patch `containers.conf`. Everything else in
-> the bundle stays per-container.
+> **Global hooks.** `terok-shield setup` installs hooks under
+> `<state_root>/shield/hooks` and registers them in `containers.conf`.
+> Task preparation never modifies them; bare Podman restarts remain protected.
 
 ### Running containers
 

@@ -95,19 +95,7 @@ make spdx NAME="Real Human Name" FILES="src/terok_shield/new_file.py"  # Add SPD
     ```
   When modifying an existing file, always run `make spdx` with the contributor's name to add their copyright line. NAME must be a real person's name (ASCII-only), not a project name. Use a single year (year of first contribution), not a range. Ask the user for their name if unknown. Files covered by `REUSE.toml` glob patterns (`.md`, `.yml`, `.toml`, `.json`, etc.) do not need inline headers.
 - **Workaround markers**: When an external limitation (upstream bug, platform deficiency) forces the code into an unnatural shape, use `WORKAROUND(tag-name)` comments:
-  - **Canonical site** — full explanation with issue links and removal condition:
-    ```python
-    # WORKAROUND(hooks-dir-persist): podman drops per-container --hooks-dir
-    # on stop/start even on 5.8.0 (containers/podman#17935, #121, #122).
-    # ... full explanation and removal conditions ...
-    HOOKS_DIR_PERSIST_VERSION = (99, 0, 0)
-    ```
-  - **Impact sites** — brief one-line reference (no re-explanation):
-    ```python
-    # WORKAROUND(hooks-dir-persist): currently always takes the global path
-    if info.hooks_dir_persists:
-    ```
-  - `grep 'WORKAROUND(hooks-dir-persist)'` finds every affected site. One canonical explanation, distributed awareness.
+  Keep the explanation at the workaround, with short references at impact sites.
 - **Documentation filenames**: Markdown files under `docs/` use `lowercase.md` naming (e.g. `getting_started.md`, `cli.md`, `modes.md`) to match the MkDocs `index.md` convention. Root-level project files (e.g. `README.md`, `AGENTS.md`) stay UPPERCASE per standard convention.
 - **Public API surface**: `__init__.py` + `__all__` is the contract. Symbols listed in `__all__` are stable across minor releases; anything underscore-prefixed or absent from `__all__` is internal and may change without notice. (Shield's `_LAZY_IMPORTS` + `__getattr__` pattern keeps the import cost down while honouring the same contract — additions go in both `_LAZY_IMPORTS` and `__all__`.) Review the list before each release — stable APIs stay small because growing them costs.
 
@@ -189,8 +177,7 @@ The library is a pure function of its inputs. Given a `ShieldConfig` with `state
 
 Each container gets an isolated `state_dir` with this layout:
 
-The canonical layout lives in `state.py`'s module docstring (hooks/,
-the stdlib-only entrypoint, `ruleset.nft`, DNS-tier files, the
+The canonical layout lives in `state.py`'s module docstring (`ruleset.nft`, DNS-tier files, the
 profile/live/deny allowlist files, dnsmasq artifacts, `loopback.ports`,
 `container.id`, `audit.jsonl`) — mirror it from there rather than here.
 
@@ -199,7 +186,7 @@ Path functions in `state.py` derive all paths from `state_dir`. `BUNDLE_VERSION`
 ### Data flow
 
 1. **CLI / terok** constructs `ShieldConfig(state_dir=...)` and creates `Shield(config)`
-2. **`Shield.pre_start()`** installs hooks, resolves DNS → writes `profile.allowed`, generates `ruleset.nft`, sets OCI annotations (`state_dir`, `loopback_ports`, `version`), returns podman args
+2. **`Shield.pre_start()`** verifies setup, resolves DNS → writes `profile.allowed`, generates `ruleset.nft`, sets OCI annotations (`state_dir`, `loopback_ports`, `version`), returns podman args
 3. **OCI hook** (the stdlib-only entrypoint from `resources/nft_hook.py`) reads annotations and applies the pre-generated `ruleset.nft` inside the container's netns
 4. **`Shield.allow()` / `deny()`** modify nft sets immediately + persist to `live.allowed`
 5. **`Shield.up()`** re-applies ruleset, restoring IPs from both allowlist files

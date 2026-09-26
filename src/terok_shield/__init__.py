@@ -46,7 +46,11 @@ if TYPE_CHECKING:
     from .audit import AuditLogger
     from .commands import COMMANDS
     from .dns.resolver import DnsResolver
-    from .hooks.install import HooksInstaller
+    from .hooks.install import (
+        HooksInstaller,
+        ensure_user_hooks_dir_configured,
+        user_hooks_dir_configured,
+    )
     from .nft.rules import RulesetBuilder
     from .profiles import ProfileLoader
     from .run import CommandRunner, ExecError
@@ -63,6 +67,7 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
         "terok_shield.hooks.install",
         "ensure_user_hooks_dir_configured",
     ),
+    "user_hooks_dir_configured": ("terok_shield.hooks.install", "user_hooks_dir_configured"),
     "NftNotFoundError": ("terok_shield.run", "NftNotFoundError"),
     "ShieldNeedsSetup": ("terok_shield.run", "ShieldNeedsSetup"),
     "check_firewall_binaries": ("terok_shield.prereqs", "check_firewall_binaries"),
@@ -118,62 +123,11 @@ class EnvironmentCheck:
     dns_tier: str = ""
     ok: bool = True
     podman_version: tuple[int, ...] = (0,)
-    hooks: str = "per-container"
+    hooks: str = "not-installed"
     health: str = "ok"
     issues: list[str] = field(default_factory=list)
     needs_setup: bool = False
     setup_hint: str = ""
-
-
-def _read_installed_hook_version(hooks_dirs: list[Path]) -> int | None:
-    """Read ``BUNDLE_VERSION`` from the installed ballast module, or ``None``.
-
-    The ballast (``_oci_state.py``) lives *next to* the role script, not
-    necessarily in *hooks_dirs* — shield's own installer keeps them in
-    one directory, but another package may register a *hooks_dirs* entry
-    that holds only descriptors.  So the ballast is located via the
-    descriptor's ``path`` (the load-bearing reference to the role
-    script) rather than scanned for directly in *hooks_dirs*.
-    """
-    import json
-    import re
-
-    from .podman_info.hooks_dir import HOOK_JSON_FILENAME
-
-    pattern = re.compile(r"^BUNDLE_VERSION\s*=\s*(\d+)", re.MULTILINE)
-    # find_hooks_dirs() yields directories in precedence order with the
-    # last entry taking effect (podman's last-wins --hooks-dir rule), so
-    # walk in reverse and stop at the first descriptor we find: that is
-    # the *active* install.  If its descriptor or ballast is broken we
-    # report ``None`` (unknown / broken) rather than falling through to a
-    # lower-precedence dir — podman still loads the broken higher one, so
-    # reporting a stale lower version would mask the real active install.
-    for d in reversed(hooks_dirs):
-        descriptor = d / HOOK_JSON_FILENAME
-        if not descriptor.is_file():
-            continue
-        try:
-            data = json.loads(descriptor.read_text())
-            if not isinstance(data, dict):
-                return None
-            hook = data.get("hook")
-            if not isinstance(hook, dict):
-                return None
-            argv = hook.get("path")
-            if not isinstance(argv, str):
-                return None
-            ballast = Path(argv).parent / "_oci_state.py"
-            if ballast.is_file():
-                m = pattern.search(ballast.read_text())
-                if m:
-                    return int(m.group(1))
-        except (OSError, ValueError):
-            return None
-        return None
-    return None
-
-
-# ── Shield Facade ────────────────────────────────────────
 
 
 class Shield:
@@ -257,14 +211,11 @@ class Shield:
         [`EnvironmentCheck`][terok_shield.EnvironmentCheck] with detected issues and setup hints.
         Does not raise — the caller decides how to handle issues.
         """
-        from . import state
+        from terok_util import SetupStatus
+
         from .dns import apparmor, dnsmasq
-        from .podman_info import (
-            find_hooks_dirs,
-            global_hooks_hint,
-            has_global_hooks,
-            parse_podman_info,
-        )
+        from .hooks.install import HooksInstaller
+        from .podman_info import parse_podman_info
         from .run import ShieldNeedsSetup
 
         output = self.runner.run(["podman", "info", "-f", "json"], check=False)
@@ -272,7 +223,6 @@ class Shield:
         issues: list[str] = []
         needs_setup = False
         setup_hint = ""
-        hooks = "per-container"
         health = "ok"
 
         try:
@@ -292,35 +242,14 @@ class Shield:
         if not tier.live:
             issues.append(f"DNS tier {tier.value}: {tier.hint}")
 
-        hooks_dirs = find_hooks_dirs()
-        global_hooks = has_global_hooks(hooks_dirs)
-
-        if not info.hooks_dir_persists:
-            if global_hooks:
-                hooks = "global"
-                health = "ok"
-                # Check hook version matches current package
-                hook_ver = _read_installed_hook_version(hooks_dirs)
-                if hook_ver != state.BUNDLE_VERSION:
-                    health = "stale-hooks"
-                    issues.append(
-                        f"Installed hook version {hook_ver} != expected {state.BUNDLE_VERSION}. "
-                        "Run `terok-shield setup` to update."
-                    )
-            else:
-                hooks = "not-installed"
-                health = "setup-needed"
-                needs_setup = True
-                setup_hint = global_hooks_hint()
-                issues.append(
-                    "Global hooks not installed - containers will lose firewall on restart"
-                )
-        elif global_hooks:
-            health = "stale-hooks"
-            issues.append(
-                "Stale global hooks detected - not needed on podman >= 5.6.0. "
-                "Consider removing them."
-            )
+        checks = HooksInstaller().check_setup()
+        failed = [check for check in checks if check.status != SetupStatus.READY]
+        hooks = "global" if not failed else "not-installed"
+        if failed:
+            health = "setup-needed"
+            needs_setup = True
+            setup_hint = "Run 'terok-shield setup' to refresh global hooks."
+            issues.extend(check.diagnostic for check in failed)
 
         return EnvironmentCheck(
             ok=not issues,
@@ -583,7 +512,7 @@ class Shield:
 # ``terok_shield`` namespace.  Names still reachable via ``_LAZY_IMPORTS``
 # but absent here (``BinaryCheck``, ``NftNotFoundError``,
 # ``ShieldNeedsSetup``, ``check_firewall_binaries``,
-# ``check_krun_binaries``, ``ensure_user_hooks_dir_configured``) are
+# ``check_krun_binaries``) are
 # internal: their only consumers import them from the owning submodule
 # (``terok_shield.prereqs`` / ``.run`` / ``.hooks.install``) for concrete
 # types, so they need not be part of the stable facade.
@@ -601,5 +530,7 @@ __all__ = [
     "ShieldMode",
     "ShieldRuntime",
     "ShieldState",
+    "ensure_user_hooks_dir_configured",
     "recorded_dns_tier",
+    "user_hooks_dir_configured",
 ]

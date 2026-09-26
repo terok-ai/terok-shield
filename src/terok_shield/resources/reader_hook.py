@@ -173,7 +173,8 @@ def _spawn_reader(
     try:
         proc = subprocess.Popen(  # noqa: S603  # nosec B603  # NOSONAR
             [
-                "/usr/bin/python3",
+                sys.executable,
+                "-I",
                 str(reader),
                 str(sd),
                 container_id,
@@ -300,17 +301,9 @@ def _reader_alive(pid_file: Path) -> bool:
 def _is_our_reader(pid_int: int, sd: Path) -> bool:
     """``True`` if ``pid_int`` is the NFLOG reader we spawned for ``sd``.
 
-    Reads ``/proc/{pid}/cmdline`` and compares to the invocation shape
-    from ``_spawn_reader``.  Two signatures are accepted:
-
-    * the outer Popen shape — ``python3 <reader.py> <sd> <container>
-      --emit=socket [--annotations=…]``
-    * the nsenter-exec'd self the reader produces when it re-enters
-      its own namespaces (argv mutated but sd still encoded in an arg)
-
-    Missing / unreadable cmdline maps to ``False``.  Lenient on
-    ``argv[0]`` (accept any python binary path) to tolerate different
-    distros and venv layouts.
+    Match the installed script and state directory at their fixed argv
+    positions. Interpreter filenames may be versioned or Nix-wrapped; cleanup
+    must also recognize a reader launched before isolated mode was installed.
     """
     try:
         raw = Path(f"/proc/{pid_int}/cmdline").read_bytes()
@@ -321,7 +314,13 @@ def _is_our_reader(pid_int: int, sd: Path) -> bool:
         return False
     script_bytes = str(_reader_script_path()).encode()
     sd_bytes = str(sd).encode()
-    return args[0].endswith(b"python3") and args[1] == script_bytes and sd_bytes in args[2:]
+    tail = args[2:] if args[1] == b"-I" else args[1:]
+    return (
+        len(tail) >= 4
+        and tail[0] == script_bytes
+        and tail[1] == sd_bytes
+        and b"--emit=socket" in tail[3:]
+    )
 
 
 #: Absolute path to the NFLOG reader script, baked into the hook by

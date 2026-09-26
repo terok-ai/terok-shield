@@ -19,12 +19,12 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+from terok_util import find_host_tool
 
 from terok_shield import Shield, ShieldConfig
 from terok_shield.config import DnsTier, detect_dns_tier
 from terok_shield.dns.dnsmasq import generate_config, nftset_entry, read_merged_domains
 from terok_shield.nft.constants import DNSMASQ_BIND_DEFAULT, PASTA_DNS
-from terok_shield.run import which_sbin_aware
 from tests.testnet import (
     ALLOWED_TARGET_DOMAIN,
     ALLOWED_TARGET_HTTP,
@@ -49,7 +49,7 @@ from ..helpers import (
 )
 
 dnsmasq_missing = pytest.mark.skipif(
-    not which_sbin_aware("dnsmasq"),
+    not find_host_tool("dnsmasq"),
     reason="dnsmasq not installed",
 )
 
@@ -446,12 +446,6 @@ class TestGracefulDegradation:
 
         with tempfile.TemporaryDirectory() as tmp:
             shield = Shield(ShieldConfig(state_dir=Path(tmp)))
-            # The Shield constructor pre-populates shield.runner._has_cache before
-            # the monkeypatch above overrides shield.runner.has.  Clear the cache
-            # so that detect_dns_tier(shield.runner.has) uses the patched lookup
-            # rather than returning the cached pre-patch result.
-            shield.runner._has_cache.clear()
-
             # Determine expected tier with dnsmasq hidden
             expected_tier = detect_dns_tier(shield.runner.has)
 

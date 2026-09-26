@@ -4,9 +4,8 @@
 """Unit tests for HooksInstaller and the containers.conf patcher.
 
 Covers the single-layout install/uninstall lifecycle and the line-based
-containers.conf editing that install triggers.  The per-container
-[`install_hooks`][terok_shield.hooks.install.install_hooks] path and the
-role-file generators are exercised by ``test_hook_mode_class``.
+containers.conf editing that install triggers. Standalone bootstrap and
+owned receipt checks are exercised by ``test_setup_path``.
 """
 
 from __future__ import annotations
@@ -24,6 +23,13 @@ from terok_shield.hooks.install import (
 )
 
 from ..testfs import PLACEHOLDER_ALT_HOOKS_DIR, PLACEHOLDER_HOOKS_DIR
+
+
+@pytest.fixture(autouse=True)
+def installed_host_tools(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep file-install tests independent of optional host executable packages."""
+    monkeypatch.setattr("terok_shield.hooks.install.find_host_tool", lambda name: name)
+
 
 # ── Install / uninstall lifecycle ────────────────────────
 
