@@ -21,11 +21,10 @@ from .hooks_dir import (
     global_hooks_hint,
     has_global_hooks,
 )
-from .info import HOOKS_DIR_PERSIST_VERSION, PodmanInfo, parse_podman_info
+from .info import PodmanInfo, parse_podman_info
 from .network import parse_resolv_conf, parse_slirp4netns_cidr, slirp4netns_gateway
 
 __all__ = [
-    "HOOKS_DIR_PERSIST_VERSION",
     "HOOK_JSON_FILENAME",
     "PodmanInfo",
     "find_hooks_dirs",

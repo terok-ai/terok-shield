@@ -18,7 +18,7 @@ from unittest import mock
 
 import pytest
 
-from terok_shield import Shield, ShieldConfig
+from terok_shield import HooksInstaller, Shield, ShieldConfig
 from tests.testnet import BLOCKED_TARGET_HTTP
 
 from ..conftest import CTR_PREFIX, hooks_unavailable, nft_missing, podman_missing
@@ -35,7 +35,7 @@ from ..helpers import assert_blocked
 class TestHookEntrypointStory:
     """Story: stdlib-only hook applies pre-generated ruleset and discovers gateway."""
 
-    @mock.patch("terok_shield.hooks.mode.has_global_hooks", return_value=True)
+    @mock.patch("terok_shield.hooks.mode.HooksInstaller.check_setup", return_value=())
     def test_pre_start_writes_ruleset_nft(
         self, _hgh: mock.Mock, shield_env: Path, _pull_image: None
     ) -> None:
@@ -75,7 +75,7 @@ class TestHookEntrypointStory:
         assert "terok_shield" in shield.rules(name)
         assert_blocked(name, BLOCKED_TARGET_HTTP)
 
-    @mock.patch("terok_shield.hooks.mode.has_global_hooks", return_value=True)
+    @mock.patch("terok_shield.hooks.mode.HooksInstaller.check_setup", return_value=())
     def test_hook_entrypoint_is_stdlib_only(
         self, _hgh: mock.Mock, shield_env: Path, _pull_image: None
     ) -> None:
@@ -84,8 +84,8 @@ class TestHookEntrypointStory:
         sd = shield_env / "containers" / name
         Shield(ShieldConfig(state_dir=sd)).pre_start(name)
 
-        entrypoint = StateBundle(sd).hook_entrypoint
-        assert entrypoint.exists(), "pre_start must install the hook entrypoint script"
+        entrypoint = HooksInstaller().target_dir / "terok-shield-hook"
+        assert entrypoint.exists(), "setup must install the hook entrypoint script"
         content = entrypoint.read_text()
         assert content.splitlines()[0] == "#!/usr/bin/env python3", (
             "Hook entrypoint must start with #!/usr/bin/env python3"

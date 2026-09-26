@@ -31,8 +31,6 @@ def test_bundle_version_is_positive_int() -> None:
 @pytest.mark.parametrize(
     ("attr", "expected"),
     [
-        pytest.param("hooks_dir", FAKE_STATE_DIR / "hooks", id="hooks-dir"),
-        pytest.param("hook_entrypoint", FAKE_STATE_DIR / "terok-shield-hook", id="hook-entrypoint"),
         pytest.param("resolved_cache", FAKE_STATE_DIR / "resolved.ips", id="resolved-cache"),
         pytest.param("audit", FAKE_STATE_DIR / "audit.jsonl", id="audit-path"),
         pytest.param("dnsmasq_conf", FAKE_STATE_DIR / "dnsmasq.conf", id="dnsmasq-conf"),
@@ -45,18 +43,6 @@ def test_bundle_version_is_positive_int() -> None:
 def test_path_property(attr: str, expected: Path) -> None:
     """Pure path properties derive deterministic paths under the state dir."""
     assert getattr(StateBundle(FAKE_STATE_DIR), attr) == expected
-
-
-@pytest.mark.parametrize(
-    ("stage", "expected_name"),
-    [
-        pytest.param("createRuntime", "terok-shield-createRuntime.json", id="create-runtime"),
-        pytest.param("poststop", "terok-shield-poststop.json", id="poststop"),
-    ],
-)
-def test_hook_json(stage: str, expected_name: str) -> None:
-    """``StateBundle.hook_json(stage)`` derives the per-stage OCI hook JSON filenames."""
-    assert StateBundle(FAKE_STATE_DIR).hook_json(stage) == FAKE_STATE_DIR / "hooks" / expected_name
 
 
 @pytest.mark.parametrize(
@@ -75,7 +61,6 @@ def test_ensure_dirs_creates_required_directories(
     bundle.ensure_dirs()
 
     assert bundle.state_dir.is_dir()
-    assert bundle.hooks_dir.is_dir()
 
 
 def test_ensure_dirs_is_idempotent(tmp_path: Path) -> None:
@@ -115,10 +100,8 @@ def test_ensure_dirs_forces_owner_only_mode(
     bundle.ensure_dirs()
 
     assert _mode(bundle.state_dir) == STATE_DIR_MODE
-    assert _mode(bundle.hooks_dir) == STATE_DIR_MODE
     # Validator-side invariant: no group/world write bits.
     assert bundle.state_dir.stat().st_mode & 0o022 == 0
-    assert bundle.hooks_dir.stat().st_mode & 0o022 == 0
 
 
 def test_ensure_dirs_repairs_loose_existing_mode(tmp_path: Path) -> None:
@@ -129,14 +112,11 @@ def test_ensure_dirs_repairs_loose_existing_mode(tmp_path: Path) -> None:
     """
     bundle = StateBundle(tmp_path / "container-1")
     bundle.state_dir.mkdir()
-    bundle.hooks_dir.mkdir()
     bundle.state_dir.chmod(0o775)
-    bundle.hooks_dir.chmod(0o775)
 
     bundle.ensure_dirs()
 
     assert _mode(bundle.state_dir) == STATE_DIR_MODE
-    assert _mode(bundle.hooks_dir) == STATE_DIR_MODE
 
 
 def test_read_denied_ips_empty_when_no_policy(tmp_path: Path) -> None:

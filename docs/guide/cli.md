@@ -11,7 +11,7 @@ Global options:
 
 ## run
 
-Launch a shielded container via podman. Resolves DNS, installs hooks, and
+Launch a shielded container via podman. Resolves DNS, checks setup, and
 execs into `podman run` with the correct flags.
 
 ```bash

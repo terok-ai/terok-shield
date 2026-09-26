@@ -11,10 +11,6 @@ paths are derived from a single ``state_dir`` root through
 Bundle layout::
 
     {state_dir}/
-    ├── hooks/
-    │   ├── terok-shield-createRuntime.json
-    │   └── terok-shield-poststop.json
-    ├── {HOOK_ENTRYPOINT_NAME}         # entrypoint script (stdlib-only Python)
     ├── policy/                        # v15 tiered +/- policy (one file per tier set)
     │   ├── 10-override                #   → t10_override
     │   ├── 20-security-deny           #   → t20_security_deny
@@ -27,7 +23,8 @@ Bundle layout::
     ├── ruleset.nft                    # pre-generated nft ruleset (gateways baked in)
     ├── upstream.dns                   # upstream DNS address
     ├── dns.tier                       # active DNS tier
-    ├── dnsmasq.bin                    # the dnsmasq binary the OCI hook launches
+    ├── dnsmasq.command                # symbolic/operator launch choice
+    ├── dnsmasq.bin                    # live executable identity for cleanup
     ├── network.mode                   # rootless network mode (pasta/slirp4netns)
     ├── loopback.ports                 # per-container host-loopback TCP ports (newline-separated)
     ├── dnsmasq.conf                   # generated dnsmasq configuration
@@ -45,7 +42,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .config import DnsTier
-from .paths import HOOK_ENTRYPOINT_NAME
 from .policy import (
     LOCALHOST,
     Action,
@@ -58,6 +54,7 @@ from .policy import (
 )
 from .resources._oci_state import (
     DNSMASQ_BIN_FILE_NAME,
+    DNSMASQ_COMMAND_FILE_NAME,
     DNSMASQ_CONF_FILE_NAME,
     DNSMASQ_PID_FILE_NAME,
 )
@@ -75,7 +72,7 @@ def _read_cached_ips(cache: Path) -> list[str]:
     return [line.strip() for line in cache.read_text().splitlines() if line.strip()]
 
 
-BUNDLE_VERSION = 17
+BUNDLE_VERSION = 18
 """Integer version of the state bundle layout.
 
 Bumped whenever the file layout changes in a backwards-incompatible way.
@@ -84,12 +81,12 @@ deliberately no compatibility window and no migration: containers
 prepared by a different generation fail fast at restart with a message
 naming the remedy (re-create the task; a running container keeps
 running untouched, and the task workspace rides its mounts).  The
-same constant is the signal ``check_environment()`` uses to detect a
-stale on-disk entrypoint — bump it whenever the entrypoint *protocol*
-changes even if the file layout itself is unchanged, so that
-``terok setup`` rewrites the script instead of short-circuiting.
+hook and package must agree on this protocol.
 
-Current shape (v16): v15 plus two derived seed caches —
+Current shape (v18): symbolic dnsmasq launch choice is separate from live
+process identity. Global hooks are setup-owned, not per-container files.
+
+v16: v15 plus two derived seed caches —
 ``override_resolved.ips`` (t10 break-glass) and ``deny_resolved.ips``
 (t20 security-deny).  Both tiers are now statically resolved, so each is
 repopulated *by address* on every ``shield down``/``up`` rebuild instead
@@ -254,20 +251,6 @@ class StateBundle:
     state_dir: Path
 
     # ── OCI hook paths ──────────────────────────────────────
-
-    @property
-    def hooks_dir(self) -> Path:
-        """OCI hooks directory within the state bundle."""
-        return self.state_dir / "hooks"
-
-    @property
-    def hook_entrypoint(self) -> Path:
-        """Path to the hook entrypoint script."""
-        return self.state_dir / HOOK_ENTRYPOINT_NAME
-
-    def hook_json(self, stage: str) -> Path:
-        """Hook JSON file for a given OCI stage (``createRuntime`` / ``poststop``)."""
-        return self.hooks_dir / f"terok-shield-{stage}.json"
 
     @property
     def ruleset(self) -> Path:
@@ -449,8 +432,13 @@ class StateBundle:
         return self.state_dir / DNSMASQ_PID_FILE_NAME
 
     @property
+    def dnsmasq_command(self) -> Path:
+        """Path to the symbolic or explicitly configured dnsmasq launch choice."""
+        return self.state_dir / DNSMASQ_COMMAND_FILE_NAME
+
+    @property
     def dnsmasq_bin(self) -> Path:
-        """Path to the recorded dnsmasq binary, the one the OCI hook launches and matches."""
+        """Path to the live dnsmasq executable identity, never a launch choice."""
         return self.state_dir / DNSMASQ_BIN_FILE_NAME
 
     @property
@@ -546,8 +534,6 @@ class StateBundle:
         """
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.state_dir.chmod(STATE_DIR_MODE)
-        self.hooks_dir.mkdir(parents=True, exist_ok=True)
-        self.hooks_dir.chmod(STATE_DIR_MODE)
         self.policy_dir.mkdir(parents=True, exist_ok=True)
         self.policy_dir.chmod(STATE_DIR_MODE)
 

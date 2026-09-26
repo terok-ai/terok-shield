@@ -27,6 +27,8 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from terok_util import require_host_tool, require_setup
+
 from .. import state
 from ..config import (
     ANNOTATION_AUDIT_ENABLED_KEY,
@@ -65,13 +67,12 @@ from ..nft.rules import (
     restore_elements,
     safe_ip,
 )
-from ..podman_info.hooks_dir import global_hooks_hint, has_global_hooks
 from ..podman_info.info import PodmanInfo, parse_podman_info
 from ..podman_info.network import parse_resolv_conf, slirp4netns_gateway
 from ..run import ExecError, ShieldNeedsSetup
 from ..state import StateBundle
 from ..util import is_ipv4
-from .install import install_hooks
+from .install import HooksInstaller
 
 logger = logging.getLogger(__name__)
 
@@ -156,17 +157,12 @@ class HookMode:
 
         Raises:
             ShieldNeedsSetup: When global hooks are not installed
-                (see ``WORKAROUND(hooks-dir-persist)``).
+                or need refreshing.
         """
         sd = self._config.state_dir.resolve()
+        require_setup(HooksInstaller().check_setup(live=True))
         info = self._get_podman_info()
-
-        # Ensure state dirs and install hooks (idempotent)
         StateBundle(sd).ensure_dirs()
-        install_hooks(
-            hook_entrypoint=StateBundle(sd).hook_entrypoint,
-            hooks_dir=StateBundle(sd).hooks_dir,
-        )
 
         # Detect DNS tier, upstream DNS, and gateway addresses
         dnsmasq_bin = dnsmasq.locate(self._config.dnsmasq_path, self._runner)
@@ -182,7 +178,7 @@ class HookMode:
         bundle = StateBundle(sd)
         bundle.upstream_dns.write_text(f"{upstream_dns}\n")
         bundle.dns_tier.write_text(f"{tier.value}\n")
-        bundle.dnsmasq_bin.write_text(f"{dnsmasq_bin}\n")
+        bundle.dnsmasq_command.write_text(f"{dnsmasq_bin}\n")
         bundle.network_mode.write_text(f"{mode}\n")
         bundle.loopback_ports.write_text("".join(f"{p}\n" for p in self._config.loopback_ports))
         self._author_policy(
@@ -230,23 +226,7 @@ class HookMode:
             f"{ANNOTATION_DNS_TIER_KEY}={tier.value}",
         ]
 
-        # WORKAROUND(hooks-dir-persist): currently always takes the global path
-        if info.hooks_dir_persists:
-            args += ["--hooks-dir", str(StateBundle(sd).hooks_dir)]
-        elif has_global_hooks():
-            self._audit.log_event(
-                container,
-                "setup",
-                detail=(
-                    f"podman {'.'.join(str(v) for v in info.version)}: "
-                    "using global hooks dir (--hooks-dir does not persist on restart)"
-                ),
-            )
-        else:
-            raise ShieldNeedsSetup(
-                f"Podman {'.'.join(str(v) for v in info.version)} detected.\n\n"
-                + global_hooks_hint()
-            )
+        self._audit.log_event(container, "setup", detail="using setup-installed global hooks")
 
         args += [
             "--cap-drop",
@@ -953,7 +933,7 @@ class HookMode:
         """
         pid = self._runner.podman_inspect(container, "{{.State.Pid}}")
         output = self._runner.run(
-            ["podman", "unshare", "cat", f"/proc/{pid}/root/etc/resolv.conf"],
+            ["podman", "unshare", require_host_tool("cat"), f"/proc/{pid}/root/etc/resolv.conf"],
             check=False,
         )
         dns = parse_resolv_conf(output)

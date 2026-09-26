@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TypedDict, Unpack
 
 import pytest
+import terok_util.host_tools as _host_tools
 
 from terok_shield.config import ShieldConfig, ShieldMode, ShieldRuntime
 from terok_shield.resources import _oci_state as _oci_state_pkg
@@ -22,6 +23,7 @@ from terok_shield.resources import _oci_state as _oci_state_pkg
 # them in ``sys.modules`` so the role scripts' bare ``import
 # _oci_state`` reuses the module the test already has a handle on.
 sys.modules.setdefault("_oci_state", _oci_state_pkg)
+sys.modules.setdefault("_host_tools", _host_tools)
 
 from ..testfs import CONFIG_FILENAME, CONFIG_ROOT_NAME, STATE_ROOT_NAME
 

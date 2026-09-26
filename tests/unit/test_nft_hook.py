@@ -26,6 +26,18 @@ from ..testfs import DNSMASQ_SBIN
 from ..testnet import KRUN_DNSMASQ_BIND
 
 
+@pytest.fixture(autouse=True)
+def _available_host_tools(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mock subprocess tests still resolve real, isolated executable files."""
+    binaries = tmp_path / "host-bin"
+    binaries.mkdir()
+    for name in ("podman", "nsenter", "nft", "dnsmasq", "ip"):
+        tool = binaries / name
+        tool.touch()
+        tool.chmod(0o755)
+    monkeypatch.setenv("PATH", str(binaries))
+
+
 def _oci_json(
     pid: int = 42,
     state_dir: str = "/tmp/sd",
@@ -76,7 +88,8 @@ def test_bootstrap_env_sets_missing_var(
         mock.patch("terok_shield.resources._oci_state.pwd.getpwuid", return_value=fake_entry),
         mock.patch("terok_shield.resources._oci_state.outer_host_uid", return_value=1000),
     ):
-        _oci_state.bootstrap_env()
+        with mock.patch.object(_oci_state, "_SETUP_PATH", "/usr/bin"):
+            _oci_state.bootstrap_env()
         if expected_key == "PATH":
             assert expected_value in os.environ[expected_key]
         else:
@@ -101,21 +114,12 @@ def test_bootstrap_env_preserves_inherited_home_and_xdg() -> None:
         assert os.environ["XDG_RUNTIME_DIR"] == "/custom/xdg"
 
 
-def test_bootstrap_env_overrides_inherited_path() -> None:
-    """An attacker-controlled ``PATH`` is replaced with the trusted constant.
-
-    The OCI runtime may pass through whatever ``$PATH`` the operator
-    environment held; if that value puts an attacker-writable directory
-    ahead of the system locations, ``shutil.which("nft")`` would
-    resolve to a planted binary the hook then runs with
-    ``CAP_NET_ADMIN``.  ``bootstrap_env`` clamps the search path to the
-    trusted system directories and refuses to honour the inherited one.
-    """
-    poisoned = "/tmp/attacker:/usr/bin"
-    with mock.patch.dict("os.environ", {"HOME": "/h", "PATH": poisoned}, clear=True):
+@pytest.mark.parametrize("inherited", ["", "/custom/bin:/usr/bin"])
+def test_bootstrap_env_preserves_inherited_path(inherited: str) -> None:
+    """An inherited search environment always wins, including deliberately empty PATH."""
+    with mock.patch.dict("os.environ", {"PATH": inherited}, clear=True):
         _oci_state.bootstrap_env()
-        assert os.environ["PATH"] == _oci_state._TRUSTED_PATH
-        assert "/tmp/attacker" not in os.environ["PATH"]
+        assert os.environ["PATH"] == inherited
 
 
 @pytest.mark.parametrize(
@@ -152,27 +156,31 @@ def test_bootstrap_env_falls_back_when_getpwuid_raises() -> None:
 # ── _find_* helpers ──────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize(
-    ("finder", "which_result", "expected"),
-    [
-        pytest.param(_oci_state.find_nsenter, "/bin/nsenter", "/bin/nsenter", id="nsenter-which"),
-        pytest.param(_oci_state.find_nsenter, None, "/usr/bin/nsenter", id="nsenter-fallback"),
-        pytest.param(_oci_state.find_nft, "/usr/bin/nft", "/usr/bin/nft", id="nft-which"),
-        pytest.param(_oci_state.find_nft, None, "/usr/sbin/nft", id="nft-fallback"),
-    ],
-)
-def test_find_binary_uses_which_or_falls_back(
-    finder: object, which_result: str | None, expected: str
+@pytest.mark.parametrize("name", ["nsenter", "nft", "podman", "ip"])
+def test_find_binary_current_path(
+    name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Each _find_*() helper returns the which result when found, or a hard-coded fallback."""
-    with mock.patch("terok_shield.resources._oci_state.shutil.which", return_value=which_result):
-        assert finder() == expected  # type: ignore[operator]
+    """Standalone lookup follows PATH and fails instead of guessing FHS paths."""
+    binary = tmp_path / name
+    binary.touch()
+    binary.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    assert _oci_state.find_binary(name) == str(binary)
+    monkeypatch.setenv("PATH", "")
+    with pytest.raises(FileNotFoundError):
+        _oci_state.find_binary(name)
 
 
-def test_find_dnsmasq_reads_the_recorded_binary(tmp_path: Path) -> None:
-    """The hook launches the binary pre_start recorded, not whatever its own PATH holds."""
-    (tmp_path / _oci_state.DNSMASQ_BIN_FILE_NAME).write_text(f"{DNSMASQ_SBIN}\n")
-    assert _oci_state.find_dnsmasq(tmp_path) == DNSMASQ_SBIN
+def test_find_dnsmasq_resolves_symbolic_choice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The launch choice is resolved now, independently of the last live executable."""
+    (tmp_path / _oci_state.DNSMASQ_COMMAND_FILE_NAME).write_text("dnsmasq\n")
+    binary = tmp_path / "dnsmasq"
+    binary.touch()
+    binary.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    assert _oci_state.find_dnsmasq(tmp_path) == str(binary)
 
 
 # ── _nsenter ─────────────────────────────────────────────────────────────────
@@ -384,7 +392,7 @@ def test_createruntime_starts_dnsmasq_when_conf_present(tmp_path: Path) -> None:
     (sd / "ruleset.nft").write_text("table inet terok_shield {}")
     dnsmasq_conf = sd / "dnsmasq.conf"
     dnsmasq_conf.write_text("[dnsmasq config]")
-    (sd / "dnsmasq.bin").write_text(f"{DNSMASQ_SBIN}\n")
+    (sd / "dnsmasq.command").write_text("dnsmasq\n")
 
     def _fake_nsenter(*args: object, **kwargs: object) -> None:
         # Simulate dnsmasq writing its PID file on launch.
@@ -411,7 +419,7 @@ def test_createruntime_raises_when_dnsmasq_pid_file_not_written(tmp_path: Path) 
     sd.mkdir()
     (sd / "ruleset.nft").write_text("table inet terok_shield {}")
     (sd / "dnsmasq.conf").write_text("[dnsmasq config]")
-    (sd / "dnsmasq.bin").write_text(f"{DNSMASQ_SBIN}\n")
+    (sd / "dnsmasq.command").write_text("dnsmasq\n")
 
     with mock.patch("terok_shield.resources._oci_state.nsenter"):
         with pytest.raises(RuntimeError, match="PID file not written"):
@@ -424,7 +432,7 @@ def test_createruntime_raises_when_dnsmasq_identity_check_fails(tmp_path: Path) 
     sd.mkdir()
     (sd / "ruleset.nft").write_text("table inet terok_shield {}")
     (sd / "dnsmasq.conf").write_text("[dnsmasq config]")
-    (sd / "dnsmasq.bin").write_text(f"{DNSMASQ_SBIN}\n")
+    (sd / "dnsmasq.command").write_text("dnsmasq\n")
 
     def _fake_nsenter(*args: object, **kwargs: object) -> None:
         if any("conf-file" in str(a) for a in args):
@@ -449,7 +457,7 @@ def test_createruntime_is_idempotent_when_dnsmasq_already_alive(tmp_path: Path) 
     sd.mkdir()
     (sd / "ruleset.nft").write_text("table inet terok_shield {}")
     (sd / "dnsmasq.conf").write_text("[dnsmasq config]")
-    (sd / "dnsmasq.bin").write_text(f"{DNSMASQ_SBIN}\n")
+    (sd / "dnsmasq.command").write_text("dnsmasq\n")
     pid_file = sd / "dnsmasq.pid"
     pid_file.write_text("4242\n")  # prior run left a live process
 
@@ -1031,7 +1039,7 @@ def test_createruntime_skips_ip_add_for_loopback_bind(tmp_path: Path) -> None:
     sd.mkdir()
     (sd / "ruleset.nft").write_text("table inet terok_shield {}")
     (sd / "dnsmasq.conf").write_text("listen-address=127.0.0.1\nport=53\nbind-interfaces\n")
-    (sd / "dnsmasq.bin").write_text(f"{DNSMASQ_SBIN}\n")
+    (sd / "dnsmasq.command").write_text("dnsmasq\n")
 
     def _fake_nsenter(*args: object, **kwargs: object) -> None:
         if any("conf-file" in str(a) for a in args):
@@ -1064,7 +1072,7 @@ def test_createruntime_adds_link_local_for_krun_bind(tmp_path: Path) -> None:
     (sd / "dnsmasq.conf").write_text(
         f"listen-address={KRUN_DNSMASQ_BIND}\nport=53\nbind-interfaces\n"
     )
-    (sd / "dnsmasq.bin").write_text(f"{DNSMASQ_SBIN}\n")
+    (sd / "dnsmasq.command").write_text("dnsmasq\n")
 
     def _fake_nsenter(*args: object, **kwargs: object) -> None:
         # Only the dnsmasq launch writes the PID file.

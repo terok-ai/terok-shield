@@ -5,23 +5,13 @@
 
 Parses ``podman info -f json`` into a structured
 [`PodmanInfo`][terok_shield.podman_info.info.PodmanInfo] dataclass, with
-just enough metadata for shield to choose a network mode and decide
-whether per-container ``--hooks-dir`` will survive a restart.
+just enough metadata for shield to choose a network mode.
 
 This module is stateless — callers cache the result.
 """
 
 import json
 from dataclasses import dataclass
-
-# Minimum podman version where --hooks-dir persists on restart.
-# WORKAROUND(hooks-dir-persist): podman drops per-container --hooks-dir
-# on stop/start even on 5.8.0 (containers/podman#17935, #121, #122).
-# Originally gated at (5, 6, 0), set to (99, 0, 0) to effectively
-# disable per-container hooks until podman reliably persists them.
-# When lowered, per-container hooks become the default and global
-# hook installation is no longer required.
-HOOKS_DIR_PERSIST_VERSION = (99, 0, 0)
 
 
 @dataclass(frozen=True)
@@ -36,16 +26,6 @@ class PodmanInfo:
     rootless_network_cmd: str
     pasta_executable: str
     slirp4netns_executable: str
-
-    @property
-    def hooks_dir_persists(self) -> bool:
-        """Return True if ``--hooks-dir`` survives container restart.
-
-        Currently always False — podman drops per-container hooks-dir
-        on stop/start even on 5.8.0 (issues #121, #122).  The version
-        gate will be lowered when podman fixes this upstream.
-        """
-        return self.version >= HOOKS_DIR_PERSIST_VERSION
 
     @property
     def network_mode(self) -> str:

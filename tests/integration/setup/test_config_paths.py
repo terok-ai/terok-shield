@@ -44,7 +44,7 @@ class TestPathResolution:
         StateBundle(sd).ensure_dirs()
 
         assert sd.is_dir()
-        assert StateBundle(sd).hooks_dir.is_dir()
+        assert not (sd / "hooks").exists()
 
 
 from terok_shield.state import StateBundle

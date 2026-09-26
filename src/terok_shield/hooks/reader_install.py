@@ -5,13 +5,15 @@
 
 Copies ``terok_shield/resources/nflog_reader.py`` out of the installed
 package to the canonical on-disk location, where the OCI bridge hook
-can execute it with ``/usr/bin/python3``.  The destination survives
+can execute it with the installation-bound Python.  The destination survives
 terok-shield reinstalls (the OCI hook references it by absolute path
 regardless of the package's virtual-environment location).
 """
 
 from importlib import resources as importlib_resources
 from pathlib import Path
+
+from terok_util import host_tools_source
 
 from ..paths import reader_script_path
 
@@ -42,5 +44,6 @@ def install_reader_resource(dest: Path | None = None) -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
     source = importlib_resources.files(_READER_PACKAGE).joinpath(_READER_RESOURCE)
     dest.write_bytes(source.read_bytes())
+    (dest.parent / "_host_tools.py").write_text(host_tools_source())
     dest.chmod(0o755)
     return dest

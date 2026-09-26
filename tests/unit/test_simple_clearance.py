@@ -23,6 +23,13 @@ _CONTAINER = "c1"
 # ── Hub-liveness guard ────────────────────────────────────────────────
 
 
+@pytest.fixture
+def _dbus_send_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mocked D-Bus subprocess tests do not need the host client installed."""
+    monkeypatch.setattr(simple_clearance, "require_host_tool", lambda name: name)
+
+
+@pytest.mark.usefixtures("_dbus_send_available")
 class TestDbusHubActive:
     """The guard must reliably detect whether the hub already owns the name."""
 
@@ -279,7 +286,12 @@ class TestSpawnReader:
             result = session._spawn_reader()
         assert result is fake_proc
         argv = popen.call_args[0][0]
-        assert argv[-4:] == [str(simple_clearance._READER_SCRIPT), "/sd", "cname", "--emit=json"]
+        assert argv[-4:] == [
+            str(simple_clearance.reader_script_path()),
+            "/sd",
+            "cname",
+            "--emit=json",
+        ]
 
 
 class TestShutdownReader:

@@ -29,10 +29,11 @@ from __future__ import annotations
 
 import json
 import logging
-import shutil
 import subprocess  # nosec B404 — podman is a trusted host binary
 from dataclasses import dataclass
 from pathlib import Path
+
+from terok_util import find_host_tool
 
 from .config import ANNOTATION_STATE_DIR_KEY, ANNOTATION_VERSION_KEY
 
@@ -50,7 +51,7 @@ def _inspect_records(container: str) -> object | None:
     (``--all``, ``--latest``, …) — the public contract accepts identifiers from
     external callers that may not have validated them.
     """
-    podman = shutil.which("podman")
+    podman = find_host_tool("podman")
     if not podman:
         _log.warning("podman not on PATH — cannot inspect %s", container)
         return None

@@ -93,10 +93,6 @@ across state files are reliable regardless of input notation (e.g.
 
 ```text
 {state_dir}/
-├── hooks/
-│   ├── terok-shield-createRuntime.json
-│   └── terok-shield-poststop.json
-├── terok-shield-hook              # entrypoint script (stdlib-only)
 ├── policy/                        # v15 tiered +/- policy, one file per tier set
 │   ├── 10-override                #   → nft set t10_override      (break-glass allow, above the deny)
 │   ├── 20-security-deny           #   → nft set t20_security_deny (vault hosts + operator deny)
@@ -117,17 +113,13 @@ across state files are reliable regardless of input notation (e.g.
 └── audit.jsonl                    # per-container audit log
 ```
 
-`pre_start()` always writes the `hooks/` descriptors and the
-`terok-shield-hook` entrypoint into the bundle, but podman only uses them
-when per-container `--hooks-dir` persists across restarts. It does not
-today — podman drops a per-container `--hooks-dir` across stop/start
-([containers/podman#17935](https://github.com/containers/podman/issues/17935)) —
-so shield instead installs the hooks once into a **global** directory
-(`<state_root>/shield/hooks`, e.g. `~/.local/share/terok/shield/hooks`) and
-registers that directory in podman's `containers.conf` (`hooks_dir` under
-`[engine]`; `~/.config/containers/containers.conf` for rootless). `terok-shield
-setup` installs the global hooks and patches `containers.conf`; the rest of the
-bundle above stays per-container regardless.
+`terok-shield setup` installs global hooks under `<state_root>/shield/hooks`
+and registers them in `containers.conf`. Task preparation writes only its state
+bundle, so bare Podman starts and restarts retain protection.
+
+Hooks use setup's isolated Python and require no installed terok packages. Host
+tools follow the current PATH; runtimes that omit PATH use a setup-captured search
+path. Setup receipts detect package/interpreter changes and missing artifacts.
 
 ### Data flow diagrams
 

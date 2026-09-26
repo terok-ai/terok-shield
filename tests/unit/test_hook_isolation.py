@@ -16,7 +16,10 @@ allowed-set line by line.
 """
 
 import ast
+import sys
 from pathlib import Path
+
+from terok_util import host_tools_source
 
 _RESOURCES = Path(__file__).parents[2] / "src" / "terok_shield" / "resources"
 
@@ -52,7 +55,7 @@ def _check_imports(source: str, *, allow_ballast: bool, file_label: str) -> None
         if isinstance(node, ast.Import):
             for alias in node.names:
                 top = alias.name.split(".")[0]
-                if allow_ballast and top == _BALLAST_NAME:
+                if top == "_host_tools" or (allow_ballast and top == _BALLAST_NAME):
                     continue
                 assert top in _STDLIB, f"{file_label} imports non-stdlib module: {alias.name}"
         elif isinstance(node, ast.ImportFrom):
@@ -63,7 +66,7 @@ def _check_imports(source: str, *, allow_ballast: bool, file_label: str) -> None
                 )
             if node.module:
                 top = node.module.split(".")[0]
-                if allow_ballast and top == _BALLAST_NAME:
+                if top == "_host_tools" or (allow_ballast and top == _BALLAST_NAME):
                     continue
                 assert top in _STDLIB, f"{file_label} imports non-stdlib module: {node.module}"
 
@@ -97,3 +100,12 @@ class TestReaderHookImportIsolation:
         """Verify ``reader_hook.py`` imports only stdlib + the ballast sibling."""
         source = (_RESOURCES / "reader_hook.py").read_text()
         _check_imports(source, allow_ballast=True, file_label="reader_hook.py")
+
+
+def test_copied_host_helper_uses_only_stdlib() -> None:
+    """The shared source copied into hooks may not import its installed package."""
+    for node in ast.walk(ast.parse(host_tools_source())):
+        if isinstance(node, ast.Import):
+            assert all(alias.name.split(".")[0] in sys.stdlib_module_names for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            assert node.level == 0 and node.module.split(".")[0] in sys.stdlib_module_names

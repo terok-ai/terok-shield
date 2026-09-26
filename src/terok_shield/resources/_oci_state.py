@@ -11,8 +11,8 @@ is what the isolation test checks against), and from there ``from
 _oci_state import …`` resolves to this file.
 
 Stdlib-only by design (audited by ``test_hook_entrypoint_isolation``):
-the OCI runtime executes us with ``/usr/bin/python3`` outside any
-virtualenv, so a dependency on ``terok_shield`` would fail to import.
+the OCI runtime executes setup's interpreter in isolated mode; no installed
+terok packages are imported.
 
 Keep in sync with the package-side definitions:
 
@@ -27,7 +27,6 @@ from __future__ import annotations
 import json
 import os
 import pwd
-import shutil
 import stat
 import subprocess  # nosec B404
 import sys
@@ -41,7 +40,7 @@ ANN_STATE_DIR = "terok.shield.state_dir"
 ANN_VERSION = "terok.shield.version"
 """OCI annotation carrying the bundle version this container was prepared with."""
 
-BUNDLE_VERSION = 17
+BUNDLE_VERSION = 18
 """Wire-protocol version for the hook ↔ pre_start state-bundle contract.
 
 Bumped whenever the on-disk file layout, the hook → reader argv
@@ -49,6 +48,9 @@ shape, or the wire payload changes incompatibly.  The nft hook hard-
 fails on a version mismatch — deliberately no compatibility window and
 no migration: the remedy is re-creating the task container (or
 ``terok setup`` when the installed hooks are older than the package).
+
+v18: ``dnsmasq.command`` holds the symbolic launch choice or explicit operator
+override. ``dnsmasq.bin`` identifies only the current process for cleanup.
 
 v17: ``pre_start`` records the dnsmasq binary it located as
 ``state_dir/dnsmasq.bin``.  The hook launches that binary and matches
@@ -83,7 +85,10 @@ DNSMASQ_PID_FILE_NAME = "dnsmasq.pid"
 """PID of the per-container dnsmasq, written by dnsmasq itself."""
 
 DNSMASQ_BIN_FILE_NAME = "dnsmasq.bin"
-"""Absolute path of the dnsmasq binary ``pre_start`` located for this container."""
+"""Actual executable of the live dnsmasq, used only for process identity."""
+
+DNSMASQ_COMMAND_FILE_NAME = "dnsmasq.command"
+"""Symbolic dnsmasq name, or an explicit operator-provided binary override."""
 
 META_PATH_FILE_NAME = "meta_path"
 """Per-container pointer to the orchestrator's wire-dossier JSON.
@@ -299,14 +304,9 @@ def resolve_dossier_from_meta(meta_path: str | Path) -> dict[str, str]:
 
 # ── Environment bootstrap ─────────────────────────────────
 
-#: Trusted ``$PATH`` for hook subprocess execution.  Set unconditionally
-#: in ``bootstrap_env()`` so an attacker who can influence the OCI
-#: runtime's environment cannot point ``shutil.which`` at a planted
-#: binary.  Order mirrors the typical sysadmin precedence (system
-#: locations before user locations, sbin before bin) without including
-#: any of the user-writable directories that ``$PATH``-injection
-#: attacks rely on.
-_TRUSTED_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+# Older OCI runtimes discard PATH. Setup captures only the search environment,
+# never resolved host binaries; an inherited PATH (including empty) always wins.
+_SETUP_PATH = "__SETUP_PATH__"
 
 #: Environment variables that influence the dynamic linker or Python
 #: import resolution and that an attacker could use to hijack
@@ -333,10 +333,8 @@ def bootstrap_env() -> None:
     ``outer_host_uid()`` parses ``/proc/self/uid_map`` to recover the
     host UID and we use that throughout.
 
-    Hardened against ``$PATH`` / ``LD_PRELOAD`` injection: we
-    unconditionally pin ``$PATH`` to a trusted constant and wipe the
-    dynamic-linker variables that would let a poisoned environment
-    hijack the binaries we ``shutil.which()`` and exec below.
+    Preserve the launching operator's PATH. Only runtimes that omit it use
+    the installation-time search path; tools are resolved afresh each launch.
     """
     uid = outer_host_uid()
 
@@ -350,12 +348,7 @@ def bootstrap_env() -> None:
     if not os.environ.get("XDG_RUNTIME_DIR"):
         os.environ["XDG_RUNTIME_DIR"] = f"/run/user/{uid}"
 
-    # Trusted ``$PATH`` is set unconditionally — an inherited PATH that
-    # prepends an attacker-controlled directory would otherwise let
-    # ``shutil.which`` resolve ``nsenter`` / ``podman`` / ``nft`` /
-    # ``dnsmasq`` to a planted binary, and the hook executes those with
-    # CAP_NET_ADMIN inside the container netns.
-    os.environ["PATH"] = _TRUSTED_PATH
+    os.environ.setdefault("PATH", _SETUP_PATH)
 
     # Wipe dynamic-linker / Python-import injection vectors before any
     # subprocess call.  These would otherwise propagate via ``os.environ``
@@ -458,28 +451,31 @@ def pid_exists(pid: int) -> bool:
 # ── Binary finders ───────────────────────────────────────
 
 
+def find_binary(name: str) -> str:
+    """Resolve a host tool through the stdlib-only helper copied by setup."""
+    from _host_tools import require_host_tool
+
+    return require_host_tool(name)
+
+
 def find_podman() -> str:
-    """Path to the podman binary, falling back to ``/usr/bin/podman``."""
-    return shutil.which("podman") or "/usr/bin/podman"
+    """Resolve Podman using the current host search path."""
+    return find_binary("podman")
 
 
 def find_nsenter() -> str:
-    """Path to the nsenter binary, falling back to ``/usr/bin/nsenter``."""
-    return shutil.which("nsenter") or "/usr/bin/nsenter"
+    """Resolve nsenter using the current host search path."""
+    return find_binary("nsenter")
 
 
 def find_nft() -> str:
-    """Path to the nft binary, falling back to ``/usr/sbin/nft``."""
-    return shutil.which("nft") or "/usr/sbin/nft"
+    """Resolve nft using the current host search path."""
+    return find_binary("nft")
 
 
 def find_dnsmasq(state_dir: Path) -> str:
-    """The dnsmasq binary ``pre_start`` recorded for this container.
-
-    Raises:
-        OSError: When the bundle carries no recorded binary.
-    """
-    return (state_dir / DNSMASQ_BIN_FILE_NAME).read_text().strip()
+    """Resolve the launch choice, not the previous process's executable path."""
+    return find_binary((state_dir / DNSMASQ_COMMAND_FILE_NAME).read_text().strip())
 
 
 def is_our_dnsmasq(pid_int: int, state_dir: Path) -> bool:
@@ -498,19 +494,14 @@ def is_our_dnsmasq(pid_int: int, state_dir: Path) -> bool:
     if f"--conf-file={state_dir / DNSMASQ_CONF_FILE_NAME}".encode() not in argv:
         return False
     try:
-        return argv[0] == find_dnsmasq(state_dir).encode()
+        return argv[0] == (state_dir / DNSMASQ_BIN_FILE_NAME).read_text().strip().encode()
     except OSError:
         return argv[0].rsplit(b"/", 1)[-1] == b"dnsmasq"
 
 
 def find_ip_bin() -> str:
-    """Path to the ``ip`` binary, falling back to ``/sbin/ip``.
-
-    ``ip`` is the new krun-path dependency: when dnsmasq binds to a
-    non-loopback address, the hook runs ``ip addr add`` inside the
-    container netns so ``bind-interfaces`` finds the address on ``lo``.
-    """
-    return shutil.which("ip") or "/sbin/ip"
+    """Resolve ip using the current host search path."""
+    return find_binary("ip")
 
 
 # ── DNS / netns helpers ──────────────────────────────────

@@ -38,10 +38,6 @@ Each container gets an isolated state bundle under `containers/`:
 ~/.local/state/terok/shield/
 └── containers/
     └── my-container/
-        ├── hooks/                  # only if per-container hooks are supported
-        │   ├── terok-shield-createRuntime.json
-        │   └── terok-shield-poststop.json
-        ├── terok-shield-hook       # OCI hook entrypoint (stdlib-only Python), per-container hooks only
         ├── policy/                 # v15 tiered +/- policy, one file per tier set
         │   ├── 10-override         #   → nft set t10_override (break-glass allow)
         │   ├── 20-security-deny    #   → nft set t20_security_deny (vault hosts + operator deny)
@@ -52,28 +48,19 @@ Each container gets an isolated state bundle under `containers/`:
         ├── ruleset.nft             # Pre-generated nft ruleset (gateways baked in)
         ├── dnsmasq.conf            # Generated dnsmasq config (dnsmasq tiers)
         ├── dnsmasq.pid             # dnsmasq PID (dnsmasq tiers)
-        ├── dnsmasq.bin             # The dnsmasq binary the hook launches
+        ├── dnsmasq.bin             # Live dnsmasq identity (cleanup only)
         ├── resolv.conf             # Bind-mounted /etc/resolv.conf (every tier)
         ├── upstream.dns            # Persisted upstream DNS address
         ├── dns.tier                # Persisted active DNS tier
         └── audit.jsonl             # Per-container audit log
 ```
 
-> **Where the hooks live.** The `hooks/` descriptors and the
-> `terok-shield-hook` entrypoint are part of this per-container bundle only
-> when podman supports persistent per-container hooks. It does not today —
-> podman drops a per-container `--hooks-dir` across stop/start
-> ([containers/podman#17935](https://github.com/containers/podman/issues/17935)) —
-> so shield installs the hooks once into a **global** directory and registers
-> it in podman's `containers.conf` (`hooks_dir` under `[engine]`;
-> `~/.config/containers/containers.conf` for rootless). Run `terok-shield setup`
-> to install the global hooks and patch `containers.conf`. The `pre_start()`
-> rows below describe the per-container-hooks layout.
+> **Global hooks.** `terok-shield setup` installs hooks under
+> `<state_root>/shield/hooks` and registers them in `containers.conf`.
+> Task preparation never modifies them; bare Podman restarts remain protected.
 
 | File | Written by | Purpose |
 |------|-----------|---------|
-| `hooks/` | `pre_start()` | OCI hook descriptors (per-container hooks only) |
-| `terok-shield-hook` | `pre_start()` | Stdlib-only hook entrypoint script (per-container hooks only) |
 | `ruleset.nft` | `pre_start()` | Pre-generated nft ruleset applied by the hook (gateways baked in) |
 | `policy/10-override` | `pre_start()` | Break-glass allow tier (`t10_override`) |
 | `policy/20-security-deny` | `pre_start()` / `deny()` | Vault-host + operator deny tier (`t20_security_deny`) |
@@ -83,7 +70,7 @@ Each container gets an isolated state bundle under `containers/`:
 | `resolved.ips` | `pre_start()` / `resolve()` | Resolved allow IPs seeding `t40_project_allow` (every tier but `dnsmasq-live`) |
 | `dnsmasq.conf` | `pre_start()` | Generated dnsmasq configuration (dnsmasq tiers) |
 | `dnsmasq.pid` | OCI hook | dnsmasq PID for lifecycle management |
-| `dnsmasq.bin` | `pre_start()` | The dnsmasq binary the hook launches and matches |
+| `dnsmasq.bin` | `pre_start()` | Live dnsmasq identity (cleanup only) and matches |
 | `resolv.conf` | `pre_start()` | Points container DNS at dnsmasq, or at the upstream forwarder on the tiers without it |
 | `upstream.dns` | `pre_start()` | Persisted upstream DNS forwarder address |
 | `dns.tier` | `pre_start()` | Persisted tier (`dnsmasq-live`, `dnsmasq-static`, `lookup`, or `getent`) |

@@ -44,7 +44,7 @@ Podman container, with or without the rest of terok.
   when dnsmasq lacks nftset support or is unavailable, and says so
 - **Live allow/deny** at runtime for individual containers
 - **Per-container isolation** — each container gets its own state
-  bundle, hooks, and audit log
+  bundle and audit log
 - **Connection audit logging** (JSON-lines lifecycle logs +
   kernel-level per-packet nftables logs)
 - **Fail-closed** — hook failure prevents the container from
@@ -95,10 +95,11 @@ cdn.example.com
 ### 2. Start a container with the shield
 
 ```bash
+terok-shield setup
 terok-shield run my-container -- alpine:latest sh
 ```
 
-This resolves DNS, installs OCI hooks, and launches the container
+Setup installs global OCI hooks; run resolves DNS and launches the container
 with a default-deny firewall — only destinations in the
 `dev-standard` profile are reachable.  To use custom profiles:
 

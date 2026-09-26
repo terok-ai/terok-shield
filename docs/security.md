@@ -128,7 +128,8 @@ automatically routed to the correct set. Rejects are cross-family:
 
 ## Fail-closed guarantees
 
-After [`pre_start()`](guide/getting_started.md#quick-start) installs hooks, this
+With setup-installed global hooks and a bundle prepared by
+[`pre_start()`](guide/getting_started.md#quick-start), this
 invariant holds: **no path from "firewall setup failed" to "container running
 unrestricted."**
 

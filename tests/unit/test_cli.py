@@ -405,33 +405,33 @@ def test_run_execs_podman_with_shield_flags(
         assert item in podman_argv
 
 
-def test_find_podman_resolves_relative_path(
+def test_find_podman_preserves_absolute_path_symlink(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """_find_podman() resolves relative PATH hits to an absolute executable path."""
-    podman_path = tmp_path / BIN_DIR_NAME / "podman"
-    podman_path.parent.mkdir()
-    podman_path.write_text("#!/bin/sh\n")
-    podman_path.chmod(0o755)
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(
-        "terok_shield.cli.main.shutil.which", lambda _name: str(Path(BIN_DIR_NAME) / "podman")
-    )
-    assert _find_podman() == str(podman_path.resolve())
+    """CLI exec retains the exact executable spelling selected by the shared lookup."""
+    binaries = tmp_path / BIN_DIR_NAME
+    binaries.mkdir()
+    executable = binaries / "podman"
+    executable.touch()
+    executable.chmod(0o755)
+    profile = tmp_path / "profile"
+    profile.symlink_to(binaries, target_is_directory=True)
+    monkeypatch.setenv("PATH", str(profile))
+    assert _find_podman() == str(profile / "podman")
 
 
-def test_find_podman_rejects_non_executable_path(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+@pytest.mark.parametrize("relative", [False, True], ids=["not-executable", "relative-path"])
+def test_find_podman_rejects_unusable_search_sources(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, relative: bool
 ) -> None:
-    """_find_podman() rejects resolved paths that are not executable."""
-    podman_path = tmp_path / BIN_DIR_NAME / "podman"
-    podman_path.parent.mkdir()
-    podman_path.write_text("not executable\n")
-    podman_path.chmod(0o644)
+    """A non-executable file or relative PATH directory must not supply Podman."""
+    binaries = tmp_path / BIN_DIR_NAME
+    binaries.mkdir()
+    executable = binaries / "podman"
+    executable.touch()
+    executable.chmod(0o755 if relative else 0o644)
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(
-        "terok_shield.cli.main.shutil.which", lambda _name: str(Path(BIN_DIR_NAME) / "podman")
-    )
+    monkeypatch.setenv("PATH", BIN_DIR_NAME if relative else str(binaries))
     with pytest.raises(OSError, match="podman binary not found"):
         _find_podman()
 
@@ -439,7 +439,7 @@ def test_find_podman_rejects_non_executable_path(
 def test_run_reports_missing_podman(cli_dispatch: CliDispatchHarness) -> None:
     """run() exits with a clear error when podman cannot be found."""
     cli_dispatch.shield.pre_start.return_value = ["--annotation", "a=b"]
-    with mock.patch("terok_shield.cli.main.shutil.which", return_value=None):
+    with mock.patch("terok_shield.cli.main.find_host_tool", return_value=None):
         with pytest.raises(SystemExit) as ctx:
             main(["run", _CONTAINER, "--", _IMAGE])
     assert ctx.value.code == 1
@@ -1137,7 +1137,10 @@ def test_version_flag_prints_versions(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """--version prints terok-shield + podman + nft versions."""
-    with mock.patch("subprocess.run") as mock_run:
+    with (
+        mock.patch("subprocess.run") as mock_run,
+        mock.patch("terok_shield.cli.main.require_host_tool", return_value="podman"),
+    ):
         mock_run.return_value = mock.Mock(returncode=0, stdout="5.8.0\n")
         with pytest.raises(SystemExit, match="0"):
             main(["--version"])

@@ -1584,7 +1584,7 @@ test = [
 requires-dist = [
     { name = "pydantic", specifier = "~=2.13" },
     { name = "pyyaml", specifier = "~=6.0" },
-    { name = "terok-util", specifier = ">=0.3.1,<0.4.0" },
+    { name = "terok-util", git = "https://github.com/sliwowitz/terok-util?rev=fix%2Fnixos-path-setup" },
 ]
 
 [package.metadata.requires-dev]
@@ -1615,16 +1615,13 @@ test = [
 
 [[package]]
 name = "terok-util"
-version = "0.3.1"
-source = { registry = "https://pypi.org/simple" }
+version = "0.4.0.dev120+gda9293e52"
+source = { git = "https://github.com/sliwowitz/terok-util?rev=fix%2Fnixos-path-setup#da9293e528b687ac98219f2d396b38d3fb9b4808" }
 dependencies = [
     { name = "jinja2" },
+    { name = "packaging" },
     { name = "platformdirs" },
     { name = "ruamel-yaml" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/29/00/ed3fa723b046b04a3549b7e239a0d67382df830205cccdc66094da7a8473/terok_util-0.3.1.tar.gz", hash = "sha256:75e6eaffa9afc59ad6c23600283540ffd9dd116eda66734254e93e4e9b7f7f86", size = 253434, upload-time = "2026-09-11T08:44:15.269Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c1/56/ac8f7a76cd7abe4178ebcd236c325b92fb6f0401dcd7162211dc752fd039/terok_util-0.3.1-py3-none-any.whl", hash = "sha256:eeabc6359f33781c4aecdf86917a4f583bec5c3b8d2ed24fa17fa3a57b3c6847", size = 114249, upload-time = "2026-09-11T08:44:13.72Z" },
 ]
 
 [[package]]

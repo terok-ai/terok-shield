@@ -9,22 +9,15 @@ place that publishes the list of binaries it depends on.  Keeps the
 install-time preflight and the runtime failure sites honest about
 what the shield actually needs.
 
-Pure probes: every check is ``shutil.which`` or a sbin-aware variant.
+Pure probes: every check uses the shared host PATH resolver.
 No subprocess invocation, no side effects.
 """
 
 from __future__ import annotations
 
-import shutil
 from dataclasses import dataclass
 
-from .run import which_sbin_aware
-
-#: Directories searched after ``PATH`` when probing daemon binaries.
-#: rootless users regularly have neither on their login PATH; probing
-#: them anyway lets the aggregator report a usable host rather than
-#: fail on a shell-configuration quirk.
-_SBIN_DIRS: tuple[str, ...] = ("/usr/sbin", "/sbin")
+from terok_util import find_host_tool
 
 
 @dataclass(frozen=True)
@@ -42,7 +35,7 @@ class BinaryCheck:
 
     @property
     def ok(self) -> bool:
-        """True when the binary was located on PATH or a standard sbin directory."""
+        """True when the binary was located on the current host PATH."""
         return bool(self.path)
 
 
@@ -56,11 +49,11 @@ def check_firewall_binaries() -> tuple[BinaryCheck, ...]:
     or be ignored for their workflow.
     """
     return (
-        BinaryCheck("nft", which_sbin_aware("nft"), "nftables ruleset enforcement"),
-        BinaryCheck("dnsmasq", which_sbin_aware("dnsmasq"), "local DNS caching resolver"),
+        BinaryCheck("nft", find_host_tool("nft") or "", "nftables ruleset enforcement"),
+        BinaryCheck("dnsmasq", find_host_tool("dnsmasq") or "", "local DNS caching resolver"),
         BinaryCheck(
             "dig/drill",
-            shutil.which("dig") or shutil.which("drill") or "",
+            find_host_tool("dig") or find_host_tool("drill") or "",
             "DNS resolution for allowlist domains",
         ),
     )
@@ -78,7 +71,7 @@ def check_krun_binaries() -> tuple[BinaryCheck, ...]:
     return (
         BinaryCheck(
             "ip",
-            which_sbin_aware("ip"),
+            find_host_tool("ip") or "",
             "in-netns IP assignment for the krun runtime",
         ),
     )

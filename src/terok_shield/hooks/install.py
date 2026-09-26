@@ -18,8 +18,6 @@ Public entry points:
 
 - [`HooksInstaller`][terok_shield.hooks.install.HooksInstaller] — global
   installation lifecycle (install + uninstall).
-- [`install_hooks`][terok_shield.hooks.install.install_hooks] — per-container
-  install used by ``HookMode.pre_start``.
 
 Pure file I/O — no runtime container interaction.
 """
@@ -27,9 +25,25 @@ Pure file I/O — no runtime container interaction.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
+import sys
 from dataclasses import dataclass, field
+from importlib.metadata import version
 from pathlib import Path
+
+from terok_util import (
+    SetupCheck,
+    SetupReceipt,
+    SetupStatus,
+    find_host_tool,
+    host_path,
+    host_tools_source,
+    python_identity,
+    require_no_downgrade,
+    require_setup,
+)
 
 from ..config import ANNOTATION_KEY
 from ..podman_info._conf import _user_containers_conf
@@ -70,6 +84,7 @@ def _bridge_hook_json(stage: str) -> str:
 #: the role scripts + ballast and the JSON descriptors podman scans.
 _SCRIPT_FILES: tuple[str, ...] = (
     _BALLAST_NAME,
+    "_host_tools.py",
     _NFT_ENTRYPOINT_NAME,
     _READER_ENTRYPOINT_NAME,
 )
@@ -113,23 +128,86 @@ class HooksInstaller:
     target_dir: Path = field(default_factory=_default_target_dir)
     """Directory the hook scripts, ballast, and JSON descriptors all live in."""
 
+    def _receipt(self) -> SetupReceipt:
+        """Describe only Shield's own installed hook generation."""
+        from ..paths import reader_script_path
+
+        return SetupReceipt(
+            self.target_dir.parent / "setup.json",
+            "terok-shield",
+            version("terok-shield"),
+            {
+                "python": python_identity(),
+                "hooks": str(self.target_dir),
+                "reader": str(reader_script_path()),
+                "host_tools": hashlib.sha256(host_tools_source().encode()).hexdigest(),
+            },
+        )
+
+    def check_setup(self, *, live: bool = False) -> tuple[SetupCheck, ...]:
+        """Check Shield's receipt and hooks, optionally probing launch prerequisites."""
+        checks = [self._receipt().check(), *self._check_artifacts()]
+        if live:
+            checks.extend(self._check_tools())
+        return tuple(checks)
+
+    def _check_tools(self) -> tuple[SetupCheck, ...]:
+        """Probe required host tools without constructing a Shield runtime."""
+        return tuple(
+            SetupCheck(
+                "terok-shield",
+                name,
+                SetupStatus.READY if find_host_tool(name) else SetupStatus.MISSING,
+                f"Host tool {name!r} must be executable on PATH.",
+            )
+            for name in ("podman", "nft", "nsenter")
+        )
+
+    def _check_artifacts(self) -> tuple[SetupCheck, ...]:
+        """Validate the installed bootstrap and every required owned artifact."""
+        from ..paths import reader_script_path
+
+        try:
+            missing = [
+                name
+                for name in (*_SCRIPT_FILES, *_DESCRIPTOR_FILES)
+                if not (self.target_dir / name).is_file()
+            ]
+            for path in (reader_script_path(), reader_script_path().parent / "_host_tools.py"):
+                if not path.is_file():
+                    missing.append(str(path))
+            if missing:
+                raise ValueError(f"Missing hook files: {', '.join(missing)}")
+            if not os.access(sys.executable, os.X_OK):
+                raise ValueError("Hook Python interpreter is not executable")
+            for name, entrypoint in (
+                (_nft_hook_json, _NFT_ENTRYPOINT_NAME),
+                (_bridge_hook_json, _READER_ENTRYPOINT_NAME),
+            ):
+                for stage in _HOOK_STAGES:
+                    expected = json.loads(
+                        _generate_hook_json(str(self.target_dir / entrypoint), stage)
+                    )
+                    if json.loads((self.target_dir / name(stage)).read_text()) != expected:
+                        raise ValueError("Hook bootstrap binding changed; rerun setup")
+            if not user_hooks_dir_configured(self.target_dir):
+                raise ValueError("Hook directory is not registered in containers.conf")
+        except (OSError, ValueError) as exc:
+            return (SetupCheck("terok-shield", "hooks", SetupStatus.STALE, str(exc)),)
+        return (SetupCheck("terok-shield", "hooks", SetupStatus.READY),)
+
     def install(self) -> None:
-        """Write entrypoints, ballast, and descriptors to ``target_dir``.
-
-        Both hook pairs (nft + reader) and the shared ballast are
-        written unconditionally — the reader hook soft-fails on
-        missing clearance, so installing it on a shield-only host
-        costs nothing and removes a configuration knob.  The
-        standalone NFLOG reader resource is copied to its canonical
-        per-user path.
-
-        ``containers.conf`` is patched to list ``target_dir`` in
-        ``hooks_dir`` so podman discovers the descriptors.
-        """
+        """Install global standalone hooks after preflight; certify only verified work."""
+        require_no_downgrade(self.check_setup())
+        require_setup(self._check_tools())
+        receipt = self._receipt()
+        receipt.clear()
         install_reader_resource()
         self.target_dir.mkdir(parents=True, exist_ok=True)
-        _write_role_files(self.target_dir, self.target_dir)
+        _write_role_files(self.target_dir)
         ensure_user_hooks_dir_configured(self.target_dir)
+        require_setup(self._check_artifacts())
+        receipt.write()
 
     def uninstall(self) -> None:
         """Remove every hook file [`install`][terok_shield.hooks.install.HooksInstaller.install] would write.
@@ -138,105 +216,59 @@ class HooksInstaller:
         is left untouched: other terok packages may still register
         their own ``hooks_dir`` entries the operator wants to keep.
         """
+        self._receipt().clear()
         for name in (*_SCRIPT_FILES, *_DESCRIPTOR_FILES):
             (self.target_dir / name).unlink(missing_ok=True)
 
     def is_installed(self) -> bool:
         """True when ``target_dir`` carries the canonical createRuntime hook JSON.
 
-        A presence probe, not a version check — the
-        [`Shield.check_environment`][terok_shield.Shield.check_environment]
-        path compares the ballast's ``BUNDLE_VERSION`` separately.
+        Use ``check_setup`` for receipt, interpreter, and artifact validation.
         """
         return (self.target_dir / _nft_hook_json("createRuntime")).is_file()
-
-
-# ── Per-container install (used by HookMode.pre_start) ──
-
-
-def install_hooks(*, hook_entrypoint: Path, hooks_dir: Path) -> None:
-    """Write OCI hook entrypoints, ballast, and JSON descriptors.
-
-    Lays down both role scripts (nft + reader) plus the shared OCI
-    ballast in ``hooks_dir``.  ``hook_entrypoint`` names both the
-    target directory **and** the on-disk filename for the **nft**
-    script — callers that pin a non-default name (per-container
-    installs, future test scaffolding) get exactly the path they
-    asked for in the JSON descriptors.  The reader entrypoint and
-    ``_oci_state.py`` ballast land in the same parent directory under
-    their canonical names.
-
-    WORKAROUND(hooks-dir-persist): currently only used for global
-    hooks because podman does not persist per-container
-    ``--hooks-dir`` across stop/start.  The per-container code path is
-    kept for near-future use.
-
-    Args:
-        hook_entrypoint: Where to write the nft entrypoint script.
-            The reader entrypoint and ``_oci_state.py`` ballast land
-            in the same parent directory.
-        hooks_dir: Directory for hook JSON descriptors.
-    """
-    hook_entrypoint.parent.mkdir(parents=True, exist_ok=True)
-    hooks_dir.mkdir(parents=True, exist_ok=True)
-    _write_role_files(hook_entrypoint.parent, hooks_dir, nft_entrypoint_name=hook_entrypoint.name)
 
 
 # ── Installation mechanics ──────────────────────────────
 
 
-def _write_role_files(
-    script_dir: Path,
-    hooks_dir: Path,
-    *,
-    nft_entrypoint_name: str = _NFT_ENTRYPOINT_NAME,
-) -> None:
-    """Write nft + reader entrypoints, the shared ballast, and the four hook JSONs.
-
-    The two role scripts and the ``_oci_state.py`` ballast all land in
-    *script_dir*; each role script imports the ballast as a sibling at
-    runtime (Python's default ``sys.path[0]`` is the script's
-    directory).  Hook JSONs go into *hooks_dir* and reference the
-    script paths under *script_dir*.
-
-    Args:
-        script_dir: Where to write ``_oci_state.py``, the nft
-            entrypoint, and the reader entrypoint.
-        hooks_dir: Where to write the four ``terok-shield*.json`` files.
-        nft_entrypoint_name: On-disk filename for the nft entrypoint.
-            Defaults to the canonical ``terok-shield-hook``; callers
-            pinning a non-default path (``install_hooks``) thread
-            their own filename through so the JSON descriptors point
-            at the script the caller asked for.
-    """
+def _write_role_files(target_dir: Path) -> None:
+    """Copy standalone hook sources and bind descriptors to setup's interpreter."""
     from ..paths import reader_script_path
 
-    (script_dir / _BALLAST_NAME).write_text((_RESOURCES / _BALLAST_NAME).read_text())
-    (script_dir / nft_entrypoint_name).write_text((_RESOURCES / "nft_hook.py").read_text())
-    # The reader hook carries an absolute path to the NFLOG reader
-    # script as a baked constant; rewrite the placeholder so the hook
-    # always finds the reader exactly where ``reader_script_path()``
-    # resolved at this ``terok-shield setup`` call.
-    reader_hook_source = (_RESOURCES / "reader_hook.py").read_text()
-    reader_hook_rendered = reader_hook_source.replace(
-        '"__READER_SCRIPT_PATH__"', json.dumps(str(reader_script_path()))
+    ballast = (
+        (_RESOURCES / _BALLAST_NAME)
+        .read_text()
+        .replace('"__SETUP_PATH__"', json.dumps(host_path()))
     )
-    (script_dir / _READER_ENTRYPOINT_NAME).write_text(reader_hook_rendered)
-    (script_dir / nft_entrypoint_name).chmod(0o755)
-    (script_dir / _READER_ENTRYPOINT_NAME).chmod(0o755)
-
-    nft_path = str(script_dir / nft_entrypoint_name)
-    reader_path = str(script_dir / _READER_ENTRYPOINT_NAME)
-    for stage in _HOOK_STAGES:
-        (hooks_dir / _nft_hook_json(stage)).write_text(
-            _generate_hook_json(nft_path, stage, nft_entrypoint_name)
-        )
-        (hooks_dir / _bridge_hook_json(stage)).write_text(
-            _generate_hook_json(reader_path, stage, _READER_ENTRYPOINT_NAME)
-        )
+    (target_dir / _BALLAST_NAME).write_text(ballast)
+    (target_dir / "_host_tools.py").write_text(host_tools_source())
+    (target_dir / _NFT_ENTRYPOINT_NAME).write_text((_RESOURCES / "nft_hook.py").read_text())
+    reader = (
+        (_RESOURCES / "reader_hook.py")
+        .read_text()
+        .replace('"__READER_SCRIPT_PATH__"', json.dumps(str(reader_script_path())))
+    )
+    (target_dir / _READER_ENTRYPOINT_NAME).write_text(reader)
+    for entrypoint, descriptor in (
+        (_NFT_ENTRYPOINT_NAME, _nft_hook_json),
+        (_READER_ENTRYPOINT_NAME, _bridge_hook_json),
+    ):
+        (target_dir / entrypoint).chmod(0o755)
+        for stage in _HOOK_STAGES:
+            (target_dir / descriptor(stage)).write_text(
+                _generate_hook_json(str(target_dir / entrypoint), stage)
+            )
 
 
 # ── containers.conf registration ────────────────────────
+
+
+def user_hooks_dir_configured(hooks_dir: Path) -> bool:
+    """Whether the user's containers.conf registers this package-owned hook directory."""
+    return str(hooks_dir.expanduser()) in {
+        str(Path(entry).expanduser())
+        for entry in _parse_hooks_dir_from_conf(_user_containers_conf())
+    }
 
 
 def ensure_user_hooks_dir_configured(hooks_dir: Path | None = None) -> None:
@@ -333,22 +365,11 @@ def _append_to_hooks_dir(conf_path: Path, new_entry: str) -> None:
 # ── Generators ──────────────────────────────────────────
 
 
-def _generate_hook_json(entrypoint: str, stage: str, hook_name: str) -> str:
-    """Build an OCI hook JSON descriptor for a given lifecycle stage.
-
-    *hook_name* is cosmetic (the kernel's shebang loader discards the
-    exec-supplied ``argv[0]``) but is kept so ``ps`` still shows a
-    recognizable name.  Each role script self-dispatches by ``argv[1]``
-    (``createRuntime`` / ``poststop``); no shared dispatch flag.
-
-    Args:
-        entrypoint: Absolute path to the hook entrypoint script.
-        stage: OCI hook stage (``createRuntime`` or ``poststop``).
-        hook_name: Cosmetic program name placed at ``args[0]``.
-    """
+def _generate_hook_json(entrypoint: str, stage: str) -> str:
+    """Bind an OCI lifecycle stage to the installation's isolated Python."""
     hook = {
         "version": "1.0.0",
-        "hook": {"path": entrypoint, "args": [hook_name, stage]},
+        "hook": {"path": sys.executable, "args": [sys.executable, "-I", entrypoint, stage]},
         "when": {"annotations": {ANNOTATION_KEY: ".*"}},
         "stages": [stage],
     }

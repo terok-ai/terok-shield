@@ -18,13 +18,12 @@ import argparse
 import json
 import os
 import shlex
-import shutil
 import sys
 from collections.abc import Collection
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from terok_util import CommandDef, configure
+from terok_util import CommandDef, configure, find_host_tool, require_host_tool
 
 from .. import Shield, ShieldConfig, ShieldMode
 from ..commands import COMMANDS, needs_container
@@ -265,11 +264,9 @@ _FLAG_ALIASES: dict[str, str] = {
 
 def _find_podman() -> str:
     """Locate the podman binary for the ``run`` subcommand."""
-    found = shutil.which("podman")
+    found = find_host_tool("podman")
     if found:
-        resolved = Path(found).resolve()
-        if resolved.is_file() and os.access(resolved, os.X_OK):
-            return str(resolved)
+        return found
     raise OSError("podman binary not found. Install Podman to use 'terok-shield run'.")
 
 
@@ -344,7 +341,7 @@ def _collect_all_audit_entries(state_root: Path, n: int) -> list[dict]:
 
 
 def _cmd_setup() -> None:
-    """Install global OCI hooks for podman < 5.6.0 restart persistence."""
+    """Install the global OCI hooks that protect every Podman start."""
     from ..hooks.install import HooksInstaller
 
     installer = HooksInstaller()
@@ -517,7 +514,7 @@ def _version_string() -> str:
         import subprocess
 
         r = subprocess.run(  # noqa: S603, S607
-            ["podman", "version", "--format", "{{.Client.Version}}"],
+            [require_host_tool("podman"), "version", "--format", "{{.Client.Version}}"],
             capture_output=True,
             text=True,
             timeout=5,

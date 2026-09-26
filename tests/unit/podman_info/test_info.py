@@ -142,39 +142,6 @@ class TestNetworkMode:
         assert info.network_mode == "pasta"
 
 
-# ── PodmanInfo.hooks_dir_persists tests ──────────────────
-
-
-class TestHooksDirPersists:
-    """Tests for hooks-dir persistence version gate."""
-
-    def test_podman_493_not_persistent(self) -> None:
-        """podman 4.9.3 → hooks-dir does NOT persist."""
-        info = parse_podman_info(json.dumps(UBUNTU_2404_INFO))
-        assert not info.hooks_dir_persists
-
-    def test_podman_542_not_persistent(self) -> None:
-        """podman 5.4.2 → hooks-dir does NOT persist."""
-        info = parse_podman_info(json.dumps(DEBIAN_13_INFO))
-        assert not info.hooks_dir_persists
-
-    def test_podman_431_not_persistent(self) -> None:
-        """podman 4.3.1 -> hooks-dir does NOT persist."""
-        info = parse_podman_info(json.dumps(DEBIAN_12_INFO))
-        assert not info.hooks_dir_persists
-
-    def test_podman_560_not_persistent(self) -> None:
-        """podman 5.6.0 → hooks-dir does NOT persist (version gate raised, #122)."""
-        data = {"host": {}, "version": {"Version": "5.6.0"}}
-        info = parse_podman_info(json.dumps(data))
-        assert not info.hooks_dir_persists
-
-    def test_podman_580_not_persistent(self) -> None:
-        """podman 5.8.0 → hooks-dir does NOT persist (version gate raised, #122)."""
-        info = parse_podman_info(json.dumps(FEDORA_43_INFO))
-        assert not info.hooks_dir_persists
-
-
 # ── _parse_version edge cases ────────────────────────────
 
 

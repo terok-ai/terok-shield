@@ -1,4 +1,11 @@
 # Changelog
+
+## v0.9.0 (unreleased)
+
+- Own setup receipts and bind standalone global hooks to the setup interpreter.
+- Resolve host tools from each launch's PATH, including NixOS; retain Podman 4.8 support.
+- Remove per-task hook installation. Rerun setup and recreate old bundle containers.
+
 ## v0.8.0 — Past Prologue
 
 ## What's Changed

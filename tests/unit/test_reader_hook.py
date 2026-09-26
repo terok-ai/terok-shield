@@ -305,7 +305,7 @@ class TestSpawnReader:
             reader_hook._spawn_reader(tmp_path, _SHORT_ID, full_container_id=_CONTAINER_ID)
         assert (tmp_path / "reader.pid").read_text().strip() == "12345"
         cmd = popen.call_args[0][0]
-        assert cmd[:2] == ["/usr/bin/python3", str(reader)]
+        assert cmd[:3] == [sys.executable, "-I", str(reader)]
         assert str(tmp_path) in cmd
         assert _SHORT_ID in cmd
         assert "--emit=socket" in cmd
@@ -851,3 +851,24 @@ class TestReapReaderReapsTheWholeGroup:
                 with contextlib.suppress(ProcessLookupError, PermissionError):
                     os.killpg(head.pid, signal.SIGKILL)
             head.wait()
+
+
+@pytest.mark.parametrize("isolated", [False, True])
+def test_reader_identity_accepts_custom_interpreter(tmp_path: Path, isolated: bool) -> None:
+    """Exact script/state identity handles versioned or custom setup interpreters."""
+    reader = tmp_path / "reader.py"
+    argv = [str(tmp_path / "custom-python")]
+    if isolated:
+        argv += ["-I"]
+    argv += [str(reader), str(tmp_path), _CONTAINER_ID, "--emit=socket"]
+    with (
+        mock.patch.object(reader_hook, "_reader_script_path", return_value=reader),
+        mock.patch.object(Path, "read_bytes", return_value="\0".join(argv).encode()),
+    ):
+        assert reader_hook._is_our_reader(42, tmp_path)
+    argv[-1] = "--version"
+    with (
+        mock.patch.object(reader_hook, "_reader_script_path", return_value=reader),
+        mock.patch.object(Path, "read_bytes", return_value="\0".join(argv).encode()),
+    ):
+        assert not reader_hook._is_our_reader(42, tmp_path)

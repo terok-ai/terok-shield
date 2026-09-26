@@ -29,6 +29,7 @@ slots:
   void:
   mageia:
   manjaro:
+  nixos:
 
 phases:
   - name: installing shield hooks
