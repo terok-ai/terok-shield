@@ -583,3 +583,73 @@ def test_environment_uses_owner_checks(status, make_shield: ShieldHarnessFactory
         env = harness.shield.check_environment()
     assert env.needs_setup == (status != SetupStatus.READY)
     assert env.hooks == ("global" if status == SetupStatus.READY else "not-installed")
+
+
+# ── the timed allow-all window ───────────────────────────────────────────
+
+
+def test_bypass_arms_the_window_and_logs_the_duration(
+    make_shield: ShieldHarnessFactory,
+) -> None:
+    """bypass() delegates to the backend and records what was granted."""
+    harness = make_shield()
+    assert harness.shield.bypass("test-ctr", "30s") == "30s"
+    harness.mode.arm_window.assert_called_once_with("test-ctr", "30s")
+    harness.audit.log_event.assert_called_once_with(
+        "test-ctr", "bypass_armed", detail="duration=30s"
+    )
+
+
+def test_bypass_without_a_duration_takes_the_configured_one(
+    make_shield: ShieldHarnessFactory,
+    make_config: ConfigFactory,
+) -> None:
+    """A caller that names no duration gets ``ShieldConfig.bypass_duration``."""
+    harness = make_shield(make_config(bypass_duration="2h"))
+    assert harness.shield.bypass("test-ctr") == "2h"
+    harness.mode.arm_window.assert_called_once_with("test-ctr", "2h")
+
+
+def test_bypass_off_disarms_and_logs(make_shield: ShieldHarnessFactory) -> None:
+    """bypass_off() closes the window early and records it."""
+    harness = make_shield()
+    harness.shield.bypass_off("test-ctr")
+    harness.mode.disarm_window.assert_called_once_with("test-ctr")
+    harness.audit.log_event.assert_called_once_with("test-ctr", "bypass_disarmed")
+
+
+def test_bypass_remaining_delegates_to_the_backend(make_shield: ShieldHarnessFactory) -> None:
+    """bypass_remaining() reports the backend's reading, with no audit entry."""
+    harness = make_shield()
+    harness.mode.window_remaining.return_value = "4m12s"
+    assert harness.shield.bypass_remaining("test-ctr") == "4m12s"
+    harness.audit.log_event.assert_not_called()
+
+
+def test_harvest_reads_the_containers_audit_log(
+    make_shield: ShieldHarnessFactory, tmp_path: Path
+) -> None:
+    """``Shield.harvest()`` is a read over this container's own state dir."""
+    import json
+
+    from terok_shield.config import ShieldConfig
+
+    (tmp_path / "audit.jsonl").write_text(
+        json.dumps(
+            {
+                "ts": "2026-09-30T10:00:00+00:00",
+                "container": "test-ctr",
+                "action": "blocked",
+                "dest": TEST_IP1,
+                "port": 443,
+                "proto": "tcp",
+            }
+        )
+        + "\n"
+    )
+    harness = make_shield(ShieldConfig(state_dir=tmp_path))
+
+    (entry,) = harness.shield.harvest()
+
+    assert (entry.action, entry.target) == ("blocked", TEST_IP1)
+    harness.audit.log_event.assert_not_called()

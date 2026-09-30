@@ -54,6 +54,7 @@ from ..nft.constants import (
     NFT_TABLE_NAME,
     PASTA_DNS,
     PASTA_HOST_LOOPBACK_MAP,
+    SET_BYPASS_WINDOW,
     SLIRP4NETNS_DNS,
     SLIRP4NETNS_GATEWAY_V6,
     TIER_PROJECT_ALLOW,
@@ -62,8 +63,11 @@ from ..nft.rules import (
     RulesetBuilder,
     add_deny_elements_dual,
     add_override_elements_dual,
+    arm_bypass_window,
     delete_deny_elements_dual,
+    disarm_bypass_window,
     parse_set_elements,
+    parse_window_expiry,
     restore_elements,
     safe_ip,
 )
@@ -1001,6 +1005,36 @@ class HookMode:
         return dns
 
     # ── Queries ─────────────────────────────────────────
+
+    # ── Timed allow-all window ──────────────────────────
+
+    def arm_window(self, container: str, timeout: str) -> None:
+        """Open the timed allow-all window for *timeout*.
+
+        The element carries a kernel timeout, so the window closes itself even
+        if nothing ever calls [`disarm_window`][terok_shield.hooks.mode.HookMode.disarm_window]
+        — and any disruption (a rebuild, a restart, a crashed host process)
+        only closes it sooner.
+        """
+        self._runner.nft_via_nsenter(container, stdin=arm_bypass_window(timeout))
+
+    def disarm_window(self, container: str) -> None:
+        """Close the timed allow-all window now, before its timeout runs out."""
+        self._runner.nft_via_nsenter(container, stdin=disarm_bypass_window())
+
+    def window_remaining(self, container: str) -> str | None:
+        """Time left on the window, or ``None`` when none is open.
+
+        Read from the kernel's own countdown: the window keeps no host-side
+        deadline, so a stale answer is impossible by construction.
+        """
+        try:
+            output = self._runner.nft_via_nsenter(
+                container, "list", "set", "inet", NFT_TABLE_NAME, f"{SET_BYPASS_WINDOW}_v4"
+            )
+        except ExecError:
+            return None
+        return parse_window_expiry(output)
 
     def shield_state(self, container: str) -> ShieldState:
         """Query the live nft ruleset to determine the container's shield state."""

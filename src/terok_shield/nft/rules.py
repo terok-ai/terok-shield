@@ -62,6 +62,7 @@ _SAFE_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 # authored timeouts stay restricted to the single-unit _SAFE_TIMEOUT_RE.
 _ELEMENT_TIMEOUT_RE = re.compile(r"^(?:\d+[dhms])+$")
 _ELEMENTS_BLOCK_RE = re.compile(r"elements = \{(.*?)\}", re.DOTALL)
+_WINDOW_EXPIRES_RE = re.compile(r"expires\s+(\d+[smhd](?:\d+[smhd])*)")
 
 # Cross-family reject (auto-selects ICMP / ICMPv6 in an ``inet`` table).
 _REJECT = "reject with icmpx admin-prohibited"
@@ -525,6 +526,17 @@ def disarm_bypass_window() -> str:
         f"flush set {NFT_TABLE} {SET_BYPASS_WINDOW}_v4\n"
         f"flush set {NFT_TABLE} {SET_BYPASS_WINDOW}_v6\n"
     )
+
+
+def parse_window_expiry(nft_output: str) -> str | None:
+    """Time left on the timed allow-all window, from ``nft list set`` output.
+
+    Returns the element's printed ``expires`` countdown (``"3m42s"``), or
+    ``None`` when the set holds no element — the kernel clock is the window's
+    only record, so an empty set means closed rather than unknown.
+    """
+    match = _WINDOW_EXPIRES_RE.search(nft_output)
+    return match.group(1) if match else None
 
 
 def parse_set_elements(nft_output: str) -> list[tuple[str, str]]:

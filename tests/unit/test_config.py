@@ -117,6 +117,7 @@ class TestShieldFileConfigDefaults:
         assert cfg.mode == "auto"
         assert cfg.default_profiles == []
         assert cfg.audit.enabled is True
+        assert cfg.bypass_duration == "5m"
 
     def test_audit_defaults(self) -> None:
         """AuditFileConfig defaults to enabled."""
@@ -198,6 +199,27 @@ class TestShieldFileConfigAuditValidation:
         """audit.enabled must be a boolean."""
         with pytest.raises(ValidationError):
             ShieldFileConfig(audit={"enabled": "yes-please"})  # type: ignore[arg-type]
+
+
+class TestBypassDuration:
+    """The timed-window default is validated where it is written, not where it is used."""
+
+    @pytest.mark.parametrize("value", ["30s", "5m", "2h", "1d"])
+    def test_an_nft_timeout_is_accepted(self, value: str) -> None:
+        assert ShieldFileConfig(bypass_duration=value).bypass_duration == value
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            pytest.param("5 minutes", id="prose"),
+            pytest.param("5m; drop", id="injection"),
+            pytest.param("1h30m", id="compound-nft-rejects-too"),
+            pytest.param("", id="empty"),
+        ],
+    )
+    def test_anything_else_fails_at_load(self, value: str) -> None:
+        with pytest.raises(ValidationError, match="nft timeout"):
+            ShieldFileConfig(bypass_duration=value)
 
 
 class TestDnsTierDetection:

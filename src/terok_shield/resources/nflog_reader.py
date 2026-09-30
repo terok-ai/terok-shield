@@ -5,6 +5,11 @@
 
 """Stream blocked-connection events out of one container for the clearance flow.
 
+Refusals reach the operator as clearance requests and land in the audit log.
+Accepts through the timed allow-all window land in the audit log only: while
+that window is open nothing is refused, so there is no verdict to ask for, but
+what the window let through is exactly what an operator wants to read later.
+
 Subscribes to the kernel's NFLOG group inside a single container's network
 namespace, deduplicates by destination IP, and publishes each unique block as
 an event.  Events always travel as JSON; the reader itself never speaks
@@ -71,6 +76,10 @@ _SAFE_CONTAINER_ID = re.compile(r"^[0-9a-fA-F]{12,64}$")
 #                           interactive deny rule
 NFLOG_GROUP = 100
 _BLOCKED_PREFIX_TAG = "BLOCKED"
+#: Accepts through the timed allow-all window.  Recorded in the audit log so
+#: the window's traffic is reviewable afterwards, never prompted on: nothing
+#: was refused, so there is no verdict to ask for.
+_BYPASS_PREFIX_TAG = "BYPASS"
 
 
 # ── Wire-format sanitiser (producer side, container-out) ──────────────
@@ -491,7 +500,7 @@ class ReaderSession:
             for event in _drain(sock):
                 self._maybe_emit(event, now)
 
-    def _maybe_emit(self, event: _RawBlockEvent, now: float) -> None:
+    def _maybe_emit(self, event: _RawPacketEvent, now: float) -> None:
         """Filter noise, dedupe by domain-or-dest, emit if fresh.
 
         The wire dedup key (``_last_emit``) is only mutated once the
@@ -517,15 +526,18 @@ class ReaderSession:
         if _is_noise_dest(event.dest):
             return
         domain = self._resolve_domain(event.dest)
-        dedup_key = domain or event.dest
+        # Scoped by action: a window accept must not mute the audit line for a
+        # refusal to the same host thirty seconds later, or the other way round.
+        dedup_key = f"{event.action}:{domain or event.dest}"
+        wires = event.action == "blocked"
         last_emit = self._last_emit.get(dedup_key)
         last_audit = self._last_audit.get(dedup_key)
-        emit_fresh = last_emit is None or (now - last_emit) >= self._DEDUP_WINDOW_S
+        emit_fresh = wires and (last_emit is None or (now - last_emit) >= self._DEDUP_WINDOW_S)
         audit_fresh = last_audit is None or (now - last_audit) >= self._DEDUP_WINDOW_S
         if not emit_fresh and not audit_fresh:
             return
         dossier = self._resolve_dossier()
-        if audit_fresh and self._append_audit_block(event, domain, dossier):
+        if audit_fresh and self._append_audit_record(event, domain, dossier):
             self._last_audit[dedup_key] = now
         if emit_fresh:
             request_id = f"{self._container}:{self._next_id}"
@@ -543,7 +555,7 @@ class ReaderSession:
 
     def _emit_connection_blocked(
         self,
-        event: _RawBlockEvent,
+        event: _RawPacketEvent,
         domain: str,
         request_id: str,
         dossier: Dossier,
@@ -600,8 +612,8 @@ class ReaderSession:
                 dossier[str(key)] = str(value)
         return dossier
 
-    def _append_audit_block(self, event: _RawBlockEvent, domain: str, dossier: Dossier) -> bool:
-        """Write one ``"action": "blocked"`` entry to ``state_dir/audit.jsonl``.
+    def _append_audit_record(self, event: _RawPacketEvent, domain: str, dossier: Dossier) -> bool:
+        """Write one entry to ``state_dir/audit.jsonl``, tagged with the event's action.
 
         Inlined (rather than importing ``terok_shield.audit.AuditLogger``)
         because the reader script is shipped as a stdlib-only resource —
@@ -626,7 +638,7 @@ class ReaderSession:
         entry = {
             "ts": datetime.now(UTC).isoformat(timespec="seconds"),
             "container": _sanitize_str(self._container),
-            "action": "blocked",
+            "action": event.action,
             "dest": _sanitize_str(event.dest),
             "port": event.port,
             "proto": _PROTO_NAMES.get(event.proto, str(event.proto)),
@@ -839,12 +851,19 @@ class JsonEmitter:
 
 
 @dataclass(frozen=True)
-class _RawBlockEvent:
+class _RawPacketEvent:
     """Pre-enrichment fields pulled straight from one NFLOG packet."""
 
     dest: str
     port: int
     proto: int
+    action: str = "blocked"
+    """What the ruleset did with the packet, from its nflog prefix.
+
+    ``"blocked"`` for a refusal at the terminal rule, ``"bypass"`` for an
+    accept through the timed allow-all window.  Only a refusal is a question
+    for the operator, so only ``"blocked"`` reaches the clearance wire.
+    """
 
 
 def _open_nflog_socket(
@@ -876,9 +895,9 @@ def _open_nflog_socket(
         return None
 
 
-def _drain(sock: socket.socket) -> list[_RawBlockEvent]:  # pragma: no cover — real socket recv
+def _drain(sock: socket.socket) -> list[_RawPacketEvent]:  # pragma: no cover — real socket recv
     """Read every pending NFLOG message and extract its block events."""
-    events: list[_RawBlockEvent] = []
+    events: list[_RawPacketEvent] = []
     while True:
         try:
             data = sock.recv(65535)
@@ -890,9 +909,9 @@ def _drain(sock: socket.socket) -> list[_RawBlockEvent]:  # pragma: no cover —
     return events
 
 
-def _parse_messages(data: bytes) -> list[_RawBlockEvent]:
+def _parse_messages(data: bytes) -> list[_RawPacketEvent]:
     """Pull ``BLOCKED``-prefixed packet events out of a netlink message batch."""
-    events: list[_RawBlockEvent] = []
+    events: list[_RawPacketEvent] = []
     offset = 0
     while offset + _NLMSG_HDR.size <= len(data):
         nl_len, nl_type, _flags, _seq, _pid = _NLMSG_HDR.unpack_from(data, offset)
@@ -923,15 +942,19 @@ def _parse_attrs(data: bytes) -> dict[int, bytes]:
     return attrs
 
 
-def _attrs_to_event(attrs: dict[int, bytes]) -> _RawBlockEvent | None:
-    """Keep only ``BLOCKED``-prefixed packets; drop everything else."""
+def _attrs_to_event(attrs: dict[int, bytes]) -> _RawPacketEvent | None:
+    """Keep ``BLOCKED``- and ``BYPASS``-prefixed packets; drop everything else."""
     prefix = attrs.get(_NFULA_PREFIX, b"").rstrip(b"\x00").decode("ascii", errors="replace")
-    if _BLOCKED_PREFIX_TAG not in prefix:
+    if _BLOCKED_PREFIX_TAG in prefix:
+        action = "blocked"
+    elif _BYPASS_PREFIX_TAG in prefix:
+        action = "bypass"
+    else:
         return None
     dest, proto, port = _extract_ip_dest(attrs.get(_NFULA_PAYLOAD, b""))
     if not dest:
         return None
-    return _RawBlockEvent(dest=dest, port=port, proto=proto)
+    return _RawPacketEvent(dest=dest, port=port, proto=proto, action=action)
 
 
 def _extract_ip_dest(payload: bytes) -> tuple[str, int, int]:

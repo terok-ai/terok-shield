@@ -25,6 +25,9 @@ Each line is a JSON object:
 | `denied` | Domain/IP removed from allow set at runtime |
 | `shield_down` | Container switched to the DOWN posture |
 | `shield_up` | Container restored to deny-all mode |
+| `bypass_armed` | Timed allow-all window opened (`detail` carries the duration) |
+| `bypass_disarmed` | Timed allow-all window closed before its timeout |
+| `bypass` | Connection accepted through the open window (one per destination per 30 s) |
 | `note` | Advisory event (e.g. private-range address allowlisted — RFC 1918/RFC 4193) |
 | `error` | Something failed |
 

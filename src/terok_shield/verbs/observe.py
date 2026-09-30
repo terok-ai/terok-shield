@@ -13,11 +13,12 @@ dispatched by the CLI's own aggregated-mode handler
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
 from typing import TYPE_CHECKING
 
 from terok_util import ArgDef, CommandDef
 
-from ._common import NEEDS_CTR, format_version, print_env_hint
+from ._common import CONTAINER_ARG, NEEDS_CTR, format_version, print_env_hint
 
 if TYPE_CHECKING:
     from terok_shield import Shield
@@ -68,6 +69,22 @@ def _handle_logs(shield: Shield, container: str, *, n: int = 50) -> None:
         print(json.dumps(entry))
 
 
+def _handle_harvest(shield: Shield, container: str, *, output_json: bool = False) -> None:
+    """Show what this container reached for, refusals first."""
+    entries = shield.harvest()
+    if output_json:
+        print(json.dumps([asdict(entry) for entry in entries]))
+        return
+    if not entries:
+        print(f"Nothing harvested for {container} — no refusals, no window accepts")
+        return
+    for entry in entries:
+        ports = ",".join(str(port) for port in entry.ports) or "-"
+        print(
+            f"{entry.action:<8} {entry.target:<40} x{entry.count:<5} :{ports:<12} {entry.last_seen}"
+        )
+
+
 STATUS = CommandDef(
     name="status",
     help="Show shield configuration overview",
@@ -105,5 +122,21 @@ LOGS = CommandDef(
     args=(
         ArgDef(name="--container", default=None, help="Filter by container name"),
         ArgDef(name="-n", type=int, default=50, help="Number of recent entries"),
+    ),
+)
+
+HARVEST = CommandDef(
+    name="harvest",
+    help="Show what a container reached for — refusals and window accepts",
+    handler=_handle_harvest,
+    extras=NEEDS_CTR,
+    args=(
+        CONTAINER_ARG,
+        ArgDef(
+            name="--json",
+            dest="output_json",
+            action="store_true",
+            help="Emit the entries as JSON instead of a table",
+        ),
     ),
 )

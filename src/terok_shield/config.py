@@ -217,6 +217,12 @@ class ShieldConfig:
     [`dns_cache_dir`][terok_shield.paths.dns_cache_dir] under the shield state
     root.  Only the tiers that resolve at launch use it.
     """
+    bypass_duration: str = "5m"
+    """How long the timed allow-all window stays open when a caller names no duration.
+
+    An nft timeout (``30s``, ``5m``, ``2h``).  The kernel closes the window when
+    the element expires, so nothing outlives the timeout it was opened with.
+    """
     dnsmasq_path: Path | None = None
     """The dnsmasq binary to run; ``None`` finds one on the current host PATH.
 
@@ -318,6 +324,18 @@ class ShieldModeBackend(Protocol):
 
     def shield_state(self, container: str) -> ShieldState:
         """Query a container's shield state from the live ruleset."""
+        ...
+
+    def arm_window(self, container: str, timeout: str) -> None:
+        """Open the timed allow-all window for *timeout*."""
+        ...
+
+    def disarm_window(self, container: str) -> None:
+        """Close the timed allow-all window now."""
+        ...
+
+    def window_remaining(self, container: str) -> str | None:
+        """Time left on the window, or ``None`` when none is open."""
         ...
 
     def preview(self, *, down: bool = False, disengaged: bool = False) -> str:
