@@ -355,6 +355,12 @@ def _cmd_setup() -> None:
     installer.install()
     print("Done. Global hooks installed.")
 
+    # Optional: audit log rotation via logrotate (best-effort, never blocks).
+    from ..logrotate import setup_logrotate
+
+    print()
+    setup_logrotate(verbose=True)
+
 
 # ── Config construction ──────────────────────────────────
 
