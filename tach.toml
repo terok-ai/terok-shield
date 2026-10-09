@@ -206,6 +206,12 @@ path = "terok_shield.audit"
 layer = "support"
 depends_on = []
 
+# Harvest — reads the audit log back for review (state is a lower layer)
+[[modules]]
+path = "terok_shield.harvest"
+layer = "support"
+depends_on = []
+
 # Profile loading
 [[modules]]
 path = "terok_shield.profiles"
@@ -224,6 +230,7 @@ path = "terok_shield"
 layer = "support"
 depends_on = [
     "terok_shield.audit",
+    "terok_shield.harvest",
     "terok_shield.profiles",
     "terok_shield.watchers",
 ]

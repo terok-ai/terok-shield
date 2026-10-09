@@ -2115,3 +2115,69 @@ def test_resolve_leaves_live_tier_allow_resolution_to_dnsmasq(
     assert not bundle.resolved_cache.exists()
     calls = harness.dns.resolve_and_cache.call_args_list
     assert [c.args[1] for c in calls] == [bundle.override_resolved, bundle.deny_resolved]
+
+
+# ── the timed allow-all window ───────────────────────────────────────────
+
+
+def test_arm_window_adds_the_default_routes_with_the_kernel_timeout(
+    make_hook_mode: HookModeHarnessFactory,
+) -> None:
+    """arm_window() hands nft the element that expires on its own."""
+    harness = make_hook_mode()
+    harness.mode.arm_window("test-ctr", "5m")
+
+    stdin = harness.runner.nft_via_nsenter.call_args.kwargs["stdin"]
+    assert "bypass_window_v4 { 0.0.0.0/0 timeout 5m }" in stdin
+    assert "bypass_window_v6 { ::/0 timeout 5m }" in stdin
+
+
+def test_arm_window_refuses_a_timeout_nft_would_not_take(
+    make_hook_mode: HookModeHarnessFactory,
+) -> None:
+    """A duration that is not an nft timeout never reaches the kernel."""
+    harness = make_hook_mode()
+    with pytest.raises(ValueError, match="Invalid nft timeout"):
+        harness.mode.arm_window("test-ctr", "5m; drop")
+    harness.runner.nft_via_nsenter.assert_not_called()
+
+
+def test_disarm_window_flushes_both_families(make_hook_mode: HookModeHarnessFactory) -> None:
+    """disarm_window() closes the window before its timeout runs out."""
+    harness = make_hook_mode()
+    harness.mode.disarm_window("test-ctr")
+
+    stdin = harness.runner.nft_via_nsenter.call_args.kwargs["stdin"]
+    assert stdin.count("flush set") == 2
+
+
+def test_window_remaining_reads_the_kernel_countdown(
+    make_hook_mode: HookModeHarnessFactory,
+) -> None:
+    """The window keeps no host-side deadline, so the answer comes from nft."""
+    harness = make_hook_mode()
+    harness.runner.nft_via_nsenter.return_value = (
+        "table inet terok_shield {\n\tset bypass_window_v4 {\n"
+        "\t\telements = { 0.0.0.0/0 timeout 5m expires 3m42s }\n\t}\n}\n"
+    )
+    assert harness.mode.window_remaining("test-ctr") == "3m42s"
+
+
+def test_window_remaining_is_none_when_no_window_is_open(
+    make_hook_mode: HookModeHarnessFactory,
+) -> None:
+    """An empty set means closed — not unknown."""
+    harness = make_hook_mode()
+    harness.runner.nft_via_nsenter.return_value = (
+        "table inet terok_shield {\n\tset bypass_window_v4 {\n\t\ttype ipv4_addr\n\t}\n}\n"
+    )
+    assert harness.mode.window_remaining("test-ctr") is None
+
+
+def test_window_remaining_survives_a_container_without_the_table(
+    make_hook_mode: HookModeHarnessFactory,
+) -> None:
+    """nft failing (no table, container gone) reads as no window, not a crash."""
+    harness = make_hook_mode()
+    harness.runner.nft_via_nsenter.side_effect = ExecError(["nft"], 1, "No such file or directory")
+    assert harness.mode.window_remaining("test-ctr") is None

@@ -32,6 +32,7 @@ from terok_shield.nft.rules import (
     delete_deny_elements_dual,
     disarm_bypass_window,
     parse_set_elements,
+    parse_window_expiry,
     restore_elements,
     safe_ip,
 )
@@ -1196,3 +1197,21 @@ class TestRestoreElements:
             restore_elements("bad; flush ruleset", [(TEST_IP1, "")])
         with pytest.raises(ValueError):
             restore_elements("t40_project_allow_v4", [("not-an-ip", "")])
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        pytest.param(
+            "elements = { 0.0.0.0/0 timeout 5m expires 3m42s }", "3m42s", id="compound-countdown"
+        ),
+        pytest.param(
+            "elements = { 0.0.0.0/0 timeout 2h expires 1h59m58s }", "1h59m58s", id="hours"
+        ),
+        pytest.param("type ipv4_addr\nflags timeout", None, id="no-element"),
+        pytest.param("", None, id="empty"),
+    ],
+)
+def test_parse_window_expiry(output: str, expected: str | None) -> None:
+    """``parse_window_expiry`` reads the kernel countdown, or reports none."""
+    assert parse_window_expiry(output) == expected

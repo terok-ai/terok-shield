@@ -492,7 +492,7 @@ class TestSocketEmitterContainerExited:
 
 
 class TestAttrsToEvent:
-    """``_attrs_to_event`` must keep only BLOCKED-prefixed packets."""
+    """``_attrs_to_event`` keeps the refusals and the window accepts, nothing else."""
 
     def test_blocked_prefix_returns_event(self) -> None:
         attrs = {
@@ -502,6 +502,15 @@ class TestAttrsToEvent:
         event = reader._attrs_to_event(attrs)
         assert event is not None
         assert event.dest == TEST_IP1
+
+    def test_bypass_prefix_returns_a_bypass_event(self) -> None:
+        attrs = {
+            reader._NFULA_PREFIX: b"TEROK_SHIELD_BYPASS\x00",
+            reader._NFULA_PAYLOAD: _ipv4_tcp_packet(dest=TEST_IP1, port=443),
+        }
+        event = reader._attrs_to_event(attrs)
+        assert event is not None
+        assert event.action == "bypass"
 
     def test_non_blocked_prefix_returns_none(self) -> None:
         attrs = {
@@ -801,7 +810,7 @@ class TestReaderSession:
         session = reader.ReaderSession(state_dir=tmp_path, container="c1", emitter=recorder)
         fake_sock = _FakeSocket()
 
-        raw = reader._RawBlockEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP)
+        raw = reader._RawPacketEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP)
 
         def fake_select(rfds: list, *_args: object, **_kwargs: object) -> tuple[list, list, list]:
             session._stop_requested = True  # exit after the first tick
@@ -834,7 +843,7 @@ class TestReaderSession:
 
         emitter = _FlakyEmitter()
         session = reader.ReaderSession(state_dir=tmp_path, container="c1", emitter=emitter)
-        raw = reader._RawBlockEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP)
+        raw = reader._RawPacketEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP)
         # Drive two ticks so a failed emit on tick 1 can retry on tick 2
         # without the dedup window suppressing the retry.
         session._maybe_emit(raw, now=0.0)
@@ -879,8 +888,10 @@ class TestReaderSession:
         session = reader.ReaderSession(state_dir=tmp_path, container="c1", emitter=recorder)
         fake_sock = _FakeSocket()
         noise = [
-            reader._RawBlockEvent(dest=IPV6_MCAST_ALL_ROUTERS, port=0, proto=socket.IPPROTO_ICMPV6),
-            reader._RawBlockEvent(dest=IPV6_MCAST_MLDV2, port=0, proto=socket.IPPROTO_ICMPV6),
+            reader._RawPacketEvent(
+                dest=IPV6_MCAST_ALL_ROUTERS, port=0, proto=socket.IPPROTO_ICMPV6
+            ),
+            reader._RawPacketEvent(dest=IPV6_MCAST_MLDV2, port=0, proto=socket.IPPROTO_ICMPV6),
         ]
 
         def fake_select(rfds: list, *_args: object, **_kwargs: object) -> tuple[list, list, list]:
@@ -905,8 +916,8 @@ class TestReaderSession:
         session._domain_cache._mapping = {TEST_IP1: TEST_DOMAIN, TEST_IP2: TEST_DOMAIN}
         fake_sock = _FakeSocket()
         events = [
-            reader._RawBlockEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP),
-            reader._RawBlockEvent(dest=TEST_IP2, port=443, proto=socket.IPPROTO_TCP),
+            reader._RawPacketEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP),
+            reader._RawPacketEvent(dest=TEST_IP2, port=443, proto=socket.IPPROTO_TCP),
         ]
 
         def fake_select(rfds: list, *_args: object, **_kwargs: object) -> tuple[list, list, list]:
@@ -939,7 +950,7 @@ class TestReaderSession:
                 "meta_path": str(meta),
             },
         )
-        raw = reader._RawBlockEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP)
+        raw = reader._RawPacketEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP)
         session._maybe_emit(raw, now=0.0)
 
         blocked = next(payload for kind, payload in recorder.calls if kind == "blocked")
@@ -956,8 +967,8 @@ class TestReaderSession:
         fake_sock = _FakeSocket()
         # Two *distinct* IPs, no domain in cache → two emissions expected.
         events = [
-            reader._RawBlockEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP),
-            reader._RawBlockEvent(dest=TEST_IP99, port=443, proto=socket.IPPROTO_TCP),
+            reader._RawPacketEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP),
+            reader._RawPacketEvent(dest=TEST_IP99, port=443, proto=socket.IPPROTO_TCP),
         ]
 
         def fake_select(rfds: list, *_args: object, **_kwargs: object) -> tuple[list, list, list]:
@@ -987,7 +998,7 @@ class TestAuditBlockAppend:
     def test_block_writes_audit_line_with_expected_shape(self, tmp_path: Path) -> None:
         recorder = _RecordingEmitter()
         session = reader.ReaderSession(state_dir=tmp_path, container="c1", emitter=recorder)
-        raw = reader._RawBlockEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP)
+        raw = reader._RawPacketEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP)
         session._maybe_emit(raw, now=0.0)
 
         audit_path = tmp_path / AUDIT_FILENAME
@@ -1010,7 +1021,7 @@ class TestAuditBlockAppend:
 
         recorder = _RecordingEmitter()
         session = reader.ReaderSession(state_dir=tmp_path, container="c1", emitter=recorder)
-        raw = reader._RawBlockEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP)
+        raw = reader._RawPacketEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP)
         session._maybe_emit(raw, now=0.0)
 
         entries = [
@@ -1022,7 +1033,7 @@ class TestAuditBlockAppend:
         """No resolved domain → no ``domain`` key in the audit entry (vs. empty string)."""
         recorder = _RecordingEmitter()
         session = reader.ReaderSession(state_dir=tmp_path, container="c1", emitter=recorder)
-        raw = reader._RawBlockEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP)
+        raw = reader._RawPacketEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP)
         session._maybe_emit(raw, now=0.0)
 
         entry = json.loads((tmp_path / AUDIT_FILENAME).read_text().splitlines()[0])
@@ -1037,7 +1048,7 @@ class TestAuditBlockAppend:
             emitter=recorder,
             static_dossier={"task": "abc", "project": "terok"},
         )
-        raw = reader._RawBlockEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP)
+        raw = reader._RawPacketEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP)
         session._maybe_emit(raw, now=0.0)
 
         entry = json.loads((tmp_path / AUDIT_FILENAME).read_text().splitlines()[0])
@@ -1047,7 +1058,7 @@ class TestAuditBlockAppend:
         """Shield-only deployments don't pad audit rows with an empty ``dossier`` key."""
         recorder = _RecordingEmitter()
         session = reader.ReaderSession(state_dir=tmp_path, container="c1", emitter=recorder)
-        raw = reader._RawBlockEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP)
+        raw = reader._RawPacketEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP)
         session._maybe_emit(raw, now=0.0)
 
         entry = json.loads((tmp_path / AUDIT_FILENAME).read_text().splitlines()[0])
@@ -1071,7 +1082,7 @@ class TestAuditBlockAppend:
 
         emitter = _AlwaysFailingEmitter()
         session = reader.ReaderSession(state_dir=tmp_path, container="c1", emitter=emitter)
-        raw = reader._RawBlockEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP)
+        raw = reader._RawPacketEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP)
         session._maybe_emit(raw, now=0.0)
 
         audit_path = tmp_path / AUDIT_FILENAME
@@ -1085,7 +1096,7 @@ class TestAuditBlockAppend:
         (tmp_path / AUDIT_FILENAME).mkdir()
 
         session = reader.ReaderSession(state_dir=tmp_path, container="c1", emitter=recorder)
-        raw = reader._RawBlockEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP)
+        raw = reader._RawPacketEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP)
         session._maybe_emit(raw, now=0.0)
 
         # Wire still received the event despite audit failure.
@@ -1096,7 +1107,7 @@ class TestAuditBlockAppend:
         """Anything other than TCP/UDP gets the numeric proto in the audit entry."""
         recorder = _RecordingEmitter()
         session = reader.ReaderSession(state_dir=tmp_path, container="c1", emitter=recorder)
-        raw = reader._RawBlockEvent(dest=TEST_IP1, port=0, proto=132)  # SCTP
+        raw = reader._RawPacketEvent(dest=TEST_IP1, port=0, proto=132)  # SCTP
         session._maybe_emit(raw, now=0.0)
 
         entry = json.loads((tmp_path / AUDIT_FILENAME).read_text().splitlines()[0])
@@ -1124,7 +1135,7 @@ class TestAuditBlockAppend:
 
         emitter = _AlwaysFailingEmitter()
         session = reader.ReaderSession(state_dir=tmp_path, container="c1", emitter=emitter)
-        raw = reader._RawBlockEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP)
+        raw = reader._RawPacketEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP)
         # Five NFLOG packets within the same dedup window — TCP retries.
         for t in (0.0, 1.0, 2.0, 5.0, 10.0):
             session._maybe_emit(raw, now=t)
@@ -1228,3 +1239,54 @@ class _FakeSocket:
 
     def close(self) -> None:
         """No-op — present so ``ReaderSession.run``'s finally block can call it."""
+
+
+class TestBypassWindowRecords:
+    """While the window is open nothing is refused, so nothing is prompted on."""
+
+    def test_bypass_event_is_audited_but_never_prompted(self, tmp_path: Path) -> None:
+        """The window's traffic reaches audit.jsonl; the clearance wire stays quiet."""
+        recorder = _RecordingEmitter()
+        session = reader.ReaderSession(state_dir=tmp_path, container="c1", emitter=recorder)
+        event = reader._RawPacketEvent(
+            dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP, action="bypass"
+        )
+
+        session._maybe_emit(event, now=0.0)
+
+        assert recorder.calls == []
+        entries = [json.loads(line) for line in (tmp_path / "audit.jsonl").read_text().splitlines()]
+        assert [e["action"] for e in entries] == ["bypass"]
+        assert entries[0]["dest"] == TEST_IP1
+
+    def test_a_window_accept_does_not_mute_a_later_refusal(self, tmp_path: Path) -> None:
+        """Dedup is scoped per action, so the same host still records both verdicts."""
+        session = reader.ReaderSession(
+            state_dir=tmp_path, container="c1", emitter=_RecordingEmitter()
+        )
+        bypassed = reader._RawPacketEvent(
+            dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP, action="bypass"
+        )
+        blocked = reader._RawPacketEvent(dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP)
+
+        session._maybe_emit(bypassed, now=0.0)
+        session._maybe_emit(blocked, now=1.0)
+
+        entries = [json.loads(line) for line in (tmp_path / "audit.jsonl").read_text().splitlines()]
+        assert [e["action"] for e in entries] == ["bypass", "blocked"]
+
+    def test_repeated_window_accepts_stay_bounded(self, tmp_path: Path) -> None:
+        """An open window must not write one audit line per retransmit."""
+        session = reader.ReaderSession(
+            state_dir=tmp_path, container="c1", emitter=_RecordingEmitter()
+        )
+        event = reader._RawPacketEvent(
+            dest=TEST_IP1, port=443, proto=socket.IPPROTO_TCP, action="bypass"
+        )
+
+        session._maybe_emit(event, now=0.0)
+        session._maybe_emit(event, now=1.0)
+        session._maybe_emit(event, now=session._DEDUP_WINDOW_S + 1.0)
+
+        lines = (tmp_path / "audit.jsonl").read_text().splitlines()
+        assert len(lines) == 2

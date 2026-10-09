@@ -395,6 +395,7 @@ def _build_config(
         profiles_dir=profiles_dir,
         dns_cache_dir=dns_cache_dir,
         dnsmasq_path=file_cfg.dnsmasq_path,
+        bypass_duration=file_cfg.bypass_duration,
     )
 
 

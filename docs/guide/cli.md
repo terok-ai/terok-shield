@@ -220,6 +220,66 @@ security-deny tier). Allow-set state the container learned through dnsmasq
 survives the transition — a down/up round trip never forgets IPs the
 workload already resolved.
 
+## bypass
+
+Open, close, or show the timed allow-all window — the escape hatch for the
+moment a task needs something the policy does not name yet.
+
+```bash
+terok-shield bypass <container>                 # how long is left
+terok-shield bypass <container> --for 5m        # open it
+terok-shield bypass <container> --off           # close it now
+```
+
+| Argument | Description |
+|----------|-------------|
+| `container` | Container name or ID |
+| `--for` | Open the window for this long (an nft timeout such as `30s`, `5m`, `2h`); defaults to `bypass_duration` |
+| `--off` | Close the window now |
+
+While the window is open every destination is accepted, above the deny tiers
+but still below the hard-deny floor: link-local and IMDS addresses stay
+refused. Each accepted connection is logged with the `TEROK_SHIELD_BYPASS`
+prefix and recorded in `audit.jsonl` as `bypass`, so what the window let
+through can be read back afterwards — and promoted into the policy if it
+belongs there.
+
+The window lives in the kernel. Its element carries a timeout, so it closes
+itself when the timeout runs out, and any disruption — a `shield up`, a
+restart, a host process that dies — closes it sooner rather than later.
+Nothing renews it, and there is no host-side deadline to go stale: the
+countdown the bare verb prints is read straight from nft.
+
+## harvest
+
+Show what a container reached for, read back out of its audit log.
+
+```bash
+terok-shield harvest <container>          # refusals first, then window accepts
+terok-shield harvest <container> --json   # the same entries, machine-readable
+```
+
+| Argument | Description |
+|----------|-------------|
+| `container` | Container name or ID |
+| `--json` | Emit the entries as JSON instead of a table |
+
+Nothing new is collected: the NFLOG reader already writes one line per refusal
+and one per accept through the timed window, and `harvest` folds those into one
+entry per target — the unit a promotion decision is made in. The target is the
+domain when the reader recovered one from the DNS cache and the address
+otherwise, because an allowlist entry for a rotating CDN is worth nothing as an
+IP.
+
+The count is a floor on attempts, not a connection count: the reader records at
+most one line per target per 30 seconds, so a tight retry loop and a single
+request can both land as one.
+
+`harvest` changes no policy. Acting on what it shows — an entry in
+`shield.allow`, a curated set, a break-glass `shield.override` — stays an
+explicit act, and the tier that refused a host still decides whether it can be
+promoted at all.
+
 ## reset
 
 Forget DNS-learned allow-set state, returning the allow sets to their

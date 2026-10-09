@@ -92,6 +92,11 @@ COMMANDS: CommandTree = CommandTree(
         _lazy("down", "Switch container to the DOWN posture (accept + log)", "control:DOWN"),
         _lazy("up", "Restore deny-all mode for a container", "control:UP"),
         _lazy(
+            "bypass",
+            "Open, close or show the timed allow-all window for a container",
+            "control:BYPASS",
+        ),
+        _lazy(
             "reset",
             "Forget DNS-learned allow state (back to authored policy seeds)",
             "control:RESET",
@@ -102,6 +107,11 @@ COMMANDS: CommandTree = CommandTree(
             "control:QUARANTINE",
         ),
         _lazy("rules", "Show current nft rules for a container", "control:RULES"),
+        _lazy(
+            "harvest",
+            "Show what a container reached for (refusals and window accepts)",
+            "observe:HARVEST",
+        ),
         _lazy(
             "watch",
             "Stream shield events — audit log, NFLOG packets, and DNS blocks on the dnsmasq tiers",

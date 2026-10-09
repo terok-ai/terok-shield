@@ -46,6 +46,7 @@ if TYPE_CHECKING:
     from .audit import AuditLogger
     from .commands import COMMANDS
     from .dns.resolver import DnsResolver
+    from .harvest import HarvestEntry
     from .hooks.install import (
         HooksInstaller,
         ensure_user_hooks_dir_configured,
@@ -62,6 +63,7 @@ if TYPE_CHECKING:
 _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "BinaryCheck": ("terok_shield.prereqs", "BinaryCheck"),
     "ExecError": ("terok_shield.run", "ExecError"),
+    "HarvestEntry": ("terok_shield.harvest", "HarvestEntry"),
     "HooksInstaller": ("terok_shield.hooks.install", "HooksInstaller"),
     "ensure_user_hooks_dir_configured": (
         "terok_shield.hooks.install",
@@ -432,6 +434,39 @@ class Shield:
         self.audit.log_event(container, "shield_up")
         self.hub_events.shield_up(container, container_id, dossier=self._read_dossier())
 
+    def harvest(self) -> "list[HarvestEntry]":
+        """Summarise what this container reached for, from its audit log.
+
+        A read, not a policy change: the entries say what was refused and what
+        the timed window let through, and promoting any of them stays an
+        explicit act elsewhere.
+        """
+        from .harvest import harvest
+
+        return harvest(self.config.state_dir)
+
+    def bypass(self, container: str, duration: str | None = None) -> str:
+        """Open the timed allow-all window and return the duration granted.
+
+        *duration* is an nft timeout; ``None`` takes
+        [`bypass_duration`][terok_shield.ShieldConfig.bypass_duration] from the
+        config.  The window lives in the kernel: it closes when the element
+        expires, a rebuild or a restart closes it sooner, and nothing renews it.
+        """
+        duration = duration or self.config.bypass_duration
+        self._mode.arm_window(container, duration)
+        self.audit.log_event(container, "bypass_armed", detail=f"duration={duration}")
+        return duration
+
+    def bypass_off(self, container: str) -> None:
+        """Close the timed allow-all window before its timeout runs out."""
+        self._mode.disarm_window(container)
+        self.audit.log_event(container, "bypass_disarmed")
+
+    def bypass_remaining(self, container: str) -> str | None:
+        """Time left on the timed allow-all window, or ``None`` when none is open."""
+        return self._mode.window_remaining(container)
+
     def reset(self, container: str) -> None:
         """Forget DNS-learned allow state, keeping the authored policy seeds.
 
@@ -516,6 +551,7 @@ __all__ = [
     "EnvironmentCheck",
     "ExecError",
     "HOOK_ENTRYPOINT_NAME",
+    "HarvestEntry",
     "HooksInstaller",
     "Shield",
     "ShieldConfig",

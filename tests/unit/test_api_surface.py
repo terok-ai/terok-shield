@@ -30,6 +30,7 @@ EXPECTED_ALL = [
     "EnvironmentCheck",
     "ExecError",
     "HOOK_ENTRYPOINT_NAME",
+    "HarvestEntry",
     "HooksInstaller",
     "Shield",
     "ShieldConfig",
@@ -109,6 +110,7 @@ class TestAPISurface:
             "profiles_dir",
             "runtime",
             "dns_cache_dir",
+            "bypass_duration",
             "dnsmasq_path",
         ]
 
@@ -118,6 +120,7 @@ class TestAPISurface:
         assert cfg.loopback_ports == ()
         assert cfg.audit_enabled is True
         assert cfg.profiles_dir is None
+        assert cfg.bypass_duration == "5m"
         assert cfg.runtime == ShieldRuntime.DEFAULT
         assert cfg.dns_cache_dir is None
 

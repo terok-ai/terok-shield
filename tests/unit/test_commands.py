@@ -12,12 +12,18 @@ import pytest
 from terok_shield.commands import COMMANDS, is_container_arg, needs_container, standalone_only
 from terok_shield.verbs.control import (
     _handle_allow,
+    _handle_bypass,
     _handle_deny,
     _handle_preview,
     _handle_quarantine,
     _handle_reset,
 )
-from terok_shield.verbs.observe import _handle_logs, _handle_profiles, _handle_status
+from terok_shield.verbs.observe import (
+    _handle_harvest,
+    _handle_logs,
+    _handle_profiles,
+    _handle_status,
+)
 from terok_shield.verbs.stream import _handle_simple_clearance, _handle_watch
 
 
@@ -92,9 +98,11 @@ class TestCommandDefs:
             "deny": {"container"},
             "down": {"container", "--container-id"},
             "up": {"container", "--container-id"},
+            "bypass": {"container"},
             "reset": {"container"},
             "quarantine": {"container"},
             "rules": {"container"},
+            "harvest": {"container"},
             "watch": {"container"},
             "simple-clearance": {"container"},
             "logs": {"--container"},  # the standalone CLI's optional filter
@@ -213,6 +221,43 @@ class TestHandlers:
         assert "QUARANTINED" in output
         assert "test-ctr" in output
 
+    def test_handle_bypass_opens_the_window_for_the_named_duration(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """``--for`` arms the window and says what was granted."""
+        shield = mock.MagicMock()
+        shield.bypass.return_value = "5m"
+        _handle_bypass(shield, "test-ctr", duration="5m")
+        shield.bypass.assert_called_once_with("test-ctr", "5m")
+        assert "5m" in capsys.readouterr().out
+
+    def test_handle_bypass_off_closes_the_window(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """``--off`` closes it without consulting the remaining time."""
+        shield = mock.MagicMock()
+        _handle_bypass(shield, "test-ctr", off=True)
+        shield.bypass_off.assert_called_once_with("test-ctr")
+        shield.bypass.assert_not_called()
+        assert "closed" in capsys.readouterr().out
+
+    def test_handle_bypass_without_flags_reports_the_countdown(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Bare, the verb reads the kernel's clock and arms nothing."""
+        shield = mock.MagicMock()
+        shield.bypass_remaining.return_value = "3m42s"
+        _handle_bypass(shield, "test-ctr")
+        shield.bypass.assert_not_called()
+        assert "3m42s" in capsys.readouterr().out
+
+    def test_handle_bypass_without_flags_says_when_none_is_open(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """No window is an answer, phrased as one."""
+        shield = mock.MagicMock()
+        shield.bypass_remaining.return_value = None
+        _handle_bypass(shield, "test-ctr")
+        assert "No bypass window" in capsys.readouterr().out
+
     def test_handle_reset_delegates_and_prints(self, capsys: pytest.CaptureFixture[str]) -> None:
         """_handle_reset calls shield.reset() and prints confirmation."""
         shield = mock.MagicMock()
@@ -221,6 +266,62 @@ class TestHandlers:
         output = capsys.readouterr().out
         assert "reset" in output
         assert "test-ctr" in output
+
+    def test_handle_harvest_prints_one_row_per_target(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The table names the action, the target and how often it appeared."""
+        from terok_shield.harvest import HarvestEntry
+
+        shield = mock.MagicMock()
+        shield.harvest.return_value = [
+            HarvestEntry(
+                action="blocked",
+                target="example.test",
+                count=7,
+                first_seen="2026-09-30T10:00:00+00:00",
+                last_seen="2026-09-30T10:30:00+00:00",
+                ports=(443,),
+                addresses=(),
+            )
+        ]
+        _handle_harvest(shield, "test-ctr")
+        output = capsys.readouterr().out
+        assert "blocked" in output
+        assert "example.test" in output
+        assert "x7" in output
+
+    def test_handle_harvest_says_when_there_is_nothing(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """An empty harvest is an answer — a task that needed nothing it could not have."""
+        shield = mock.MagicMock()
+        shield.harvest.return_value = []
+        _handle_harvest(shield, "test-ctr")
+        assert "Nothing harvested" in capsys.readouterr().out
+
+    def test_handle_harvest_json_is_machine_readable(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """``--json`` emits the entries verbatim for a caller that renders its own view."""
+        from terok_shield.harvest import HarvestEntry
+
+        shield = mock.MagicMock()
+        shield.harvest.return_value = [
+            HarvestEntry(
+                action="bypass",
+                target="example.test",
+                count=1,
+                first_seen="2026-09-30T10:00:00+00:00",
+                last_seen="2026-09-30T10:00:00+00:00",
+                ports=(80,),
+                addresses=("192.0.2.1",),
+            )
+        ]
+        _handle_harvest(shield, "test-ctr", output_json=True)
+        payload = json.loads(capsys.readouterr().out)
+        assert payload[0]["target"] == "example.test"
+        assert payload[0]["ports"] == [80]
 
     def test_handle_preview_all_without_down_raises(self) -> None:
         """_handle_preview raises ValueError when disengaged without down."""

@@ -17,10 +17,15 @@ in the library, and only the CLI path touches it.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+#: One count and one unit, the same grammar the nft element carries
+#: (``terok_shield.nft.rules`` validates it again before interpolating).
+_NFT_TIMEOUT_RE = re.compile(r"\d+[smhd]")
 
 
 class AuditFileConfig(BaseModel):
@@ -53,7 +58,21 @@ class ShieldFileConfig(BaseModel):
         default=None,
         description="dnsmasq binary to run; found on the current host PATH when unset",
     )
+    bypass_duration: str = Field(
+        default="5m",
+        description="How long the timed allow-all window stays open when no duration is named",
+    )
     model_config = ConfigDict(extra="forbid")
+
+    @field_validator("bypass_duration")
+    @classmethod
+    def _duration_is_an_nft_timeout(cls, v: str) -> str:
+        """Reject at load what nft would reject at arm time — a count and one unit."""
+        if not _NFT_TIMEOUT_RE.fullmatch(v):
+            raise ValueError(
+                f"bypass_duration must be an nft timeout such as '5m' or '2h', got {v!r}"
+            )
+        return v
 
     @field_validator("default_profiles")
     @classmethod

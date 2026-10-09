@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Jiri Vyskocil
 # SPDX-License-Identifier: Apache-2.0
 
-"""Live nft-mutation verbs — allow, deny, up, down, quarantine, rules, preview.
+"""Live nft-mutation verbs — allow, deny, up, down, bypass, quarantine, rules, preview.
 
 Each verb mutates or inspects a running container's shield ruleset.  The
 handlers accept ``(shield, [container], **kwargs)`` and print to stdout;
@@ -64,6 +64,34 @@ def _handle_up(shield: Shield, container: str, *, container_id: str) -> None:
     """
     shield.up(container, container_id)
     print(f"Shield up for {container}")
+
+
+def _handle_bypass(
+    shield: Shield,
+    container: str,
+    *,
+    duration: str | None = None,
+    off: bool = False,
+) -> None:
+    """Show, open or close the timed allow-all window.
+
+    With no flag the verb reports the kernel's own countdown, because that is
+    the only record the window keeps.
+    """
+    if off:
+        shield.bypass_off(container)
+        print(f"Bypass window closed for {container}")
+        return
+    if duration is None:
+        remaining = shield.bypass_remaining(container)
+        print(
+            f"Bypass window open for {container}, {remaining} left"
+            if remaining
+            else f"No bypass window open for {container}"
+        )
+        return
+    granted = shield.bypass(container, duration)
+    print(f"Bypass window open for {container} for {granted} — everything is accepted and logged")
 
 
 def _handle_reset(shield: Shield, container: str) -> None:
@@ -138,6 +166,22 @@ UP = CommandDef(
     handler=_handle_up,
     extras=NEEDS_CTR,
     args=(CONTAINER_ARG, CONTAINER_ID_ARG),
+)
+
+BYPASS = CommandDef(
+    name="bypass",
+    help="Open, close or show the timed allow-all window for a container",
+    handler=_handle_bypass,
+    extras=NEEDS_CTR,
+    args=(
+        CONTAINER_ARG,
+        ArgDef(
+            name="--for",
+            dest="duration",
+            help="Open the window for this long (an nft timeout such as 5m; default: bypass_duration)",
+        ),
+        ArgDef(name="--off", action="store_true", help="Close the window now"),
+    ),
 )
 
 RESET = CommandDef(
