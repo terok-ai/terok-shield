@@ -52,7 +52,7 @@ terok-shield = "terok_shield.cli.main:main"
 
 [dependency-groups]
 dev = [
-    "ruff~=0.16.0",
+    "ruff>=0.16,<0.18",
     "bandit>=1.7",
     "docstr-coverage>=2.3.2,<3",
     "complexipy>=6.0.1",
