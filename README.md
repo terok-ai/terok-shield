@@ -82,14 +82,19 @@ terok-shield ships with several bundled profiles
 | `nvidia-hpc` | CUDA, NGC, NVIDIA drivers |
 
 No profile applies unless you name one.  To add a custom allowlist,
-create a `.txt` file in `~/.config/terok/shield/profiles` with one domain or IP per line:
+create a `.txt` file in `~/.config/terok/shield/profiles` with one
+`+`-prefixed (allow) or `-`-prefixed (deny) entry per line — a domain,
+an IP or CIDR, optionally `:port` — or `+localhost:PORT` to reach a
+service on the host's own loopback (as `host.containers.internal:PORT`
+inside the container):
 
 e.g. `~/.config/terok/shield/profiles/my-project.txt`
 
 ```
-api.example.com
-cdn.example.com
-203.0.113.10
++api.example.com
++cdn.example.com
++203.0.113.10
++localhost:9931
 ```
 
 ### 2. Start a container with the shield
@@ -105,6 +110,13 @@ with a default-deny firewall — only destinations in the
 
 ```bash
 terok-shield run my-container --profiles dev-standard,my-project -- alpine:latest sh
+```
+
+To see — or apply by hand — the ruleset those profiles produce, without
+setup, podman or any state:
+
+```bash
+terok-shield preview --profiles dev-standard,my-project > rules.nft
 ```
 
 ### 3. Allow a domain at runtime

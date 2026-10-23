@@ -32,6 +32,8 @@ from ..testnet import (
     BROAD_CIDR_8,
     CONTAINER_HOSTNAME,
     IPV6_CLOUDFLARE,
+    LOCALHOST_GRANT,
+    LOCALHOST_GRANT_PORT,
     SLIRP4NETNS_GATEWAY,
     TEST_DOMAIN,
     TEST_DOMAIN2,
@@ -775,6 +777,36 @@ def test_preview_delegates_to_ruleset_builder(
     assert harness.mode.preview(**kwargs) == expected
 
 
+@pytest.mark.parametrize("down", [False, True], ids=["up", "down"])
+def test_preview_composes_profiles_into_the_live_tier_ruleset(
+    make_hook_mode: HookModeHarnessFactory,
+    make_config: ConfigFactory,
+    down: bool,
+) -> None:
+    """preview(profiles=…) is the ruleset the hook applies for those profiles — without any state.
+
+    The profiles' ``+localhost:PORT`` grants join the preamble next to the
+    config's own ports, their literal IPs seed the t40 set, and their
+    domains are absent: the live tier learns those per query, so the
+    preview approximates nothing.  Nothing is resolved, inspected or written.
+    """
+    config = make_config(loopback_ports=(8080,))
+    harness = make_hook_mode(config=config, ruleset=RulesetBuilder(loopback_ports=(8080,)))
+    harness.profiles.compose_profiles.return_value = [LOCALHOST_GRANT, TEST_IP1, TEST_DOMAIN]
+
+    ruleset = harness.mode.preview(down=down, profiles=["llm"])
+
+    harness.profiles.compose_profiles.assert_called_once_with(["llm"])
+    assert f"tcp dport 8080 ip daddr {PASTA_HOST_LOOPBACK_MAP} accept" in ruleset
+    assert f"tcp dport {LOCALHOST_GRANT_PORT} ip daddr {PASTA_HOST_LOOPBACK_MAP} accept" in ruleset
+    assert f"add element inet terok_shield t40_project_allow_v4 {{ {TEST_IP1} }}" in ruleset
+    assert TEST_DOMAIN not in ruleset
+    assert ("policy accept" in ruleset) is down
+    harness.runner.run.assert_not_called()
+    harness.dns.resolve_and_cache.assert_not_called()
+    assert not StateBundle(config.state_dir).ruleset.exists()
+
+
 @pytest.mark.parametrize(
     ("runner_output", "expected"),
     [
@@ -858,6 +890,34 @@ def test_pre_start_writes_ruleset_nft(
     assert ruleset_file.is_file(), "pre_start() must write ruleset.nft"
     content = ruleset_file.read_text()
     assert "terok_shield" in content
+
+
+@mock.patch("terok_shield.hooks.mode.HooksInstaller.check_setup", return_value=())
+def test_pre_start_opens_a_profile_localhost_grant_in_the_preamble(
+    _has_hooks: mock.Mock,
+    monkeypatch: pytest.MonkeyPatch,
+    make_hook_mode: HookModeHarnessFactory,
+    make_config: ConfigFactory,
+) -> None:
+    """A profile's ``+localhost:PORT`` grant lands as a preamble accept on the host-loopback map.
+
+    The grant is authored into t40 like any other entry, but its port is
+    served from the preamble — above the link-local hard-deny — exactly as
+    the supervisor's own ``ShieldConfig.loopback_ports`` are.
+    """
+    _set_euid(monkeypatch, 0)
+    config = make_config(loopback_ports=(8080,))
+    harness = make_hook_mode(config=config)
+    harness.runner.run.return_value = _MODERN_PODMAN_INFO
+    harness.profiles.compose_profiles.return_value = [LOCALHOST_GRANT]
+
+    harness.mode.pre_start("test", ["llm"])
+
+    bundle = StateBundle(config.state_dir)
+    assert f"+{LOCALHOST_GRANT}" in bundle.tier_path("project_allow").read_text()
+    ruleset = bundle.ruleset.read_text()
+    assert f"tcp dport 8080 ip daddr {PASTA_HOST_LOOPBACK_MAP} accept" in ruleset
+    assert f"tcp dport {LOCALHOST_GRANT_PORT} ip daddr {PASTA_HOST_LOOPBACK_MAP} accept" in ruleset
 
 
 def test_hooks_installer_writes_role_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

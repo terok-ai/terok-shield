@@ -108,7 +108,11 @@ def _dispatch(args: argparse.Namespace) -> None:
 
     # All other commands need a per-container config + Shield
     container = getattr(args, "container", None)
-    config = _build_config(container, state_dir_override=state_dir_override)
+    config = _build_config(
+        container,
+        state_dir_override=state_dir_override,
+        launching=cmd_name in _LAUNCH_VERBS,
+    )
     shield = Shield(config)
 
     # CLI-only standalone commands with custom logic
@@ -246,6 +250,9 @@ def _cmd_run(
     os.execv(podman, argv)  # nosec B606
 
 
+# Verbs that author a new container's bundle rather than find a running one's.
+_LAUNCH_VERBS = frozenset({"prepare", "run"})
+
 _SHIELD_MANAGED_FLAGS = frozenset(
     {
         "--name",
@@ -363,12 +370,16 @@ def _build_config(
     container: str | None = None,
     *,
     state_dir_override: Path | None = None,
+    launching: bool = False,
 ) -> ShieldConfig:
     """Build a ShieldConfig from config.yml + env vars.
 
     Args:
         container: Container name (used for per-container state_dir).
         state_dir_override: Explicit state_dir from --state-dir flag.
+        launching: The verb authors a new container's bundle (``prepare`` /
+            ``run``) rather than finding a running container's — see
+            [`_resolve_state_dir`][terok_shield.cli.main._resolve_state_dir].
     """
     file_cfg = _load_config_file()
 
@@ -378,7 +389,7 @@ def _build_config(
     if container:
         validate_container_name(container)
 
-    state_dir = _resolve_state_dir(container, state_dir_override)
+    state_dir = _resolve_state_dir(container, state_dir_override, launching=launching)
 
     # Profiles dir
     profiles_dir = _resolve_config_root() / "profiles"
@@ -398,7 +409,9 @@ def _build_config(
     )
 
 
-def _resolve_state_dir(container: str | None, state_dir_override: Path | None) -> Path:
+def _resolve_state_dir(
+    container: str | None, state_dir_override: Path | None, *, launching: bool = False
+) -> Path:
     """Return the per-container state directory.
 
     Resolution order, first hit wins:
@@ -407,19 +420,24 @@ def _resolve_state_dir(container: str | None, state_dir_override: Path | None) -
        state root lives, so nest under ``containers/<name>`` there.
        Used by tests and anyone driving the CLI by hand with a
        custom layout.
-    2. ``podman inspect`` of *container*'s ``terok.shield.state_dir``
+    2. A launch verb (*launching*: ``prepare`` / ``run``) authors the
+       bundle for a container podman does not know yet — ``podman run
+       --name`` refuses a taken name — so there is no annotation to
+       look up: the bundle goes under the default root, and the launch
+       stamps that path into the annotation for every later verb.
+    3. ``podman inspect`` of *container*'s ``terok.shield.state_dir``
        annotation.  This is the path shield's own ``pre_start()``
        writes and the OCI hook reads — the single source of truth for
        any shielded container.  If the annotation is missing the
        container simply wasn't launched through shield, so we fail
        loudly rather than guess a layout that won't match anything.
-    3. No container given (commands like ``install-hooks`` that aren't
+    4. No container given (commands like ``install-hooks`` that aren't
        per-container): use the default root + ``_default`` slot.
     """
     if state_dir_override is not None:
         state_root = state_dir_override.resolve()
         return state_root / "containers" / (container or "_default")
-    if container:
+    if container and not launching:
         annotated = resolve_container_state_dir(container)
         if annotated is None:
             raise SystemExit(
@@ -429,7 +447,7 @@ def _resolve_state_dir(container: str | None, state_dir_override: Path | None) -
             )
         return annotated
     state_root = _resolve_state_root().resolve()
-    return state_root / "containers" / "_default"
+    return state_root / "containers" / (container or "_default")
 
 
 def _load_config_file() -> ShieldFileConfig:

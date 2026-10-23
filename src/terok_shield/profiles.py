@@ -8,7 +8,8 @@ bundled directories.  User profiles override bundled ones with the
 same name, so site-specific customisation works without forking.
 
 Profiles are unified ``+``/``-`` policy files; a loaded profile yields
-its admitted (``+``) targets.  The bundled profiles ship under
+its admitted (``+``) targets, port and all, so a ``+localhost:PORT``
+host-service grant survives into the authored tier.  The bundled profiles ship under
 ``resources/examples`` as samples a caller names explicitly; the curated
 egress sets belong to terok, and the OS-package and provider hosts to
 terok-executor.
@@ -18,7 +19,7 @@ terok-executor.
 from importlib import resources as importlib_resources
 from pathlib import Path
 
-from .policy import parse_policy
+from .policy import parse_policy, render_target
 
 _BUNDLED_PACKAGE = "terok_shield.resources.examples"
 
@@ -46,7 +47,7 @@ class ProfileLoader:
         self._bundled_dir = bundled_dir or _bundled_dir()
 
     def load_profile(self, name: str) -> list[str]:
-        """Load a profile by name and return its admitted (``+``) targets.
+        """Load a profile by name and return its admitted (``+``) ``target[:port]`` entries.
 
         User profiles take precedence over bundled profiles.
 
@@ -59,7 +60,7 @@ class ProfileLoader:
         if path is None:
             available = ", ".join(sorted(profiles)) or "none"
             raise UnknownProfileError(f"Unknown profile {name!r}; available profiles: {available}")
-        return [e.target for e in parse_policy(path.read_text()) if e.action == "+"]
+        return [render_target(e) for e in parse_policy(path.read_text()) if e.action == "+"]
 
     def compose_profiles(self, names: list[str]) -> list[str]:
         """Load and merge multiple profiles, deduplicating entries.

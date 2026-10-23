@@ -17,6 +17,10 @@ flags the constant definition, not every usage.
 CONTAINER_HOSTNAME = "host.containers.internal"
 """Hostname Podman exposes for reaching services on the host."""
 
+LOCALHOST_GRANT_PORT = 9931
+LOCALHOST_GRANT = f"localhost:{LOCALHOST_GRANT_PORT}"
+"""A ``+localhost:PORT`` host-service grant target, as a profile authors it."""
+
 # ── Test domains (used as mock compose_profiles return value) ──
 
 TEST_DOMAIN = "github.com"

@@ -22,17 +22,34 @@ terok-shield status
 
 ## Profile file format
 
-Each profile is a plain text file with one entry per line. Entries can be
-domain names or IP addresses/CIDRs. Comments start with `#`.
+Each profile is a plain text file in the unified policy grammar: one entry
+per line, prefixed with `+` (allow) or `-` (deny). A target is a domain
+(optionally `*.`-prefixed for every subdomain), an IP address or CIDR, with
+an optional `:port`. Comments start with `#`. The prefix is mandatory — a
+bare line is rejected at launch.
 
 ```text
 # My project's API servers
-api.example.com
-cdn.example.com
++api.example.com
++*.cdn.example.com
 
 # Static IP for internal service
-203.0.113.10
-10.0.0.5/32
++203.0.113.10
++10.0.0.5/32
+
+# Refuse a host even if another profile admits it
+-telemetry.example.com
+```
+
+The reserved target `localhost` is a host-service grant: `+localhost:PORT`
+opens the host machine's own `localhost:PORT` to the container, which reaches
+it as `host.containers.internal:PORT`. The port is accepted in the ruleset
+preamble, above every deny tier, so a local model server or database stays
+reachable while the rest of the host and the internet remain blocked.
+
+```text
+# llama.cpp on the host
++localhost:9931
 ```
 
 !!! note "Private-range addresses in profiles"
@@ -49,11 +66,11 @@ mkdir -p ~/.config/terok/shield/profiles
 
 cat > ~/.config/terok/shield/profiles/my-project.txt << 'EOF'
 # APIs my project needs
-api.example.com
-webhooks.example.com
++api.example.com
++webhooks.example.com
 
 # Static infrastructure
-203.0.113.10
++203.0.113.10
 EOF
 ```
 

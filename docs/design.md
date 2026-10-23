@@ -18,8 +18,9 @@ runtime `/proc` discovery.
 
 ## Allowlisting
 
-Allowlists are `.txt` files with one entry per line — domain names or raw
-IP/CIDRs. Lines starting with `#` are comments.
+Allowlists are `.txt` files in the unified `+`/`-` policy grammar, one entry
+per line — domain names or raw IP/CIDRs, optionally `:port`, plus the
+`+localhost:PORT` host-service grant. Lines starting with `#` are comments.
 
 Bundled profiles use domain names because they're stable across IP rotations and
 easy to audit. DNS resolution uses the best available tier:

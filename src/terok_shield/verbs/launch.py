@@ -16,16 +16,7 @@ from __future__ import annotations
 
 from terok_util import ArgDef, CommandDef
 
-from ._common import CONTAINER_ARG, NEEDS_CTR_STANDALONE, STANDALONE, csv_list
-
-_PROFILES_ARG = ArgDef(
-    name="--profiles",
-    type=csv_list,
-    help=(
-        "Profiles to apply instead of default_profiles from config.yml "
-        "(comma-separated, e.g. 'dev-standard,dev-python')"
-    ),
-)
+from ._common import CONTAINER_ARG, NEEDS_CTR_STANDALONE, PROFILES_ARG, STANDALONE
 
 PREPARE = CommandDef(
     name="prepare",
@@ -38,7 +29,7 @@ PREPARE = CommandDef(
     ),
     args=(
         CONTAINER_ARG,
-        _PROFILES_ARG,
+        PROFILES_ARG,
         ArgDef(name="--json", action="store_true", dest="output_json", help="JSON output"),
     ),
 )
@@ -52,7 +43,7 @@ RUN = CommandDef(
         "Everything after '--' is passed to podman run as-is:\n\n"
         "  terok-shield run my-container -- alpine:latest sh"
     ),
-    args=(CONTAINER_ARG, _PROFILES_ARG),
+    args=(CONTAINER_ARG, PROFILES_ARG),
 )
 
 RESOLVE = CommandDef(

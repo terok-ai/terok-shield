@@ -402,8 +402,28 @@ def test_preview_delegates_to_mode(
     harness.mode.preview.return_value = expected
     assert harness.shield.preview(**kwargs) == expected
     harness.mode.preview.assert_called_once_with(
-        down=kwargs.get("down", False), disengaged=kwargs.get("disengaged", False)
+        down=kwargs.get("down", False), disengaged=kwargs.get("disengaged", False), profiles=[]
     )
+
+
+@pytest.mark.parametrize(
+    ("profiles", "composed"),
+    [
+        pytest.param(None, ["base"], id="default-profiles"),
+        pytest.param(["my-project"], ["my-project"], id="explicit-profiles"),
+    ],
+)
+def test_preview_profiles_fall_back_to_default_profiles_like_pre_start(
+    make_shield: ShieldHarnessFactory,
+    make_config: ConfigFactory,
+    profiles: list[str] | None,
+    composed: list[str],
+) -> None:
+    """preview() composes the config's default_profiles when none are named — as a launch would."""
+    harness = make_shield(config=make_config(default_profiles=("base",)))
+    harness.mode.preview.return_value = ""
+    harness.shield.preview(profiles=profiles)
+    harness.mode.preview.assert_called_once_with(down=False, disengaged=False, profiles=composed)
 
 
 @pytest.mark.parametrize("force", [False, True], ids=["fresh-cache", "force"])

@@ -39,6 +39,14 @@ Shield-managed flags (`--name`, `--hooks-dir`, `--annotation`, `--cap-drop`,
 `--cap-add`, `--security-opt`, `--network`) are set automatically and rejected
 if passed after `--`.
 
+`run` and `prepare` author the container's state bundle (`ruleset.nft`, the
+policy tiers, the audit log) under
+`$XDG_STATE_HOME/terok/shield/containers/<container>` — or under the global
+`--state-dir` root when given — and stamp that path into the container's
+`terok.shield.state_dir` annotation. Every other verb finds the bundle through
+that annotation, so it works on any shielded container regardless of who
+launched it.
+
 ## prepare
 
 Resolve DNS, install hooks, and print the podman flags needed to launch a
@@ -240,13 +248,46 @@ overlay entries. The workload re-earns its state on its next DNS queries.
 Show the nftables ruleset that would be applied.
 
 ```bash
-terok-shield preview [--down] [--disengage]
+terok-shield preview [--profiles <profile>[,<profile>...]] [--down] [--disengage]
 ```
 
 | Option | Description |
 |--------|-------------|
+| `--profiles` | Profiles to compose in (comma-separated); without it, the `default_profiles` from `config.yml` apply |
 | `--down` | Show the DOWN-posture ruleset instead of default deny-all |
 | `--disengage` | Show the DISENGAGED ruleset: no deny set, no range rejects (requires `--down`) |
+
+With `--profiles`, the output is the ruleset the OCI hook applies at
+`createRuntime` for those profiles on the live tier: their `+localhost:PORT`
+grants sit in the preamble and their literal IPs seed the project-allow set.
+Domains are deliberately absent — the live tier never resolves them at apply
+time (dnsmasq learns them per query), so nothing is approximated. `preview`
+needs no `setup`, no podman and no state directory, which makes it the
+generator for applying a ruleset by hand.
+
+### Applying a ruleset by hand
+
+A container that may reach one service on the host and nothing else, without
+the OCI hook:
+
+```bash
+echo '+localhost:9931' > ~/.config/terok/shield/profiles/llm.txt
+terok-shield preview --profiles llm > rules.nft
+
+podman create --name llm \
+    --network pasta:--map-host-loopback,169.254.1.2 \
+    --add-host host.containers.internal:169.254.1.2 \
+    --cap-drop NET_ADMIN --cap-drop NET_RAW \
+    alpine:latest sh
+podman init llm
+podman unshare nsenter -t "$(podman inspect -f '{{.State.Pid}}' llm)" -n nft -f - < rules.nft
+podman start llm
+```
+
+The network flags must use the same host-loopback map address the ruleset was
+generated for (`169.254.1.2`); `podman init` creates the network namespace
+before the entrypoint runs, so the rules are in place first. Without the hook
+nothing re-applies them: repeat the `nsenter` line after every `podman start`.
 
 ## rules
 

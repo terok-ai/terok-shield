@@ -61,6 +61,7 @@ from ..nft.constants import (
 from ..nft.rules import (
     RulesetBuilder,
     add_deny_elements_dual,
+    add_elements_dual,
     add_override_elements_dual,
     delete_deny_elements_dual,
     parse_set_elements,
@@ -69,6 +70,7 @@ from ..nft.rules import (
 )
 from ..podman_info.info import PodmanInfo, parse_podman_info
 from ..podman_info.network import parse_resolv_conf, slirp4netns_gateway
+from ..policy import ip_targets, localhost_ports, parse_policy
 from ..run import ExecError, ShieldNeedsSetup
 from ..state import StateBundle
 from ..util import is_ipv4
@@ -487,7 +489,7 @@ class HookMode:
         set_timeout = NFT_SET_TIMEOUT_DNSMASQ if tier.live else ""
         ruleset_builder = RulesetBuilder(
             dns=upstream_dns,
-            loopback_ports=StateBundle(sd).read_loopback_ports(),
+            loopback_ports=StateBundle(sd).read_effective_loopback_ports(),
             gateway_v4=gw_v4,
             gateway_v6=gw_v6,
             set_timeout=set_timeout,
@@ -957,7 +959,7 @@ class HookMode:
         gw_v4, gw_v6 = self._gateways
         return RulesetBuilder(
             dns=dns,
-            loopback_ports=StateBundle(sd).read_loopback_ports(),
+            loopback_ports=StateBundle(sd).read_effective_loopback_ports(),
             gateway_v4=gw_v4,
             gateway_v6=gw_v6,
             set_timeout=set_timeout,
@@ -1038,11 +1040,28 @@ class HookMode:
         except ExecError:
             return ""
 
-    def preview(self, *, down: bool = False, disengaged: bool = False) -> str:
-        """Generate the ruleset that would be applied to a container."""
-        if down:
-            return self._ruleset.build_down(disengaged=disengaged)
-        return self._ruleset.build_up()
+    def preview(
+        self, *, down: bool = False, disengaged: bool = False, profiles: Sequence[str] = ()
+    ) -> str:
+        """Generate the ruleset that would be applied to a container.
+
+        With *profiles*, the ruleset the hook applies on the live tier at
+        ``createRuntime``: their ``+localhost:PORT`` grants join the
+        preamble and their literal IPs seed the t40 project-allow set.
+        Domains are left out on purpose — the live tier never resolves
+        them at apply time (dnsmasq learns them per query), so nothing is
+        approximated.  Touches no setup, podman, DNS or state dir, which
+        makes it the generator for applying a ruleset by hand.
+        """
+        entries = parse_policy(
+            "".join(f"+{e}\n" for e in self._profiles.compose_profiles(list(profiles)))
+        )
+        builder = self._ruleset
+        if grants := localhost_ports(entries):
+            ports = (*self._config.loopback_ports, *grants)
+            builder = RulesetBuilder(loopback_ports=tuple(dict.fromkeys(ports)))
+        ruleset = builder.build_down(disengaged=disengaged) if down else builder.build_up()
+        return ruleset + add_elements_dual(ip_targets(entries))
 
 
 # ── Module-level helpers ────────────────────────────────

@@ -19,7 +19,15 @@ from terok_shield.state import (
 )
 
 from ..testfs import FAKE_STATE_DIR, READER_PID_FILENAME
-from ..testnet import TEST_DOMAIN, TEST_DOMAIN2, TEST_IP1, TEST_IP2, TEST_IP3
+from ..testnet import (
+    LOCALHOST_GRANT,
+    LOCALHOST_GRANT_PORT,
+    TEST_DOMAIN,
+    TEST_DOMAIN2,
+    TEST_IP1,
+    TEST_IP2,
+    TEST_IP3,
+)
 
 
 def test_bundle_version_is_positive_int() -> None:
@@ -357,6 +365,22 @@ def test_effective_policy_localhost_ports_span_every_tier(tmp_path: Path) -> Non
     bundle.tier_path("project_allow").write_text("+localhost:8000\n")
     bundle.policy_live.write_text("+localhost:9090\n")
     assert bundle.read_effective().localhost_ports() == (8000, 9090)
+
+
+def test_read_effective_loopback_ports_unions_supervisor_ports_with_policy_grants(
+    tmp_path: Path,
+) -> None:
+    """The preamble ports are ``loopback.ports`` plus every ``+localhost:PORT`` grant, deduplicated."""
+    bundle = StateBundle(tmp_path)
+    bundle.policy_dir.mkdir()
+    bundle.loopback_ports.write_text("8000\n8001\n")
+    bundle.tier_path("project_allow").write_text(f"+{LOCALHOST_GRANT}\n+localhost:8000\n")
+    assert bundle.read_effective_loopback_ports() == (8000, 8001, LOCALHOST_GRANT_PORT)
+
+
+def test_read_effective_loopback_ports_is_empty_without_either_source(tmp_path: Path) -> None:
+    """No ``loopback.ports`` file and no policy tiers yield no preamble ports."""
+    assert StateBundle(tmp_path).read_effective_loopback_ports() == ()
 
 
 def test_effective_policy_composes_ips_and_domains_by_action(tmp_path: Path) -> None:

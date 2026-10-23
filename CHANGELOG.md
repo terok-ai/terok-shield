@@ -1,11 +1,17 @@
 # Changelog
 
-## v0.9.0 (unreleased)
+## v0.9.0 — At Your Service
 
 - Own setup receipts and bind standalone global hooks to the setup interpreter.
 - Resolve host tools from each launch's PATH, including NixOS; retain Podman 4.8 support.
 - Remove per-task hook installation. Rerun setup and recreate old bundle containers.
 - Serialize setup with the other packages and preserve command errors for missing host tools.
+
+## What's Changed
+* preserve host PATH in standalone hooks by @sliwowitz in https://github.com/terok-ai/terok-shield/pull/455
+* host tool fixes in util by @sliwowitz in https://github.com/terok-ai/terok-shield/pull/456
+
+**Full Changelog**: https://github.com/terok-ai/terok-shield/compare/v0.8.0...v0.9.0
 
 ## v0.8.0 — Past Prologue
 

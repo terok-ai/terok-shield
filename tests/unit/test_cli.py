@@ -277,6 +277,13 @@ def test_preview_parser_supports_flags(
     assert parsed.disengaged is expected_disengaged
 
 
+def test_preview_parser_supports_profiles(parser: argparse.ArgumentParser) -> None:
+    """preview takes the same comma-separated ``--profiles`` as the launch verbs."""
+    parsed = parser.parse_args(["preview", "--profiles", "base,my-project"])
+    assert parsed.profiles == ["base", "my-project"]
+    assert parser.parse_args(["preview"]).profiles is None
+
+
 def test_parser_supports_state_dir_flag(parser: argparse.ArgumentParser) -> None:
     """The global --state-dir option is available to all commands."""
     parsed = parser.parse_args(["--state-dir", FAKE_STATE_DIR_STR, "status"])
@@ -590,20 +597,26 @@ def test_allow_and_deny_dispatch_to_shield(
         pytest.param(
             ["preview"],
             "preview",
-            mock.call(down=False, disengaged=False),
+            mock.call(down=False, disengaged=False, profiles=None),
             id="preview-default",
         ),
         pytest.param(
             ["preview", "--down"],
             "preview",
-            mock.call(down=True, disengaged=False),
+            mock.call(down=True, disengaged=False, profiles=None),
             id="preview-down",
         ),
         pytest.param(
             ["preview", "--down", "--disengage"],
             "preview",
-            mock.call(down=True, disengaged=True),
+            mock.call(down=True, disengaged=True, profiles=None),
             id="preview-down-disengage",
+        ),
+        pytest.param(
+            ["preview", "--profiles", "base,my-project"],
+            "preview",
+            mock.call(down=False, disengaged=False, profiles=["base", "my-project"]),
+            id="preview-profiles",
         ),
         pytest.param(["profiles"], "profiles_list", mock.call(), id="profiles"),
     ],
@@ -1006,6 +1019,58 @@ def test_build_config_errors_when_annotation_missing(
         pytest.raises(SystemExit, match="no 'terok.shield.state_dir' annotation"),
     ):
         _build_config("my-ctr")
+
+
+def test_build_config_launch_verb_authors_the_bundle_under_the_default_root(
+    force_hook_mode: None,
+    state_root: Path,
+) -> None:
+    """A launch verb never looks for an annotation: it creates the bundle the launch will stamp.
+
+    ``podman run --name`` refuses a taken name, so the container a launch
+    verb names cannot be running yet — inspecting it only fails (and
+    warned on every first launch).  The bundle goes under the default
+    root, exactly where the annotation will then point.
+    """
+    with (
+        mock.patch("terok_shield.cli.main.resolve_container_state_dir") as resolver,
+        mock.patch("terok_shield.cli.main._resolve_state_root", return_value=state_root),
+    ):
+        config = _build_config("my-ctr", launching=True)
+    resolver.assert_not_called()
+    assert config.state_dir == state_root.resolve() / "containers" / "my-ctr"
+
+
+@pytest.mark.parametrize(
+    ("argv", "launching"),
+    [
+        pytest.param(["prepare", _CONTAINER], True, id="prepare"),
+        pytest.param(["status", _CONTAINER], False, id="status"),
+    ],
+)
+def test_main_marks_launch_verbs_when_building_config(
+    cli_dispatch: CliDispatchHarness, argv: list[str], launching: bool
+) -> None:
+    """Only ``prepare`` / ``run`` build their config as a launch; lookup verbs do not."""
+    cli_dispatch.shield.pre_start.return_value = []
+    cli_dispatch.shield.status.return_value = {
+        "mode": "hook",
+        "audit_enabled": True,
+        "profiles": [],
+    }
+    main(argv)
+    cli_dispatch.build_config.assert_called_once_with(
+        _CONTAINER, state_dir_override=None, launching=launching
+    )
+
+
+def test_main_run_builds_config_as_a_launch(cli_run: CliRunHarness) -> None:
+    """``run`` authors a fresh bundle, so its config is built as a launch."""
+    cli_run.shield.pre_start.return_value = []
+    main(["run", _CONTAINER, "--", "alpine:latest", "sh"])
+    cli_run.build_config.assert_called_once_with(
+        _CONTAINER, state_dir_override=None, launching=True
+    )
 
 
 def test_build_config_state_dir_override_wins_over_annotation(

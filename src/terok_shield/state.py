@@ -315,6 +315,17 @@ class StateBundle:
             if line.strip()
         )
 
+    def read_effective_loopback_ports(self) -> tuple[int, ...]:
+        """Every host-loopback port the ruleset preamble opens, from both sources.
+
+        The supervisor's ports persisted in ``loopback.ports`` come first, then
+        the ``+localhost:PORT`` grants authored across the policy tiers —
+        deduplicated, order preserved.  The ruleset builder reads this, not
+        the file alone, so a profile's host-service grant reaches the preamble.
+        """
+        ports = (*self.read_loopback_ports(), *self.read_effective().localhost_ports())
+        return tuple(dict.fromkeys(ports))
+
     # ── v15 tiered policy bundle ────────────────────────────
 
     @property

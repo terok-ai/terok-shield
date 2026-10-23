@@ -320,6 +320,8 @@ class ShieldModeBackend(Protocol):
         """Query a container's shield state from the live ruleset."""
         ...
 
-    def preview(self, *, down: bool = False, disengaged: bool = False) -> str:
-        """Generate the ruleset without applying it."""
+    def preview(
+        self, *, down: bool = False, disengaged: bool = False, profiles: Sequence[str] = ()
+    ) -> str:
+        """Generate the ruleset without applying it, composing *profiles* in."""
         ...

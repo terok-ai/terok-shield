@@ -14,6 +14,7 @@ from terok_shield.policy import (
     localhost_ports,
     parse_policy,
     render_policy,
+    render_target,
 )
 from tests.testfs import FORBIDDEN_TRAVERSAL
 from tests.testnet import (
@@ -142,6 +143,21 @@ def test_round_trip_render_parse() -> None:
     )
     entries = parse_policy(text)
     assert parse_policy(render_policy(entries)) == entries
+
+
+@pytest.mark.parametrize(
+    ("entry", "expected"),
+    [
+        (PolicyEntry("+", TEST_DOMAIN), TEST_DOMAIN),
+        (PolicyEntry("+", TEST_IP1, 8080), f"{TEST_IP1}:8080"),
+        (PolicyEntry("+", LOCALHOST, 8000), f"{LOCALHOST}:8000"),
+        (PolicyEntry("+", IPV6_VERBOSE_CANONICAL, 443), f"[{IPV6_VERBOSE_CANONICAL}]:443"),
+        (PolicyEntry("+", IPV6_VERBOSE_CANONICAL), IPV6_VERBOSE_CANONICAL),
+    ],
+)
+def test_render_target_keeps_the_port_and_brackets_ipv6(entry: PolicyEntry, expected: str) -> None:
+    """``render_target`` is the line minus action and markers: ``target[:port]``, v6 bracketed."""
+    assert render_target(entry) == expected
 
 
 @pytest.mark.parametrize(

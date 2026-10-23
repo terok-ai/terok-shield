@@ -40,6 +40,17 @@ def csv_list(value: str) -> list[str]:
 #: dispatcher passes it positionally to the handler.
 CONTAINER_ARG = ArgDef(name="container", help="Container name or ID")
 
+#: ``--profiles`` for every verb that composes a policy — the launch verbs
+#: and ``preview`` — so one spelling and one help text serve them all.
+PROFILES_ARG = ArgDef(
+    name="--profiles",
+    type=csv_list,
+    help=(
+        "Profiles to apply instead of default_profiles from config.yml "
+        "(comma-separated, e.g. 'dev-standard,dev-python')"
+    ),
+)
+
 #: ``--container-id`` is the per-container hub socket routing key (full
 #: podman UUID).  Every emit-bearing verb (``up`` / ``down``) accepts it
 #: as a required option — the caller knows the full UUID at every site

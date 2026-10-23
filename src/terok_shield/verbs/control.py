@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 from terok_util import ArgDef, CommandDef
 
-from ._common import CONTAINER_ARG, CONTAINER_ID_ARG, NEEDS_CTR
+from ._common import CONTAINER_ARG, CONTAINER_ID_ARG, NEEDS_CTR, PROFILES_ARG
 
 if TYPE_CHECKING:
     from terok_shield import Shield
@@ -89,11 +89,17 @@ def _handle_rules(shield: Shield, container: str) -> None:
         print(f"No rules found for {container}")
 
 
-def _handle_preview(shield: Shield, *, down: bool = False, disengaged: bool = False) -> None:
+def _handle_preview(
+    shield: Shield,
+    *,
+    down: bool = False,
+    disengaged: bool = False,
+    profiles: list[str] | None = None,
+) -> None:
     """Show ruleset that would be applied."""
     if disengaged and not down:
         raise ValueError("--disengage requires --down")
-    ruleset = shield.preview(down=down, disengaged=disengaged)
+    ruleset = shield.preview(down=down, disengaged=disengaged, profiles=profiles)
     label = ("disengaged" if disengaged else "down") if down else "up"
     print(f"# Ruleset preview ({label}):")
     print(ruleset)
@@ -168,7 +174,15 @@ PREVIEW = CommandDef(
     name="preview",
     help="Show ruleset that would be applied",
     handler=_handle_preview,
+    epilog=(
+        "With --profiles, the ruleset the hook applies at createRuntime for those "
+        "profiles: their +localhost:PORT grants in the preamble, their literal IPs "
+        "seeding the project-allow set.  Domains are learned by dnsmasq at runtime, "
+        "not resolved here.  Needs no setup, podman or state:\n\n"
+        "  terok-shield preview --profiles my-project > rules.nft"
+    ),
     args=(
+        PROFILES_ARG,
         ArgDef(name="--down", action="store_true", help="Show the DOWN-posture ruleset"),
         ArgDef(
             name="--disengage",

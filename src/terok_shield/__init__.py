@@ -467,9 +467,24 @@ class Shield:
         """Query the live nft ruleset to determine a container's shield state."""
         return self._mode.shield_state(container)
 
-    def preview(self, *, down: bool = False, disengaged: bool = False) -> str:
-        """Generate the ruleset that would be applied to a container."""
-        return self._mode.preview(down=down, disengaged=disengaged)
+    def preview(
+        self,
+        *,
+        down: bool = False,
+        disengaged: bool = False,
+        profiles: list[str] | None = None,
+    ) -> str:
+        """Generate the ruleset that would be applied to a container.
+
+        *profiles* compose into the preview exactly as they would into a
+        launch (``None`` means the config's ``default_profiles``, as in
+        [`pre_start`][terok_shield.Shield.pre_start]): their host-service
+        grants join the preamble and their literal IPs seed the allow set.
+        See [`HookMode.preview`][terok_shield.hooks.mode.HookMode.preview].
+        """
+        if profiles is None:
+            profiles = list(self.config.default_profiles)
+        return self._mode.preview(down=down, disengaged=disengaged, profiles=profiles)
 
     def resolve(self, *, force: bool = False) -> list[str]:
         """Re-resolve the container's authored policy into its static-resolution caches.

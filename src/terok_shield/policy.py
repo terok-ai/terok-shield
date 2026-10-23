@@ -84,16 +84,25 @@ def parse_policy(text: str) -> list[PolicyEntry]:
     return entries
 
 
+def render_target(entry: PolicyEntry) -> str:
+    """Render an entry's ``target[:port]`` — the line minus its action and markers.
+
+    An IPv6 literal carrying a port is bracketed, else ``addr:port`` is
+    indistinguishable from a longer IPv6 address on re-parse.
+    """
+    if entry.port is None:
+        return entry.target
+    host = f"[{entry.target}]" if ":" in entry.target else entry.target
+    return f"{host}:{entry.port}"
+
+
 def render_policy(entries: list[PolicyEntry]) -> str:
     """Render entries back to canonical text (round-trips [`parse_policy`][terok_shield.policy.parse_policy])."""
-    lines = []
-    for e in entries:
-        # An IPv6 literal carrying a port must be bracketed, else ``addr:port``
-        # is indistinguishable from a longer IPv6 address on re-parse.
-        host = f"[{e.target}]" if (e.port is not None and ":" in e.target) else e.target
-        line = f"{e.action}{host}" + (f":{e.port}" if e.port is not None else "")
-        line += "".join(f" %{key}={value}" for key, value in sorted(e.meta.items()))
-        lines.append(line)
+    lines = [
+        f"{e.action}{render_target(e)}"
+        + "".join(f" %{key}={value}" for key, value in sorted(e.meta.items()))
+        for e in entries
+    ]
     return "\n".join(lines) + "\n" if lines else ""
 
 
@@ -211,4 +220,5 @@ __all__ = [
     "localhost_ports",
     "parse_policy",
     "render_policy",
+    "render_target",
 ]
