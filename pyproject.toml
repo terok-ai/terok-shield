@@ -36,7 +36,7 @@ dynamic = ["version"]
 dependencies = [
     "PyYAML~=6.0",
     "pydantic~=2.13",
-    "terok-util @ https://github.com/terok-ai/terok-util/releases/download/v0.5.0a1/terok_util-0.5.0a1-py3-none-any.whl",
+    "terok-util @ git+https://github.com/sliwowitz/terok-util@fix/1315-rootless-storage",
 ]
 
 [project.urls]
