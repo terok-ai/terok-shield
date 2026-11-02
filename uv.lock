@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12, <4.0"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -1654,6 +1654,7 @@ wheels = [
 [[package]]
 name = "terok-shield"
 source = { editable = "." }
+default-groups = ["dev", "test"]
 dependencies = [
     { name = "pydantic" },
     { name = "pyyaml" },
@@ -1690,7 +1691,7 @@ test = [
 requires-dist = [
     { name = "pydantic", specifier = "~=2.13" },
     { name = "pyyaml", specifier = "~=6.0" },
-    { name = "terok-util", url = "https://github.com/terok-ai/terok-util/releases/download/v0.5.0a2/terok_util-0.5.0a2-py3-none-any.whl" },
+    { name = "terok-util", git = "https://github.com/sliwowitz/terok-util.git?rev=feat%2Ftask-hosts-file" },
 ]
 
 [package.metadata.requires-dev]
@@ -1721,24 +1722,13 @@ test = [
 
 [[package]]
 name = "terok-util"
-version = "0.5.0a2"
-source = { url = "https://github.com/terok-ai/terok-util/releases/download/v0.5.0a2/terok_util-0.5.0a2-py3-none-any.whl" }
+version = "0.5.0a3.dev166+gd56891608"
+source = { git = "https://github.com/sliwowitz/terok-util.git?rev=feat%2Ftask-hosts-file#d568916082d928baa27e315d525a4e65e0aebea6" }
 dependencies = [
     { name = "jinja2" },
     { name = "packaging" },
     { name = "platformdirs" },
     { name = "ruamel-yaml" },
-]
-wheels = [
-    { url = "https://github.com/terok-ai/terok-util/releases/download/v0.5.0a2/terok_util-0.5.0a2-py3-none-any.whl", hash = "sha256:eb4946d2179dfef6308e97de08ff4adb03242fbee134b7d88ceccb4823c390d7" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "jinja2", specifier = "~=3.1" },
-    { name = "packaging", specifier = "~=26.3" },
-    { name = "platformdirs", specifier = "~=4.12" },
-    { name = "ruamel-yaml", specifier = "==0.19.1" },
 ]
 
 [[package]]

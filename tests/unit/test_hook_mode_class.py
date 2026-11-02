@@ -51,6 +51,7 @@ from ..testnet import (
     AWS_IMDS_V4,
     BROAD_CIDR_8,
     CONTAINER_HOSTNAME,
+    DOCKER_HOSTNAME,
     IPV6_CLOUDFLARE,
     IPV6_VERBOSE,
     IPV6_VERBOSE_CANONICAL,
@@ -215,6 +216,7 @@ def test_pre_start_uses_pasta_for_rootless_mode(
 
     add_host_arg = args[args.index("--add-host") + 1]
     assert add_host_arg == f"{CONTAINER_HOSTNAME}:{PASTA_HOST_LOOPBACK_MAP}"
+    assert f"{DOCKER_HOSTNAME}:{PASTA_HOST_LOOPBACK_MAP}" in args
 
 
 @mock.patch("terok_shield.hooks.mode.HooksInstaller.check_setup", return_value=())
@@ -1320,6 +1322,7 @@ def test_pre_start_slirp4netns_network_args(
     net_arg = args[args.index("--network") + 1]
     assert net_arg == "slirp4netns:allow_host_loopback=true"
     assert f"{CONTAINER_HOSTNAME}:{SLIRP4NETNS_GATEWAY}" in args
+    assert f"{DOCKER_HOSTNAME}:{SLIRP4NETNS_GATEWAY}" in args
     # The gateways the container launches with are recorded for every later reader.
     bundle = StateBundle(harness.config.state_dir)
     assert bundle.read_gateways() == (SLIRP4NETNS_GATEWAY, SLIRP4NETNS_GATEWAY_V6)
@@ -2968,6 +2971,7 @@ def test_live_override_of_a_name_opens_its_sinkhole_on_a_dnsmasq_tier(
     [
         pytest.param(LOCALHOST, id="localhost"),
         pytest.param(CONTAINER_HOSTNAME, id="host-alias"),
+        pytest.param(DOCKER_HOSTNAME, id="docker-host-alias"),
         pytest.param(f"*.{TEST_DOMAIN}", id="wildcard"),
         pytest.param("not a target", id="garbage"),
         pytest.param(AWS_IMDS_V4, id="hard-deny"),

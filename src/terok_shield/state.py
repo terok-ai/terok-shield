@@ -54,7 +54,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .config import DnsTier, ShieldState
-from .nft.constants import CONTAINER_HOST_ALIAS, HARD_DENY_RANGES
+from .nft.constants import CONTAINER_HOST_ALIAS, CONTAINER_HOST_ALIASES, HARD_DENY_RANGES
 from .podman_info.network import host_loopback_addresses
 from .policy import (
     EXPIRES_MARKER,
@@ -588,8 +588,8 @@ class OverrideSeed:
 
 # ── Rotation risk: names a DNS tier pins to launch-time addresses ──
 
-STABLE_LOCAL_NAMES = frozenset({LOCALHOST, CONTAINER_HOST_ALIAS})
-"""Names that never rotate: the host's own ``localhost`` and the alias the shield pins to it.
+STABLE_LOCAL_NAMES = frozenset({LOCALHOST, *CONTAINER_HOST_ALIASES})
+"""Names that never rotate: the host's own ``localhost`` and the aliases the shield pins to it.
 
 ``*.localhost`` names (RFC 6761) count too — they never leave the loopback.
 """

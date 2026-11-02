@@ -43,6 +43,7 @@ from terok_shield.verbs.stream import _handle_simple_clearance, _handle_watch
 from ..testnet import (
     AWS_IMDS_V4,
     CONTAINER_HOSTNAME,
+    DOCKER_HOSTNAME,
     TEST_DOMAIN,
     TEST_IP1,
     TEST_IP2,
@@ -634,6 +635,7 @@ class TestOverrideVerb:
             pytest.param(AWS_IMDS_V4, "inside the hard-deny floor", id="hard-deny"),
             pytest.param(PASTA_HOST_LOOPBACK_MAP, "the host's own loopback", id="host-map"),
             pytest.param(CONTAINER_HOSTNAME, "is the host itself", id="host-alias"),
+            pytest.param(DOCKER_HOSTNAME, "is the host itself", id="docker-host-alias"),
             pytest.param(LOCALHOST, "is the host itself", id="localhost"),
         ],
     )

@@ -36,6 +36,10 @@ PASTA_HOST_LOOPBACK_MAP = "169.254.1.2"
 # slirp4netns — so it never resolves through DNS and never rotates.
 CONTAINER_HOST_ALIAS = "host.containers.internal"
 
+# Podman also names the host ``host.docker.internal``.  Without a pin, podman
+# gives that name a host address it detects, which can be a private LAN address.
+CONTAINER_HOST_ALIASES = (CONTAINER_HOST_ALIAS, "host.docker.internal")
+
 # ── Tier denial floors (two distinct, differently-overridable classes) ──
 #
 # HARD_DENY_RANGES — link-local, including the cloud-metadata IMDS

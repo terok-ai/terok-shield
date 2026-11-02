@@ -41,6 +41,7 @@ from ..testnet import (
     AWS_IMDS_V6,
     CONTAINER_HOSTNAME,
     DEV_PYPI_DOMAIN,
+    DOCKER_HOSTNAME,
     IPV6_CLOUDFLARE,
     IPV6_NET1,
     IPV6_VERBOSE,
@@ -1325,7 +1326,10 @@ def test_rotation_risk_is_none_when_nothing_can_rotate(tmp_path: Path) -> None:
     bundle = StateBundle(tmp_path)
     bundle.ensure_dirs()
     bundle.dns_tier.write_text(f"{DnsTier.GETENT.value}\n")
-    bundle.write_tier("project_allow", f"+{TEST_IP1}\n+{LOCALHOST_GRANT}\n+{CONTAINER_HOSTNAME}\n")
+    bundle.write_tier(
+        "project_allow",
+        f"+{TEST_IP1}\n+{LOCALHOST_GRANT}\n+{CONTAINER_HOSTNAME}\n+{DOCKER_HOSTNAME}\n",
+    )
     bundle.write_tier("security_deny", f"-{TEST_IP2}\n")
     assert bundle.read_rotation_risk() is None
 
