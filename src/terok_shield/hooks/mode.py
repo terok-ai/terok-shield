@@ -1468,6 +1468,14 @@ class HookMode:
         else:
             stdin = f"delete table {NFT_TABLE}\n{rs}"
         snapshot = [] if current == ShieldState.OFFLINE else self._snapshot_allow_sets(container)
+        # Publish the accepting table and its mandatory deny entries together.
+        # A later seed would leave a window in which a denied connection could
+        # become established and survive the restored deny policy.
+        bundle = StateBundle(sd)
+        seeds = "" if disengaged else add_deny_elements_dual(sorted(bundle.read_denied_ips()))
+        seeds += _override_elements(bundle.read_override_seeds(), time.time())
+        if seeds:
+            stdin += f"\n{seeds}"
         self._runner.nft_via_nsenter(container, stdin=stdin)
 
         # Carry the allow-set contents (seeds + dnsmasq-learned IPs) across
@@ -1476,14 +1484,10 @@ class HookMode:
         # forget every learned IP after one down/up round trip.
         self._restore_allow_sets(container, snapshot, skip=())
 
-        # Repopulate deny sets so the deny policy is enforced even when shield
-        # is down, and the t10 override set so break-glass hosts stay above it.
-        # DISENGAGED references no deny set, only the override, whose accept
-        # keeps break-glass traffic out of the DOWN catch-all's records.
-        if disengaged:
-            self._reseed_override(container, sd)
-        else:
-            self._reseed_deny_and_override(container, sd)
+        # The nft plane is already complete. Synchronize its DNS companion
+        # without reopening the transaction or duplicating interval elements.
+        self._note_override_refusals(container, sd)
+        self._sync_dns_plane(container, sd)
 
         output = self._runner.nft_via_nsenter(
             container,

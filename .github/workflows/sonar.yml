@@ -18,6 +18,6 @@ permissions:
 
 jobs:
   sonar:
-    uses: terok-ai/terok-util/.github/workflows/fleet-sonar.yml@v0.4.0
+    uses: sliwowitz/terok-util/.github/workflows/fleet-sonar.yml@fix/container-boundaries
     secrets:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
