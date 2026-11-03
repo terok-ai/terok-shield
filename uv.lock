@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.12, <4.0"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -1654,7 +1654,6 @@ wheels = [
 [[package]]
 name = "terok-shield"
 source = { editable = "." }
-default-groups = ["dev", "test"]
 dependencies = [
     { name = "pydantic" },
     { name = "pyyaml" },
@@ -1691,7 +1690,7 @@ test = [
 requires-dist = [
     { name = "pydantic", specifier = "~=2.13" },
     { name = "pyyaml", specifier = "~=6.0" },
-    { name = "terok-util", url = "https://github.com/terok-ai/terok-util/releases/download/v0.5.0a1/terok_util-0.5.0a1-py3-none-any.whl" },
+    { name = "terok-util", url = "https://github.com/terok-ai/terok-util/releases/download/v0.5.0a2/terok_util-0.5.0a2-py3-none-any.whl" },
 ]
 
 [package.metadata.requires-dev]
@@ -1722,8 +1721,8 @@ test = [
 
 [[package]]
 name = "terok-util"
-version = "0.5.0a1"
-source = { url = "https://github.com/terok-ai/terok-util/releases/download/v0.5.0a1/terok_util-0.5.0a1-py3-none-any.whl" }
+version = "0.5.0a2"
+source = { url = "https://github.com/terok-ai/terok-util/releases/download/v0.5.0a2/terok_util-0.5.0a2-py3-none-any.whl" }
 dependencies = [
     { name = "jinja2" },
     { name = "packaging" },
@@ -1731,7 +1730,7 @@ dependencies = [
     { name = "ruamel-yaml" },
 ]
 wheels = [
-    { url = "https://github.com/terok-ai/terok-util/releases/download/v0.5.0a1/terok_util-0.5.0a1-py3-none-any.whl", hash = "sha256:4621ba4564fb17d56f017cacadf09c9fbe91271ae400ee56e006935cc3707a17" },
+    { url = "https://github.com/terok-ai/terok-util/releases/download/v0.5.0a2/terok_util-0.5.0a2-py3-none-any.whl", hash = "sha256:eb4946d2179dfef6308e97de08ff4adb03242fbee134b7d88ceccb4823c390d7" },
 ]
 
 [package.metadata]
