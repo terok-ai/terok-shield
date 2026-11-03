@@ -1086,15 +1086,18 @@ class StateBundle:
 
     @contextlib.contextmanager
     def override_change(self) -> Iterator[None]:
-        """Hold the t10 lock: one live grant or revoke at a time, across processes.
+        """Serialize live grants, revokes, denies, and table rebuilds across processes.
 
         A grant and a revoke each read the t10 tier, swap the running t10
         set from it and record the change.  Interleaved, one would swap from
         a tier the other just changed — a revoked address back into the
         kernel, which the tier no longer records, or one grant's element out
         of it.  So each holds this lock from its read of the tier through its
-        swap and record.  A grant resolves its names before taking it, so a
-        revoke never waits on a resolver.  The lock is an exclusive ``flock``
+        swap and record.  A rebuild holds the same lock from its policy
+        snapshot through publication, and a live deny through its kernel
+        update and overlay record, so neither can overwrite the other with
+        an older policy.  Names resolve before taking it, so a revoke never
+        waits on a resolver.  The lock is an exclusive ``flock``
         on [`override_lock`][terok_shield.state.StateBundle.override_lock],
         released when the block ends, however it ends.
 

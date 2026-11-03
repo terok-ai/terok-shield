@@ -9,11 +9,13 @@ import logging
 import os
 import re
 import sys
-from collections.abc import Callable
-from contextlib import AbstractContextManager
+from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from threading import Event, get_ident
 from unittest import mock
 from urllib.parse import unquote
 
@@ -3643,6 +3645,82 @@ def test_a_grant_and_a_revoke_each_swap_holding_the_t10_lock(
 
     assert held_at_swap == [True]
     assert not _t10_lock_held(bundle)
+
+
+@pytest.mark.parametrize("transition", ["up", "down"])
+@pytest.mark.parametrize("mutation", ["revoke", "deny"])
+def test_a_policy_change_cannot_finish_inside_a_rebuild_snapshot(
+    make_hook_mode: HookModeHarnessFactory,
+    monkeypatch: pytest.MonkeyPatch,
+    transition: str,
+    mutation: str,
+) -> None:
+    """A revoke or deny waits for publication, then changes the rebuilt table rather than the old one."""
+    harness = make_hook_mode()
+    bundle = _launched(harness.config.state_dir, DnsTier.LOOKUP)
+    bundle.upsert_override(TEST_IP2, _SOON_ISO, reason=_REASON)
+    harness.mode._container_ruleset = lambda _c: harness.ruleset
+    harness.ruleset.build_up.return_value = "up ruleset"
+    harness.ruleset.build_down.return_value = "down ruleset"
+    harness.ruleset.verify_up.return_value = []
+    harness.ruleset.verify_down.return_value = []
+    harness.ruleset.add_elements_dual.return_value = ""
+    captured, attempting, finished = Event(), Event(), Event()
+    rebuilding_thread = get_ident()
+    writes: list[str] = []
+    read_seeds = StateBundle.read_override_seeds
+    take_lock = StateBundle.override_change
+
+    def _pause_after_snapshot(state: StateBundle, *args: object, **kwargs: object) -> list:
+        seeds = read_seeds(state, *args, **kwargs)
+        if not captured.is_set():
+            assert _t10_lock_held(bundle)
+            captured.set()
+            assert attempting.wait(timeout=5), "policy mutation never reached the shared lock"
+            assert not finished.is_set(), "mutation completed before its snapshot was published"
+        return seeds
+
+    @contextmanager
+    def _observe_lock(state: StateBundle) -> Iterator[None]:
+        if get_ident() != rebuilding_thread:
+            attempting.set()
+        with take_lock(state):
+            yield
+
+    def _write(_container: str, *args: str, stdin: str | None = None) -> str:
+        if stdin or (args and args[0] in ("add", "delete")):
+            writes.append("rebuild" if get_ident() == rebuilding_thread else mutation)
+            assert _t10_lock_held(bundle)
+        return ""
+
+    def _mutate() -> None:
+        assert captured.wait(timeout=5), "rebuild never captured its seed snapshot"
+        if mutation == "revoke":
+            harness.mode.revoke_override("test-ctr", TEST_IP2)
+        else:
+            harness.mode.deny_ip("test-ctr", TEST_IP1)
+        finished.set()
+
+    monkeypatch.setattr(StateBundle, "read_override_seeds", _pause_after_snapshot)
+    monkeypatch.setattr(StateBundle, "override_change", _observe_lock)
+    harness.runner.nft_via_nsenter.side_effect = _write
+    with (
+        mock.patch.object(HookMode, "shield_state", return_value=ShieldState.UP),
+        ThreadPoolExecutor(max_workers=1) as workers,
+    ):
+        changed = workers.submit(_mutate)
+        getattr(harness.mode, f"shield_{transition}")("test-ctr")
+        changed.result(timeout=5)
+
+    assert writes[0] == "rebuild"
+    assert writes[-1] == mutation
+    assert writes == sorted(writes, key=lambda action: action != "rebuild")
+    assert finished.is_set()
+    assert not _t10_lock_held(bundle)
+    if mutation == "revoke":
+        assert bundle.override_entries(TEST_IP2) == []
+    else:
+        assert TEST_IP1 in bundle.read_denied_ips()
 
 
 _AN_HOUR = 3600
