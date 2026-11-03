@@ -9,11 +9,13 @@ import logging
 import os
 import re
 import sys
-from collections.abc import Callable
-from contextlib import AbstractContextManager
+from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from threading import Event, get_ident
 from unittest import mock
 from urllib.parse import unquote
 
@@ -2266,9 +2268,74 @@ def test_shield_down_repopulates_deny_sets(
 
     harness.mode.shield_down("test-ctr", disengaged=False)
 
-    # Verify deny elements were sent via nsenter
-    deny_calls = [c for c in harness.runner.nft_via_nsenter.call_args_list if c.kwargs.get("stdin")]
-    assert any(TEST_IP1 in (c.kwargs.get("stdin", "") or "") for c in deny_calls)
+    # The table and its deny elements become visible in the same transaction.
+    transactions = [stdin for stdin in _stdins(harness) if stdin]
+    assert len(transactions) == 1
+    assert "down ruleset" in transactions[0]
+    assert TEST_IP1 in transactions[0]
+
+
+@pytest.mark.parametrize("initial", [ShieldState.UP, ShieldState.OFFLINE])
+def test_shield_down_installs_both_deny_families_and_override_atomically(
+    make_hook_mode: HookModeHarnessFactory, initial: ShieldState
+) -> None:
+    """Every accepting table publication already contains its mandatory denies."""
+    harness = make_hook_mode()
+    harness.mode._container_ruleset = lambda _c: harness.ruleset
+    harness.runner.nft_via_nsenter.return_value = ""
+    harness.ruleset.build_down.return_value = "down ruleset"
+    harness.ruleset.verify_down.return_value = []
+    bundle = StateBundle(harness.config.state_dir)
+    bundle.ensure_dirs()
+    bundle.write_tier("security_deny", f"-{TEST_IP1}\n-{IPV6_CLOUDFLARE}\n")
+    bundle.write_tier("override", f"+{TEST_IP2}\n")
+
+    with mock.patch.object(HookMode, "shield_state", return_value=initial):
+        harness.mode.shield_down("test-ctr")
+
+    (transaction,) = [stdin for stdin in _stdins(harness) if stdin]
+    assert ("delete table" in transaction) is (initial != ShieldState.OFFLINE)
+    assert "down ruleset" in transaction
+    assert f"t20_security_deny_v4 {{ {TEST_IP1}" in transaction
+    assert f"t20_security_deny_v6 {{ {IPV6_CLOUDFLARE}" in transaction
+    assert f"t10_override_v4 {{ {TEST_IP2}" in transaction
+
+
+def test_shield_down_cannot_publish_without_reading_deny_seed(
+    make_hook_mode: HookModeHarnessFactory,
+) -> None:
+    """An unreadable policy prevents the accepting transaction from being sent."""
+    harness = make_hook_mode()
+    harness.mode._container_ruleset = lambda _c: harness.ruleset
+    harness.ruleset.build_down.return_value = "down ruleset"
+    with (
+        mock.patch.object(HookMode, "shield_state", return_value=ShieldState.OFFLINE),
+        mock.patch.object(StateBundle, "read_denied_ips", side_effect=OSError("unreadable")),
+        pytest.raises(OSError, match="unreadable"),
+    ):
+        harness.mode.shield_down("test-ctr")
+    assert _stdins(harness) == []
+
+
+def test_shield_down_failed_transaction_does_not_attempt_later_seed(
+    make_hook_mode: HookModeHarnessFactory,
+) -> None:
+    """An nft failure leaves no later accepting-table or seed transaction to run."""
+    harness = make_hook_mode()
+    harness.mode._container_ruleset = lambda _c: harness.ruleset
+    harness.ruleset.build_down.return_value = "down ruleset"
+    harness.runner.nft_via_nsenter.side_effect = ExecError(["nft"], 1, "rejected")
+    bundle = StateBundle(harness.config.state_dir)
+    bundle.ensure_dirs()
+    bundle.write_tier("security_deny", f"-{TEST_IP1}\n")
+    with (
+        mock.patch.object(HookMode, "shield_state", return_value=ShieldState.OFFLINE),
+        pytest.raises(ExecError),
+    ):
+        harness.mode.shield_down("test-ctr")
+    (transaction,) = _stdins(harness)
+    assert "down ruleset" in transaction
+    assert TEST_IP1 in transaction
 
 
 @pytest.mark.parametrize("transition", ["up", "down"])
@@ -3578,6 +3645,125 @@ def test_a_grant_and_a_revoke_each_swap_holding_the_t10_lock(
 
     assert held_at_swap == [True]
     assert not _t10_lock_held(bundle)
+
+
+@pytest.mark.parametrize("transition", ["up", "down"])
+@pytest.mark.parametrize("mutation", ["revoke", "deny"])
+def test_a_policy_change_cannot_finish_inside_a_rebuild_snapshot(
+    make_hook_mode: HookModeHarnessFactory,
+    monkeypatch: pytest.MonkeyPatch,
+    transition: str,
+    mutation: str,
+) -> None:
+    """A revoke or deny waits for publication, then changes the rebuilt table rather than the old one."""
+    harness = make_hook_mode()
+    bundle = _launched(harness.config.state_dir, DnsTier.LOOKUP)
+    bundle.upsert_override(TEST_IP2, _SOON_ISO, reason=_REASON)
+    harness.mode._container_ruleset = lambda _c: harness.ruleset
+    harness.ruleset.build_up.return_value = "up ruleset"
+    harness.ruleset.build_down.return_value = "down ruleset"
+    harness.ruleset.verify_up.return_value = []
+    harness.ruleset.verify_down.return_value = []
+    harness.ruleset.add_elements_dual.return_value = ""
+    captured, attempting, finished = Event(), Event(), Event()
+    rebuilding_thread = get_ident()
+    writes: list[str] = []
+    read_seeds = StateBundle.read_override_seeds
+    take_lock = StateBundle.override_change
+
+    def _pause_after_snapshot(state: StateBundle, *args: object, **kwargs: object) -> list:
+        seeds = read_seeds(state, *args, **kwargs)
+        if not captured.is_set():
+            assert _t10_lock_held(bundle)
+            captured.set()
+            assert attempting.wait(timeout=5), "policy mutation never reached the shared lock"
+            assert not finished.is_set(), "mutation completed before its snapshot was published"
+        return seeds
+
+    @contextmanager
+    def _observe_lock(state: StateBundle) -> Iterator[None]:
+        if get_ident() != rebuilding_thread:
+            attempting.set()
+        with take_lock(state):
+            yield
+
+    def _write(_container: str, *args: str, stdin: str | None = None) -> str:
+        if stdin or (args and args[0] in ("add", "delete")):
+            writes.append("rebuild" if get_ident() == rebuilding_thread else mutation)
+            assert _t10_lock_held(bundle)
+        return ""
+
+    def _mutate() -> None:
+        assert captured.wait(timeout=5), "rebuild never captured its seed snapshot"
+        if mutation == "revoke":
+            harness.mode.revoke_override("test-ctr", TEST_IP2)
+        else:
+            harness.mode.deny_ip("test-ctr", TEST_IP1)
+        finished.set()
+
+    monkeypatch.setattr(StateBundle, "read_override_seeds", _pause_after_snapshot)
+    monkeypatch.setattr(StateBundle, "override_change", _observe_lock)
+    harness.runner.nft_via_nsenter.side_effect = _write
+    with (
+        mock.patch.object(HookMode, "shield_state", return_value=ShieldState.UP),
+        ThreadPoolExecutor(max_workers=1) as workers,
+    ):
+        changed = workers.submit(_mutate)
+        getattr(harness.mode, f"shield_{transition}")("test-ctr")
+        changed.result(timeout=5)
+
+    assert writes[0] == "rebuild"
+    assert writes[-1] == mutation
+    assert writes == sorted(writes, key=lambda action: action != "rebuild")
+    assert finished.is_set()
+    assert not _t10_lock_held(bundle)
+    if mutation == "revoke":
+        assert bundle.override_entries(TEST_IP2) == []
+    else:
+        assert TEST_IP1 in bundle.read_denied_ips()
+
+
+@pytest.mark.parametrize("transition", ["up", "down"])
+def test_dns_sync_leaves_the_rebuilt_firewall_available_for_policy_changes(
+    make_hook_mode: HookModeHarnessFactory, transition: str
+) -> None:
+    """A slow DNS sync cannot retain the lock needed to revoke an override or deny an IP."""
+    harness = make_hook_mode()
+    bundle = _launched(harness.config.state_dir, DnsTier.LOOKUP)
+    bundle.upsert_override(TEST_IP2, _SOON_ISO, reason=_REASON)
+    harness.mode._container_ruleset = lambda _c: harness.ruleset
+    harness.ruleset.build_up.return_value = "up ruleset"
+    harness.ruleset.build_down.return_value = "down ruleset"
+    harness.ruleset.verify_up.return_value = []
+    harness.ruleset.verify_down.return_value = []
+    harness.ruleset.add_elements_dual.return_value = ""
+    harness.runner.nft_via_nsenter.return_value = ""
+
+    def _sync(container: str, state_dir: Path) -> None:
+        assert container == "test-ctr"
+        assert state_dir == bundle.state_dir
+        assert not _t10_lock_held(bundle), (
+            "DNS synchronization must not block kernel policy changes"
+        )
+        restore.assert_called_once()
+        assert any(
+            "t10_override_v4" in command and TEST_IP2 in command for command in _stdins(harness)
+        )
+        harness.mode.revoke_override(container, TEST_IP2)
+        harness.mode.deny_ip(container, TEST_IP1)
+
+    with (
+        mock.patch.object(HookMode, "shield_state", return_value=ShieldState.UP),
+        mock.patch.object(
+            harness.mode, "_restore_allow_sets", wraps=harness.mode._restore_allow_sets
+        ) as restore,
+        mock.patch.object(HookMode, "_sync_dns_plane", side_effect=_sync) as sync,
+    ):
+        getattr(harness.mode, f"shield_{transition}")("test-ctr")
+
+    sync.assert_called_once_with("test-ctr", bundle.state_dir)
+    assert bundle.override_entries(TEST_IP2) == []
+    assert TEST_IP1 in bundle.read_denied_ips()
 
 
 _AN_HOUR = 3600

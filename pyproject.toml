@@ -36,7 +36,7 @@ dynamic = ["version"]
 dependencies = [
     "PyYAML~=6.0",
     "pydantic~=2.13",
-    "terok-util @ https://github.com/terok-ai/terok-util/releases/download/v0.5.0a3/terok_util-0.5.0a3-py3-none-any.whl",
+    "terok-util @ https://github.com/terok-ai/terok-util/releases/download/v0.5.0a4/terok_util-0.5.0a4-py3-none-any.whl",
 ]
 
 [project.urls]
@@ -87,7 +87,7 @@ allow-direct-references = true
 
 [tool.hatch.version]
 source = "vcs"
-fallback-version = "0.10.0a4"
+fallback-version = "0.10.0a5"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/terok_shield"]

@@ -1400,31 +1400,33 @@ class HookMode:
         sd = self._config.state_dir.resolve()
         bundle = StateBundle(sd)
 
-        # Best-effort nft delete (IP may not be in the set)
-        try:
-            self._runner.nft_via_nsenter(
-                container,
-                "delete",
-                "element",
-                "inet",
-                "terok_shield",
-                self._set_for_ip(ip),
-                f"{{ {ip} }}",
-            )
-        except ExecError as e:
-            stderr = str(e).lower()
-            if not any(
-                pat in stderr for pat in ("no such file", "element does not exist", "not in set")
-            ):
-                logger.warning("nft delete element failed for %s: %s", ip, e)
+        with bundle.override_change():
+            # Best-effort nft delete (IP may not be in the set)
+            try:
+                self._runner.nft_via_nsenter(
+                    container,
+                    "delete",
+                    "element",
+                    "inet",
+                    "terok_shield",
+                    self._set_for_ip(ip),
+                    f"{{ {ip} }}",
+                )
+            except ExecError as e:
+                stderr = str(e).lower()
+                if not any(
+                    pat in stderr
+                    for pat in ("no such file", "element does not exist", "not in set")
+                ):
+                    logger.warning("nft delete element failed for %s: %s", ip, e)
 
-        # Add to nft deny set (prevents dnsmasq from re-allowing)
-        nft_cmd = add_deny_elements_dual([ip])
-        if nft_cmd:
-            self._nft_apply_best_effort(container, nft_cmd)
+            # Add to nft deny set (prevents dnsmasq from re-allowing)
+            nft_cmd = add_deny_elements_dual([ip])
+            if nft_cmd:
+                self._nft_apply_best_effort(container, nft_cmd)
 
-        # Persist to the runtime overlay (flips any prior allow; sticks across restart).
-        bundle.overlay_set("-", ip)
+            # Persist before any rebuild can snapshot the policy.
+            bundle.overlay_set("-", ip)
 
     def _set_for_ip(self, ip: str) -> str:
         """Return the tier-40 project-allow nft set for an IP address (by family)."""
@@ -1468,22 +1470,25 @@ class HookMode:
         else:
             stdin = f"delete table {NFT_TABLE}\n{rs}"
         snapshot = [] if current == ShieldState.OFFLINE else self._snapshot_allow_sets(container)
-        self._runner.nft_via_nsenter(container, stdin=stdin)
+        # Publish the accepting table and its mandatory deny entries together.
+        # A later seed would leave a window in which a denied connection could
+        # become established and survive the restored deny policy.
+        bundle = StateBundle(sd)
+        with bundle.override_change():
+            seeds = "" if disengaged else add_deny_elements_dual(sorted(bundle.read_denied_ips()))
+            seeds += _override_elements(bundle.read_override_seeds(), time.time())
+            if seeds:
+                stdin += f"\n{seeds}"
+            self._runner.nft_via_nsenter(container, stdin=stdin)
 
-        # Carry the allow-set contents (seeds + dnsmasq-learned IPs) across
-        # the rebuild — the down posture does not evaluate them, but the later
-        # ``shield up`` snapshots this table, so dropping them here would
-        # forget every learned IP after one down/up round trip.
-        self._restore_allow_sets(container, snapshot, skip=())
+            # Carry learned IPs across the rebuild before a live deny can remove one.
+            # DOWN does not evaluate them, but a later UP snapshots this table.
+            self._restore_allow_sets(container, snapshot, skip=())
 
-        # Repopulate deny sets so the deny policy is enforced even when shield
-        # is down, and the t10 override set so break-glass hosts stay above it.
-        # DISENGAGED references no deny set, only the override, whose accept
-        # keeps break-glass traffic out of the DOWN catch-all's records.
-        if disengaged:
-            self._reseed_override(container, sd)
-        else:
-            self._reseed_deny_and_override(container, sd)
+        # The nft plane is already complete. Synchronize its DNS companion
+        # without reopening the transaction or duplicating interval elements.
+        self._note_override_refusals(container, sd)
+        self._sync_dns_plane(container, sd)
 
         output = self._runner.nft_via_nsenter(
             container,
@@ -1547,25 +1552,28 @@ class HookMode:
         else:
             stdin = f"delete table {NFT_TABLE}\n{rs}"
         snapshot = [] if current == ShieldState.OFFLINE else self._snapshot_allow_sets(container)
-        self._runner.nft_via_nsenter(container, stdin=stdin)
+        with StateBundle(sd).override_change():
+            self._runner.nft_via_nsenter(container, stdin=stdin)
 
-        # Re-add effective IPs (allowed minus denied)
-        unique_ips = StateBundle(sd).read_effective_ips()
-        if unique_ips:
-            elements_cmd = ruleset.add_elements_dual(unique_ips)
-            if elements_cmd:
-                self._runner.nft_via_nsenter(container, stdin=elements_cmd)
+            # Re-add effective IPs (allowed minus denied)
+            unique_ips = StateBundle(sd).read_effective_ips()
+            if unique_ips:
+                elements_cmd = ruleset.add_elements_dual(unique_ips)
+                if elements_cmd:
+                    self._runner.nft_via_nsenter(container, stdin=elements_cmd)
 
-        # Repopulate the deny sets and the t10 override set from the bundle
-        denied_ips = self._reseed_deny_and_override(container, sd)
+            # Repopulate the deny sets and the t10 override set from the bundle
+            denied_ips = self._reseed_deny_and_override(container, sd)
 
-        # Restore the snapshot, minus everything the rebuild already re-added
-        # (a duplicate/overlapping element would abort the nft transaction)
-        # and minus denied entries (deny_ip() removed them from the allow set
-        # deliberately — a down/up round trip must not resurrect them).
-        self._restore_allow_sets(container, snapshot, skip=[*unique_ips, *denied_ips])
+            # Restore the snapshot, minus everything the rebuild already re-added
+            # (a duplicate/overlapping element would abort the nft transaction)
+            # and minus denied entries (deny_ip() removed them from the allow set
+            # deliberately — a down/up round trip must not resurrect them).
+            self._restore_allow_sets(container, snapshot, skip=[*unique_ips, *denied_ips])
 
         # Gateway addresses are baked into the ruleset — no repopulation needed.
+        self._note_override_refusals(container, sd)
+        self._sync_dns_plane(container, sd)
 
         output = self._runner.nft_via_nsenter(
             container,
@@ -1614,20 +1622,16 @@ class HookMode:
         return denied_ips
 
     def _reseed_override(self, container: str, sd: Path) -> None:
-        """Repopulate the t10 override set after a table rebuild, from the bundle alone — both planes.
+        """Repopulate the kernel's t10 override set from the bundle after a table rebuild.
 
         Every element that expires is timed afresh from its deadline, so a
         rebuild neither revives an override that ran out nor stretches one
         that is about to.  An address no override may open — the host's own
-        loopback, the hard-deny floor — stays out of the seed and is noted.
-        The DNS plane follows: an override that ran out since dnsmasq last
-        loaded its config stops being punched through the sinkhole
-        (``_sync_dns_plane``).
+        loopback, the hard-deny floor — stays out of the seed. The caller
+        synchronizes DNS after releasing the policy lock.
         """
         if override_cmd := _override_elements(StateBundle(sd).read_override_seeds(), time.time()):
             self._runner.nft_via_nsenter(container, stdin=override_cmd)
-        self._note_override_refusals(container, sd)
-        self._sync_dns_plane(container, sd)
 
     def _sync_dns_plane(self, container: str, sd: Path, *, strict: bool = False) -> None:
         """Reload dnsmasq when its config no longer says what the policy says now.
