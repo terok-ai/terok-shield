@@ -3723,6 +3723,49 @@ def test_a_policy_change_cannot_finish_inside_a_rebuild_snapshot(
         assert TEST_IP1 in bundle.read_denied_ips()
 
 
+@pytest.mark.parametrize("transition", ["up", "down"])
+def test_dns_sync_leaves_the_rebuilt_firewall_available_for_policy_changes(
+    make_hook_mode: HookModeHarnessFactory, transition: str
+) -> None:
+    """A slow DNS sync cannot retain the lock needed to revoke an override or deny an IP."""
+    harness = make_hook_mode()
+    bundle = _launched(harness.config.state_dir, DnsTier.LOOKUP)
+    bundle.upsert_override(TEST_IP2, _SOON_ISO, reason=_REASON)
+    harness.mode._container_ruleset = lambda _c: harness.ruleset
+    harness.ruleset.build_up.return_value = "up ruleset"
+    harness.ruleset.build_down.return_value = "down ruleset"
+    harness.ruleset.verify_up.return_value = []
+    harness.ruleset.verify_down.return_value = []
+    harness.ruleset.add_elements_dual.return_value = ""
+    harness.runner.nft_via_nsenter.return_value = ""
+
+    def _sync(container: str, state_dir: Path) -> None:
+        assert container == "test-ctr"
+        assert state_dir == bundle.state_dir
+        assert not _t10_lock_held(bundle), (
+            "DNS synchronization must not block kernel policy changes"
+        )
+        restore.assert_called_once()
+        assert any(
+            "t10_override_v4" in command and TEST_IP2 in command for command in _stdins(harness)
+        )
+        harness.mode.revoke_override(container, TEST_IP2)
+        harness.mode.deny_ip(container, TEST_IP1)
+
+    with (
+        mock.patch.object(HookMode, "shield_state", return_value=ShieldState.UP),
+        mock.patch.object(
+            harness.mode, "_restore_allow_sets", wraps=harness.mode._restore_allow_sets
+        ) as restore,
+        mock.patch.object(HookMode, "_sync_dns_plane", side_effect=_sync) as sync,
+    ):
+        getattr(harness.mode, f"shield_{transition}")("test-ctr")
+
+    sync.assert_called_once_with("test-ctr", bundle.state_dir)
+    assert bundle.override_entries(TEST_IP2) == []
+    assert TEST_IP1 in bundle.read_denied_ips()
+
+
 _AN_HOUR = 3600
 """Seconds a slow resolution is made to take, by a test's clock — far past a one-minute expiry."""
 

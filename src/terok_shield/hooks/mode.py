@@ -1572,6 +1572,8 @@ class HookMode:
             self._restore_allow_sets(container, snapshot, skip=[*unique_ips, *denied_ips])
 
         # Gateway addresses are baked into the ruleset — no repopulation needed.
+        self._note_override_refusals(container, sd)
+        self._sync_dns_plane(container, sd)
 
         output = self._runner.nft_via_nsenter(
             container,
@@ -1620,20 +1622,16 @@ class HookMode:
         return denied_ips
 
     def _reseed_override(self, container: str, sd: Path) -> None:
-        """Repopulate the t10 override set after a table rebuild, from the bundle alone — both planes.
+        """Repopulate the kernel's t10 override set from the bundle after a table rebuild.
 
         Every element that expires is timed afresh from its deadline, so a
         rebuild neither revives an override that ran out nor stretches one
         that is about to.  An address no override may open — the host's own
-        loopback, the hard-deny floor — stays out of the seed and is noted.
-        The DNS plane follows: an override that ran out since dnsmasq last
-        loaded its config stops being punched through the sinkhole
-        (``_sync_dns_plane``).
+        loopback, the hard-deny floor — stays out of the seed. The caller
+        synchronizes DNS after releasing the policy lock.
         """
         if override_cmd := _override_elements(StateBundle(sd).read_override_seeds(), time.time()):
             self._runner.nft_via_nsenter(container, stdin=override_cmd)
-        self._note_override_refusals(container, sd)
-        self._sync_dns_plane(container, sd)
 
     def _sync_dns_plane(self, container: str, sd: Path, *, strict: bool = False) -> None:
         """Reload dnsmasq when its config no longer says what the policy says now.
