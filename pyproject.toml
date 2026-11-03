@@ -87,7 +87,7 @@ allow-direct-references = true
 
 [tool.hatch.version]
 source = "vcs"
-fallback-version = "0.10.0a4"
+fallback-version = "0.10.0a5"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/terok_shield"]
