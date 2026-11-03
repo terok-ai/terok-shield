@@ -36,7 +36,7 @@ dynamic = ["version"]
 dependencies = [
     "PyYAML~=6.0",
     "pydantic~=2.13",
-    "terok-util @ git+https://github.com/sliwowitz/terok-util@fix/container-boundaries",
+    "terok-util @ https://github.com/terok-ai/terok-util/releases/download/v0.5.0a4/terok_util-0.5.0a4-py3-none-any.whl",
 ]
 
 [project.urls]
