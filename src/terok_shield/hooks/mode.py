@@ -53,6 +53,7 @@ from ..config import (
 from ..dns import apparmor, dnsmasq
 from ..nft.constants import (
     CONTAINER_HOST_ALIAS,
+    CONTAINER_HOST_ALIASES,
     DNSMASQ_BIND_DEFAULT,
     DNSMASQ_BIND_KRUN,
     ELEMENT_TIMEOUT_MAX_SECONDS,
@@ -757,8 +758,7 @@ class HookMode:
             return [
                 "--network",
                 "slirp4netns:allow_host_loopback=true",
-                "--add-host",
-                f"{CONTAINER_HOST_ALIAS}:{gateway_v4}",
+                *_host_alias_args(gateway_v4),
             ]
         # Use pasta --map-host-loopback unconditionally so that
         # CONTAINER_HOST_ALIAS always resolves to an address
@@ -766,8 +766,7 @@ class HookMode:
         return [
             "--network",
             f"pasta:--map-host-loopback,{PASTA_HOST_LOOPBACK_MAP}",
-            "--add-host",
-            f"{CONTAINER_HOST_ALIAS}:{PASTA_HOST_LOOPBACK_MAP}",
+            *_host_alias_args(PASTA_HOST_LOOPBACK_MAP),
         ]
 
     def _detect_dns_tier(self, container: str, state_dir: Path, dnsmasq_bin: str) -> DnsTier:
@@ -2012,6 +2011,11 @@ def _gateways_for_mode(network_mode: str) -> tuple[str, str]:
     )
 
 
+def _host_alias_args(address: str) -> list[str]:
+    """Return the ``--add-host`` flags that pin every name of the host to *address*."""
+    return [arg for alias in CONTAINER_HOST_ALIASES for arg in ("--add-host", f"{alias}:{address}")]
+
+
 def _covered(ip: str, skip: Iterable[str]) -> bool:
     """True when *ip* overlaps any IP/CIDR entry of *skip*.
 
@@ -2051,14 +2055,14 @@ def _override_target(target: str) -> str:
     """*target* as a live override records it — or a refusal saying why no override can carry it.
 
     Raises:
-        ValueError: For ``localhost`` and the container's host alias (both
+        ValueError: For ``localhost`` and the container's host aliases (all
             host-service grants, ``+localhost:PORT``), a ``*.`` wildcard (it
             names no address, and t10 holds addresses only), or text that is
             no domain, IP or CIDR.
     """
     target = target.strip()
     bare = target.lower().rstrip(".")
-    if bare in (LOCALHOST, CONTAINER_HOST_ALIAS):
+    if bare in (LOCALHOST, *CONTAINER_HOST_ALIASES):
         raise ValueError(
             f"{target} is the host itself: reach a host service with a +localhost:PORT grant, "
             "not an override"
