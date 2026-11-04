@@ -1691,7 +1691,7 @@ test = [
 requires-dist = [
     { name = "pydantic", specifier = "~=2.13" },
     { name = "pyyaml", specifier = "~=6.0" },
-    { name = "terok-util", url = "https://github.com/terok-ai/terok-util/releases/download/v0.5.0a4/terok_util-0.5.0a4-py3-none-any.whl" },
+    { name = "terok-util", git = "https://github.com/sliwowitz/terok-util?rev=fix%2Fdeep-scan-followups" },
 ]
 
 [package.metadata.requires-dev]
@@ -1722,24 +1722,13 @@ test = [
 
 [[package]]
 name = "terok-util"
-version = "0.5.0a4"
-source = { url = "https://github.com/terok-ai/terok-util/releases/download/v0.5.0a4/terok_util-0.5.0a4-py3-none-any.whl" }
+version = "0.5.0a5.dev172+g4ae23f0ee"
+source = { git = "https://github.com/sliwowitz/terok-util?rev=fix%2Fdeep-scan-followups#4ae23f0eeaa2e1fff6bb6f05afd81990a8abadaa" }
 dependencies = [
     { name = "jinja2" },
     { name = "packaging" },
     { name = "platformdirs" },
     { name = "ruamel-yaml" },
-]
-wheels = [
-    { url = "https://github.com/terok-ai/terok-util/releases/download/v0.5.0a4/terok_util-0.5.0a4-py3-none-any.whl", hash = "sha256:78def43838c610eec5e01c8301ccaaa44ffe498ff5bc187fb51ff1aafb12802a" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "jinja2", specifier = "~=3.1" },
-    { name = "packaging", specifier = "~=26.3" },
-    { name = "platformdirs", specifier = "~=4.12" },
-    { name = "ruamel-yaml", specifier = "==0.19.1" },
 ]
 
 [[package]]
