@@ -1722,8 +1722,8 @@ test = [
 
 [[package]]
 name = "terok-util"
-version = "0.5.0a5.dev172+g4ae23f0ee"
-source = { git = "https://github.com/sliwowitz/terok-util?rev=fix%2Fdeep-scan-followups#4ae23f0eeaa2e1fff6bb6f05afd81990a8abadaa" }
+version = "0.5.0a5.dev173+gf218819c5"
+source = { git = "https://github.com/sliwowitz/terok-util?rev=fix%2Fdeep-scan-followups#f218819c5260155197706621fdf3a255f90435e6" }
 dependencies = [
     { name = "jinja2" },
     { name = "packaging" },
