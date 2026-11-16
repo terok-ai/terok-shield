@@ -25,6 +25,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Topic :: Security",
     "Topic :: System :: Networking :: Firewalls",
     "Typing :: Typed",
@@ -73,7 +74,7 @@ docs = [
     "mkdocs-literate-nav>=0.6",
     "mkdocs-section-index>=0.3",
     "mkdocs-gen-files>=0.5",
-    "mkdocs-terok~=0.8.0",
+    "mkdocs-terok @ git+https://github.com/sliwowitz/mkdocs-terok@fix/python-315-support",
 ]
 
 [tool.uv]
