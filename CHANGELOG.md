@@ -2,9 +2,9 @@
 
 ## v0.10.0 — A Man Alone
 
-- **Breaking:** no profile applies unless the caller names one. `default_profiles` is empty
-  by default, in `ShieldConfig` and in `config.yml`. `dev-standard` stays under
-  `resources/examples`, as an example to name explicitly ([#448](https://github.com/terok-ai/terok-shield/pull/448)).
+- **Breaking:** no profile applies by default. `default_profiles` is empty until
+  `ShieldConfig` or `config.yml` names profiles; it used to be `dev-standard`, which stays
+  under `resources/examples` as an example to name explicitly ([#448](https://github.com/terok-ai/terok-shield/pull/448)).
 - **Breaking:** the bundle version is 20. Re-create a container that an older shield
   prepared; the hook refuses its bundle ([#485](https://github.com/terok-ai/terok-shield/pull/485)).
 - `harvest` reads the audit log of a container and gives one entry for each refused target,
